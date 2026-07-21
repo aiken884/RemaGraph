@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# 僅在已開好的 pane 內執行 opencode。開窗請用 dispatch-fleet.sh → open-fleet-window.sh
 set -euo pipefail
 ID="${1:?}"
 MODEL="${2:-opencode-go/deepseek-v4-pro}"
