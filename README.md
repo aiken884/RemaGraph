@@ -2,6 +2,15 @@
 
 > **凡走過必留下痕跡。** RemaGraph 是一把輕量的 MCP 工具，任何 AI coding agent 走過後自然留下的殘跡，後人可循跡。與 CodeGraph 互補：CodeGraph 記「這段程式碼有什麼已知問題」，RemaGraph 記「處理時留下了什麼痕跡」。
 
+| 項目 | 現況 |
+|------|------|
+| **版本** | `0.1.0`（private repo；**尚未** PyPI） |
+| **狀態** | v1 可用：stdio MCP 三 tool |
+| **設計 SOT** | [`DESIGN.md`](./DESIGN.md) |
+| **收斂狀態** | [`docs/reviews/v1-closeout-status.md`](./docs/reviews/v1-closeout-status.md) |
+| **Audit 合約** | [`docs/audit.md`](./docs/audit.md) |
+| **治理清單** | [`docs/governance/checklist.md`](./docs/governance/checklist.md) |
+
 ## 安裝
 
 RemaGraph 尚未發布到 PyPI，請從原始碼安裝：
@@ -118,6 +127,19 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 | `limit` | `int` | 回傳筆數上限（預設 20，最大 100） |
 
 詳細規格見 [`DESIGN.md`](./DESIGN.md)；對外穩定合約見 [`docs/audit.md`](./docs/audit.md)。
+
+## 開發與驗證
+
+```bash
+# 建議使用 uv
+uv sync --all-extras   # 或依專案慣例安裝 dev deps
+uv run ruff check src tests
+uv run pytest -m 'not slow'
+REMAGRAPH_STATE_DIR=$(mktemp -d) uv run pytest tests/smoke
+```
+
+- CI：smoke → lint → test（coverage ≥80）；另有 gitleaks、pip-audit、mutmut（非 blocking）。
+- 勿在測試中預設寫入生產 state；冒煙必須使用 `REMAGRAPH_STATE_DIR` 或 pytest `tmp_path`。
 
 ## 授權
 

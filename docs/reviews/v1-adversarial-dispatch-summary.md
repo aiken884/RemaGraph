@@ -11,3 +11,5 @@
 **規則**：審查 `(model_family, tier)` 至少一維異於實作；本 v1 實作以 deepseek 為主、審查 anthropic。
 
 **mutmut**：CI `mutmut.yml` 非 blocking（`continue-on-error`）；本地追蹤 arbitration/dedup。完整 mutation score 以 CI/本地 `uv run mutmut run` 為準，v1 不因 mutmut 超時阻斷交付。
+
+**收斂**：v1 交付狀態與文件對齊見 [`v1-closeout-status.md`](./v1-closeout-status.md)。
