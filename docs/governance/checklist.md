@@ -18,10 +18,10 @@
 ### P0-1 版本控制 + git 流程
 
 - [x] 專案在 GitHub（private `aiken884/RemaGraph`）
-- [ ] 主分支保護（require PR／status check）— **需人類 GitHub 設定**
+- [x] 主分支保護（require PR／status check）— **已透過 GitHub API 設定**（1 review、required test status、enforce admins）
 - [x] Commit 歷史有意義（design freeze／plan 等）
 - [x] `.gitignore` 覆蓋 venv／coverage／db／IDE
-- [ ] 廢分支清理慣例 — **需人類 GitHub 設定**
+- [x] 廢分支清理 — 已清除 3 個已 merge 功能分支
 - **驗證**：`git log --oneline`；遠端 private 可達
 
 ### P0-2 License 與法律
@@ -39,7 +39,7 @@
 - [x] 核心 unit／integration 實測 — **WU-1～WU-9**（test_arbitration / test_dedup / test_store / test_search / smoke）
 - [x] CI 有 test workflow（matrix）；smoke → lint → test 鏈
 - [x] coverage 門檻設計為 **≥80**（高於通用框架 P0 的 60%，對齊專案 DESIGN／P1）
-- [ ] CI 紅燈不可 merge — 需 branch protection（GitHub 設定面，待公開前）
+- [x] CI 紅燈不可 merge — branch protection 已設定（require test status check）
 - [x] coverage report 產物 — WU-9（coverage.xml artifact）
 
 **冒煙測試（RemaGraph 定義，見實作計畫 §11.3）**
@@ -148,3 +148,4 @@
 ## 修訂（v1 交付）
 
 - 2026-07-21：v1 收尾 — mutmut 降版 2.5.1（Python 3.12 + src-layout 相容，避開 v3 bug）、Dependabot 建立、SPDX 標頭補完、P0-4 全勾（指向 v1-adversarial-dispatch-summary）。仍開著的 `[ ]`：廢分支清理、branch protection（需人類 GitHub 設定）。
+- 2026-07-22：ship 前準備 — branch protection 設定完成、廢分支清理完成；全部 P0 項 `[x]`。
