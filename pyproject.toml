@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "remagraph"
+version = "0.1.0"
+description = "輕量 MCP 工具：記錄 AI coding agent 處理任務時留下的痕跡（task handoff / status update / discovered constraint），供後續 agent 查詢。"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+authors = [
+    { name = "Aiken Lin" },
+]
+dependencies = [
+    "model2vec>=0.1.0",
+    "pydantic>=2.0.0",
+]
+# sqlite3 是 stdlib，不列
+# pydantic 為 models.py 的 schema 依賴，DESIGN.md 的 pyproject 片段未列出，
+# 但「記憶 Schema」明確要求 Pydantic schema，故此處補上（見任務指示）。
+
+[project.optional-dependencies]
+vector = ["sqlite-vec>=0.1.0"]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "mutmut",
+    "ruff",
+]
+
+[project.urls]
+Homepage = "https://github.com/aiken884/RemaGraph"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
