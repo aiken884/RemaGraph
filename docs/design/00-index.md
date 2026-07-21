@@ -1,7 +1,7 @@
 # T-RG-D00：RemaGraph 設計文件索引
 
 > **艦隊任務 ID**：`T-RG-D00`
-> **狀態**：設計文件 2026-07-21 凍結；**v1 實作已落地**（套件 `0.1.0`，見 [`docs/reviews/v1-closeout-status.md`](../reviews/v1-closeout-status.md)）
+> **狀態**：設計文件 2026-07-21 凍結；**v1 實作已落地**（套件 `0.1.0`，見 [`docs/reviews/v1-closeout-status.md`](../reviews/v1-closeout-status.md)）；**v2 治理/安全/可靠度強化已實作**（`0.2.0-dev`）
 > **用途**：索引全部設計文件、記錄 PPLX 共識裁決完成狀態、追蹤各文件與 `DESIGN.md` 的差異
 
 ---
