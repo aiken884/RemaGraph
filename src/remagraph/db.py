@@ -5,11 +5,13 @@
 - 展開 state 路徑（預設 ~/.local/state/remagraph/，可透過 REMAGRAPH_STATE_DIR 覆蓋）
 - 建立 SQLite 連線（WAL 模式、SERIALIZED 隔離）
 - Schema 初始化與 migration 編排
+- DB 容量上限保護（max_db_size）
 """
 
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 
@@ -19,7 +21,9 @@ from pathlib import Path
 
 DEFAULT_STATE_DIR = Path.home() / ".local" / "state" / "remagraph"
 DB_FILENAME = "remagraph.db"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+MAX_DB_SIZE_MB = 100  # soft limit via PRAGMA max_page_count
+_ALLOWED_STATE_DIR_RE = re.compile(r"^[a-zA-Z0-9_/.-]+$")
 
 
 class MigrationError(RuntimeError):
@@ -43,7 +47,17 @@ def get_db_path(state_dir: Path | None = None) -> Path:
     """
     env_dir = os.environ.get("REMAGRAPH_STATE_DIR")
     if env_dir:
-        resolved = Path(env_dir)
+        if not _ALLOWED_STATE_DIR_RE.match(env_dir):
+            raise ValueError(
+                f"REMAGRAPH_STATE_DIR contains invalid characters: {env_dir!r}"
+            )
+        resolved = Path(env_dir).resolve()
+        # 確保解析後的路徑不在 /etc, /usr 等系統目錄（基本防禦）
+        forbidden_prefixes = ("/etc", "/usr", "/bin", "/sbin", "/dev", "/proc", "/sys")
+        if str(resolved).startswith(forbidden_prefixes):
+            raise ValueError(
+                f"REMAGRAPH_STATE_DIR must not be in a system directory: {resolved}"
+            )
     elif state_dir is not None:
         resolved = state_dir
     else:
@@ -81,6 +95,11 @@ def connect(state_dir: Path | None = None) -> sqlite3.Connection:
     # 啟用 WAL 模式與 FK
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+
+    # 容量上限
+    page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+    max_pages = (MAX_DB_SIZE_MB * 1024 * 1024) // page_size
+    conn.execute(f"PRAGMA max_page_count={max_pages}")
 
     # 執行 schema 初始化
     _init_schema(conn)
@@ -220,10 +239,24 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     # if current_version == 1:
     #     _migrate_v1_to_v2(conn)
     #     current_version = 2
-    # ...
+    if current_version == 1:
+        _migrate_v1_to_v2(conn)
+        current_version = 2
 
     if current_version > SCHEMA_VERSION:
         raise MigrationError(
             f"資料庫 schema_version={current_version} 比程式碼的 "
             f"SCHEMA_VERSION={SCHEMA_VERSION} 還新，無法降級"
         )
+
+
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    """v1 → v2 migration：v2 預留的向下相容 schema 變更。
+
+    目前 v2 尚未有 schema 變更，此 migration 為純版本號更新。
+    v2 schema 與 v1 完全一致，無需任何 DDL。
+    日後若有 actual migration，在此依序執行 DDL 後才更新版本號。
+    """
+    conn.execute(
+        "INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', '2')"
+    )

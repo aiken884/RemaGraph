@@ -26,7 +26,7 @@ from remagraph.models import MemoryKind, StoreRequest
 # ---------------------------------------------------------------------------
 
 ArbitrationReason = Literal[
-    "XXsummary_too_shortXX",
+    "summary_too_short",
     "learnings_empty",
     "handoff_note_too_short",
     "duplicate_content",
@@ -194,6 +194,19 @@ def supersede_status_updates(task_id: str, conn: sqlite3.Connection) -> Supersed
         (now, task_id),
     )
     return SupersedeResult(superseded_count=cursor.rowcount)
+
+
+def cleanup_superseded(conn: sqlite3.Connection, max_age_days: int = 90) -> int:
+    """清理超過 max_age_days 的 superseded 記錄。
+
+    回傳被刪除的筆數。僅作用於非 active 狀態且建立時間超過指定天數的記錄。
+    """
+    cursor = conn.execute(
+        "DELETE FROM memories WHERE status != 'active' "
+        "AND created_at < datetime('now', ?)",
+        (f"-{max_age_days} days",),
+    )
+    return cursor.rowcount
 
 
 def invalidate_constraints(

@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import atexit
 import sqlite3
+import threading
+import time
+from collections import defaultdict
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -23,6 +26,40 @@ from remagraph import db as _db
 from remagraph.models import SearchRequest, StatusRequest, StoreRequest
 from remagraph.search import get_status, search_memories
 from remagraph.store import process_store
+
+# ---------------------------------------------------------------------------
+# Rate limiter（簡易記憶體 token bucket, per agent_id）
+# ---------------------------------------------------------------------------
+
+_RATE_LIMIT_WINDOW = 60  # seconds
+_RATE_LIMIT_MAX = 60     # calls per window
+
+
+class _RateLimiter:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._buckets: dict[str, list[float]] = defaultdict(list)
+
+    def check(self, key: str) -> bool:
+        now = time.monotonic()
+        window_start = now - _RATE_LIMIT_WINDOW
+        with self._lock:
+            self._buckets[key] = [t for t in self._buckets[key] if t > window_start]
+            if len(self._buckets[key]) >= _RATE_LIMIT_MAX:
+                return False
+            self._buckets[key].append(now)
+            return True
+
+
+_rate_limiter = _RateLimiter()
+
+
+def _check_rate_limit(key: str) -> None:
+    if not _rate_limiter.check(key):
+        raise RuntimeError(
+            f"rate limit exceeded for {key!r} "
+            f"(max {_RATE_LIMIT_MAX} calls/{_RATE_LIMIT_WINDOW}s)"
+        )
 
 # ---------------------------------------------------------------------------
 # FastMCP 伺服器實例
@@ -79,6 +116,7 @@ def remagraph_store(
     invalidates: list[str] | None = None,
 ) -> dict[str, Any]:
     """agent 寫入記憶。"""
+    _check_rate_limit(agent_id)
     request = StoreRequest(
         task_id=task_id,
         agent_id=agent_id,
@@ -119,6 +157,7 @@ def remagraph_search(
     task_id: str | None = None,
 ) -> dict[str, Any]:
     """agent 查詢記憶（FTS5 BM25）。"""
+    _check_rate_limit(agent_id or "anonymous")
     request = SearchRequest(
         query=query,
         top_k=top_k,
@@ -139,6 +178,7 @@ def remagraph_search(
 )
 def remagraph_status(limit: int = 20) -> dict[str, Any]:
     """查詢所有 active status_update（依 task_id 去重取最新）。"""
+    _check_rate_limit("status")
     request = StatusRequest(limit=limit)
     response = get_status(_get_conn(), request)
     return {"latest": response.latest}

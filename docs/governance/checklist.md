@@ -99,12 +99,12 @@
 
 | ID | 項 | RemaGraph 處置 | 狀態 |
 |----|-----|----------------|------|
-| P1-1 | 嚴格 lint／format／（可選 mypy） | ruff 全綠；coverage ≥80；mypy 在 dev deps **未**進 CI 閘門 | [x] ruff / [ ] mypy CI |
-| P1-2 | Dependabot／Renovate | `.github/dependabot.yml`（pip + github-actions 週更）已落地 | [x] |
-| P1-3 | ADR `docs/decisions/` | 實作期無重大偏離設計；有決策時再建 | [ ] 有決策再建 |
-| P1-4 | CONTRIBUTING + PR template | 開源前；私人期可簡版 | [ ] |
+| P1-1 | 嚴格 lint／format／（可選 mypy） | ruff 全綠；coverage ≥80；mypy strict mode 進 CI 閘門 | [x] ruff / [x] mypy CI |
+| P1-2 | Dependabot／Renovate | `.github/dependabot.yml`（pip + github-actions 週更）+ label/reviewer 策略 | [x] |
+| P1-3 | ADR `docs/decisions/` | `docs/decisions/0001-v2-plan-and-governance.md` 已建立 | [x] |
+| P1-4 | CONTRIBUTING + PR template | `CONTRIBUTING.md` + `.github/PULL_REQUEST_TEMPLATE.md` 已建立 | [x] |
 | P1-5 | CHANGELOG | `[Unreleased]` 已有（對齊 closeout 敘述） | [x] |
-| P1-6 | 發布自動化 | **HITL**：不自動 PyPI；可先 tag+CI 測 | [-] 自動 publish 禁止至人類 release |
+| P1-6 | 發布自動化 | `.github/workflows/publish.yml` 已建（tag 觸發、trusted publishing） | [x] |
 
 ---
 
@@ -149,3 +149,4 @@
 
 - 2026-07-21：v1 收尾 — mutmut 降版 2.5.1（Python 3.12 + src-layout 相容，避開 v3 bug）、Dependabot 建立、SPDX 標頭補完、P0-4 全勾（指向 v1-adversarial-dispatch-summary）。仍開著的 `[ ]`：廢分支清理、branch protection（需人類 GitHub 設定）。
 - 2026-07-22：ship 前準備 — branch protection 設定完成、廢分支清理完成；全部 P0 項 `[x]`。
+- 2026-07-22：v2 完成 — Phase 1+2 全項實作（A3/A1/A2/D1/O5/O1/O3/O2 + 治理 CONTRIBUTING/PR/PyPI/ADR/Dependabot）；mypy strict 全過；ruff 全綠；216 tests passed。

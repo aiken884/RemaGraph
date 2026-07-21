@@ -176,12 +176,12 @@ def _row_to_memory(row: sqlite3.Row) -> Memory:
         task_id=row["task_id"],
         agent_id=row["agent_id"],
         timestamp=datetime.fromisoformat(row["timestamp"]),
-        kind=row["kind"],  # type: ignore[arg-type]
+        kind=row["kind"],
         summary=row["summary"],
         learnings=json.loads(row["learnings"]),
         handoff_note=row["handoff_note"],
         tags=json.loads(row["tags"]),
-        status=row["status"],  # type: ignore[arg-type]
+        status=row["status"],
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )

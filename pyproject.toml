@@ -49,6 +49,12 @@ select = ["E", "F", "I", "N", "W"]
 [tool.ruff.format]
 quote-style = "double"
 
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+exclude = ["tests/"]
+
 [tool.mutmut]
 paths_to_mutate = [
     "src/remagraph/arbitration.py",
