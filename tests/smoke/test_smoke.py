@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 import remagraph.server as server
@@ -168,7 +166,10 @@ def test_kind_filter():
         task_id="task-smoke-006",
         agent_id="oc-smoke",
         kind="status_update",
-        summary="這是一段 status update 用來測試 kind 過濾功能，需要寫夠三十個中文字元來通過長度檢查",
+        summary=(
+            "這是一段 status update 用來測試 kind 過濾功能，"
+            "需要寫夠三十個中文字元來通過長度檢查"
+        ),
         learnings=["status 過濾測試"],
         handoff_note="",
         tags=["smoke"],

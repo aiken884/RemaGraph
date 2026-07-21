@@ -2,14 +2,11 @@
 
 import json
 import os
-from datetime import datetime, timezone
-from unittest.mock import patch
 
 import pytest
 
 from remagraph.audit import _sanitize_detail, append_audit
 from remagraph.models import StoreRequest, StoreResponse
-
 
 # ---------------------------------------------------------------------------
 # fixtures

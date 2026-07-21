@@ -118,7 +118,9 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         -- 主表（含 timestamp 欄位）
         CREATE TABLE IF NOT EXISTS memories (
             id          TEXT PRIMARY KEY,
-            kind        TEXT NOT NULL CHECK (kind IN ('task_handoff', 'status_update', 'discovered_constraint')),
+            kind        TEXT NOT NULL CHECK (
+                kind IN ('task_handoff', 'status_update', 'discovered_constraint')
+            ),
             task_id     TEXT NOT NULL,
             agent_id    TEXT NOT NULL,
             timestamp   TEXT NOT NULL,
@@ -126,7 +128,9 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             learnings   TEXT NOT NULL DEFAULT '[]',
             handoff_note TEXT NOT NULL DEFAULT '',
             tags        TEXT NOT NULL DEFAULT '[]',
-            status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded', 'invalidated')),
+            status      TEXT NOT NULL DEFAULT 'active' CHECK (
+                status IN ('active', 'superseded', 'invalidated')
+            ),
             embedding   BLOB,
             created_at  TEXT NOT NULL,
             updated_at  TEXT NOT NULL
@@ -169,7 +173,8 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_memories_agent_id ON memories(agent_id);
         CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
         CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_memories_dedup ON memories(kind, status) WHERE status = 'active';
+        CREATE INDEX IF NOT EXISTS idx_memories_dedup
+            ON memories(kind, status) WHERE status = 'active';
 
         -- 版本追蹤
         CREATE TABLE IF NOT EXISTS _meta (

@@ -16,7 +16,7 @@
 ### P0-1 版本控制 + git 流程
 
 - [x] 專案在 GitHub（private `aiken884/RemaGraph`）
-- [~] 主分支保護（require PR／status check）— **待開公開或多人前設定**
+- [~] 主分支保護（require PR／status check）— **待公開或多人前設定**
 - [x] Commit 歷史有意義（design freeze／plan 等）
 - [x] `.gitignore` 覆蓋 venv／coverage／db／IDE
 - [ ] 廢分支清理慣例 — 實作期開始後執行
@@ -26,28 +26,34 @@
 
 - [x] 根目錄 `LICENSE`（Apache-2.0 全文）
 - [x] `pyproject.toml` / README 可標 SPDX `Apache-2.0`
-- [ ] 源檔 SPDX 標頭（可選，WU-0／WU-10 補）
+- [ ] 源檔 SPDX 標頭（可選，非 WU-10 scope；不影響 v0.1）
 - [-] NOTICE 第三方 — 目前無 vendored 第三方源碼；model2vec 依套件授權
 - **驗證**：LICENSE 存在且為 Apache-2.0
 
 ### P0-3 驗證閘門：測試 + 覆蓋率 + 冒煙
 
 **測試與覆蓋率**
-- [~] pytest／pytest-cov／mutmut 在 `pyproject.toml` dev deps；測試檔仍為佔位
-- [ ] 核心 unit／integration 實測 — **WU-1～WU-9**
-- [x] CI 有 test workflow（matrix）
+- [x] pytest／pytest-cov／mutmut 在 `pyproject.toml` dev deps；mutmut 已設定指向 arbitration + dedup
+- [x] 核心 unit／integration 實測 — **WU-1～WU-9**（test_arbitration / test_dedup / test_store / test_search / smoke）
+- [x] CI 有 test workflow（matrix）；smoke → lint → test 鏈
 - [x] coverage 門檻設計為 **≥80**（高於通用框架 P0 的 60%，對齊專案 DESIGN／P1）
-- [ ] CI 紅燈不可 merge — 需 branch protection
-- [ ] coverage report 產物 — WU-9
+- [ ] CI 紅燈不可 merge — 需 branch protection（GitHub 設定面，待公開前）
+- [x] coverage report 產物 — WU-9（coverage.xml artifact）
 
 **冒煙測試（RemaGraph 定義，見實作計畫 §11.3）**
-- [ ] 可 `import remagraph`／CLI 或 MCP stdio 啟動不崩
-- [ ] `remagraph_store` 最小合法寫入成功（或明確 rejected reason）
-- [ ] `remagraph_search` 對剛寫入內容可命中（含至少一則中文）
-- [ ] `remagraph_status` 回傳結構合法
-- [ ] state 目錄建立且 audit 有對應 `stored`／`error` 行
-- [ ] 冒煙進 CI 且失敗 block
-- **驗證**：本地 `pytest tests/smoke`（路徑以實作為準）+ CI job
+- [x] 可 `import remagraph`／CLI 或 MCP stdio 啟動不崩（smoke job 驗證 import）
+- [x] `remagraph_store` 最小合法寫入成功（或明確 rejected reason）（test_full_lifecycle）
+- [x] `remagraph_search` 對剛寫入內容可命中（含至少一則中文）（test_full_lifecycle）
+- [x] `remagraph_status` 回傳結構合法（test_full_lifecycle）
+- [x] state 目錄建立且 audit 有對應 `stored`／`error` 行（smoke job 以 REMAGRAPH_STATE_DIR 隔離）
+- [x] 冒煙進 CI 且失敗 block（smoke job 失敗 → lint/test 不執行）
+- **驗證**：本地 `pytest tests/smoke` + CI job（`REMAGRAPH_STATE_DIR=${{ runner.temp }}/remagraph-smoke`）
+
+**突變測試（mutation testing）**
+- [x] `[tool.mutmut]` 設定於 pyproject.toml，targets：`arbitration.py` + `dedup.py`
+- [x] CI mutmut workflow 非 blocking（`continue-on-error: true`，獨立於 test.yml 鏈）
+- [x] 本地執行：`uv run mutmut run`
+- **驗證**：`.github/workflows/mutmut.yml` 存在且可 workflow_dispatch 手動觸發
 
 ### P0-4 代碼審查與對抗式驗證
 
@@ -72,8 +78,8 @@
 - [x] `DESIGN.md` + `docs/design/*` 為架構／規格
 - [x] `docs/plans/implementation-plan-v1.md` 實作藍圖
 - [x] PPLX 審查紀錄在 `docs/design/reviews`、`docs/plans/reviews`
-- [~] README 快速開始完整度 — **WU-10**
-- [ ] `docs/architecture.md` 精簡索引（可指向 DESIGN）— **WU-10 可選**
+- [x] README 快速開始完整度 — **WU-10 完成**（stdio 安裝、MCP config 範例、REMAGRAPH_STATE_DIR、三 tool 參數表）
+- [-] `docs/architecture.md` 精簡索引（可指向 DESIGN）— DESIGN.md 已涵蓋架構，不重複
 - **驗證**：外人 30 分鐘內能懂「agent 殘跡記憶 MCP」
 
 ### P0-7 依賴管理與掃描
@@ -95,7 +101,7 @@
 | P1-2 | Dependabot／Renovate | 首次 public 或有使用者前 | [ ] |
 | P1-3 | ADR `docs/decisions/` | 實作期重大偏離設計時必寫；可補「stdio 優先」等 | [ ] |
 | P1-4 | CONTRIBUTING + PR template | 開源前；私人期可簡版 | [ ] |
-| P1-5 | CHANGELOG | WU-10 建 `[Unreleased]` | [ ] |
+| P1-5 | CHANGELOG | WU-10 完成 `[Unreleased]` | [x] |
 | P1-6 | 發布自動化 | **HITL**：不自動 PyPI；可先 tag+CI 測 | [-] 自動 publish 禁止至人類 release |
 
 ---
@@ -133,3 +139,5 @@
 |------|------|
 | 2026-07-21 | 自 Vault 通用框架適配 RemaGraph；納入實作計畫 §11 |
 | 2026-07-21 | WU-0 完成：pin 上界、`.env.example`、`pre-commit`（ruff+gitleaks）、`uv.lock` 更新、CI 重排 smoke→lint→test、trigram gate、ruff 全綠 |
+| 2026-07-21 | WU-10 完成：README（stdio 安裝／MCP config／REMAGRAPH_STATE_DIR／三 tool 參數表）、CHANGELOG [Unreleased]、P0-3 測試全綠、P0-6 勾完、P1-5 勾完 |
+| 2026-07-21 | WU-9 完成：smoke job 執行 pytest tests/smoke/ + REMAGRAPH_STATE_DIR 隔離、mutmut 設定（arbitration+dedup）+ CI workflow（非 blocking）、coverage.xml artifact、checklist P0-3 可勾項更新 |

@@ -106,7 +106,9 @@ def test_check_duplicate_empty_db():
     mock_model.dim = EMBEDDING_DIM
 
     with patch("remagraph.dedup._get_model", return_value=mock_model):
-        with patch.object(mock_model, "encode", return_value=np.ones(EMBEDDING_DIM, dtype=np.float32)):
+        with patch.object(
+            mock_model, "encode", return_value=np.ones(EMBEDDING_DIM, dtype=np.float32)
+        ):
             result = check_duplicate("test summary", "task_handoff", conn)
             assert result.passed is True
 
@@ -146,7 +148,9 @@ def test_check_duplicate_similar_content():
     mock_model.dim = EMBEDDING_DIM
 
     with patch("remagraph.dedup._get_model", return_value=mock_model):
-        with patch.object(mock_model, "encode", return_value=np.ones(EMBEDDING_DIM, dtype=np.float32)):
+        with patch.object(
+            mock_model, "encode", return_value=np.ones(EMBEDDING_DIM, dtype=np.float32)
+        ):
             result = check_duplicate("similar summary", "task_handoff", conn)
             assert result.passed is False
             assert result.reason == "duplicate_content"

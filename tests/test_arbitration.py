@@ -32,7 +32,9 @@ def conn():
     c.executescript("""
         CREATE TABLE IF NOT EXISTS memories (
             id          TEXT PRIMARY KEY,
-            kind        TEXT NOT NULL CHECK (kind IN ('task_handoff', 'status_update', 'discovered_constraint')),
+            kind        TEXT NOT NULL CHECK (
+                kind IN ('task_handoff', 'status_update', 'discovered_constraint')
+            ),
             task_id     TEXT NOT NULL,
             agent_id    TEXT NOT NULL,
             timestamp   TEXT NOT NULL,
@@ -40,7 +42,9 @@ def conn():
             learnings   TEXT NOT NULL DEFAULT '[]',
             handoff_note TEXT NOT NULL DEFAULT '',
             tags        TEXT NOT NULL DEFAULT '[]',
-            status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded', 'invalidated')),
+            status      TEXT NOT NULL DEFAULT 'active' CHECK (
+                status IN ('active', 'superseded', 'invalidated')
+            ),
             embedding   BLOB,
             created_at  TEXT NOT NULL,
             updated_at  TEXT NOT NULL
@@ -55,7 +59,10 @@ def _valid_sample_request(**overrides) -> StoreRequest:
         "task_id": "task-2026-07-21-003",
         "agent_id": "oc-dspro",
         "kind": "task_handoff",
-        "summary": "嘗試修復 subagent 委派 + deny-all 時的 acpx 連線錯誤，這是一個需要深入調查的複雜問題",
+        "summary": (
+            "嘗試修復 subagent 委派 + deny-all 時的 acpx 連線錯誤，"
+            "這是一個需要深入調查的複雜問題"
+        ),
         "learnings": ["錯誤發生在 opencode task tool 生成 child session 之後"],
         "handoff_note": "接手者請注意：此錯誤與 G1 不同，G1 是 child session 未被註冊",
         "tags": ["acpx", "subagent", "bug"],

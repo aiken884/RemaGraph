@@ -17,7 +17,6 @@ from remagraph.db import _init_schema
 from remagraph.models import SearchRequest, StatusRequest
 from remagraph.search import get_status, sanitize_fts5_query, search_memories
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -199,16 +198,25 @@ class TestSearchMemories:
     # -- tags 過濾（AND 語意） --
 
     def test_tags_filter_single(self, conn):
-        _insert_memory(conn, id="mem-1", kind="task_handoff", summary="hello", tags=["auth", "login"])
-        _insert_memory(conn, id="mem-2", kind="task_handoff", summary="hello", tags=["auth", "api"])
+        _insert_memory(
+            conn, id="mem-1", kind="task_handoff", summary="hello", tags=["auth", "login"]
+        )
+        _insert_memory(
+            conn, id="mem-2", kind="task_handoff", summary="hello", tags=["auth", "api"]
+        )
         req = SearchRequest(query="hello", tags=["login"], top_k=10)
         resp = search_memories(conn, req)
         assert len(resp.results) == 1
         assert resp.results[0]["id"] == "mem-1"
 
     def test_tags_filter_multiple(self, conn):
-        _insert_memory(conn, id="mem-1", kind="task_handoff", summary="hello", tags=["auth", "login", "oauth"])
-        _insert_memory(conn, id="mem-2", kind="task_handoff", summary="hello", tags=["auth", "login"])
+        _insert_memory(
+            conn, id="mem-1", kind="task_handoff", summary="hello",
+            tags=["auth", "login", "oauth"],
+        )
+        _insert_memory(
+            conn, id="mem-2", kind="task_handoff", summary="hello", tags=["auth", "login"]
+        )
         req = SearchRequest(query="hello", tags=["auth", "oauth"], top_k=10)
         resp = search_memories(conn, req)
         assert len(resp.results) == 1
@@ -236,7 +244,10 @@ class TestSearchMemories:
 
     def test_has_more_true(self, conn):
         for i in range(10):
-            _insert_memory(conn, id=f"mem-{i}", kind="task_handoff", summary=f"hello world test {i}")
+            _insert_memory(
+                conn, id=f"mem-{i}", kind="task_handoff",
+                summary=f"hello world test {i}",
+            )
         req = SearchRequest(query="hello world", top_k=5)
         resp = search_memories(conn, req)
         assert len(resp.results) == 5
@@ -244,7 +255,10 @@ class TestSearchMemories:
 
     def test_has_more_false_when_exact(self, conn):
         for i in range(5):
-            _insert_memory(conn, id=f"mem-{i}", kind="task_handoff", summary=f"hello world test {i}")
+            _insert_memory(
+                conn, id=f"mem-{i}", kind="task_handoff",
+                summary=f"hello world test {i}",
+            )
         req = SearchRequest(query="hello world", top_k=5)
         resp = search_memories(conn, req)
         assert len(resp.results) == 5
@@ -252,7 +266,10 @@ class TestSearchMemories:
 
     def test_has_more_false_when_less(self, conn):
         for i in range(3):
-            _insert_memory(conn, id=f"mem-{i}", kind="task_handoff", summary=f"hello world test {i}")
+            _insert_memory(
+                conn, id=f"mem-{i}", kind="task_handoff",
+                summary=f"hello world test {i}",
+            )
         req = SearchRequest(query="hello world", top_k=5)
         resp = search_memories(conn, req)
         assert len(resp.results) == 3
@@ -262,7 +279,10 @@ class TestSearchMemories:
 
     def test_top_k_default_20(self, conn):
         for i in range(25):
-            _insert_memory(conn, id=f"mem-{i}", kind="task_handoff", summary=f"hello world test {i}")
+            _insert_memory(
+                conn, id=f"mem-{i}", kind="task_handoff",
+                summary=f"hello world test {i}",
+            )
         req = SearchRequest(query="hello world")  # 預設 top_k=20
         resp = search_memories(conn, req)
         assert len(resp.results) == 20

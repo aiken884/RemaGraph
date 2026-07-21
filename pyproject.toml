@@ -48,3 +48,12 @@ select = ["E", "F", "I", "N", "W"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.mutmut]
+paths_to_mutate = [
+    "src/remagraph/arbitration.py",
+    "src/remagraph/dedup.py",
+]
+tests_dir = "tests/"
+runner = "pytest"
+backup = false

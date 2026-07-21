@@ -228,7 +228,10 @@ def invalidate_constraints(
             return ArbitrationResult(
                 passed=False,
                 reason="invalidates_kind_mismatch",
-                detail=f"只能 invalidate discovered_constraint 類型的記憶，{r['id']} 的 kind 是 {r['kind']}",
+                detail=(
+                    f"只能 invalidate discovered_constraint 類型的記憶，"
+                    f"{r['id']} 的 kind 是 {r['kind']}"
+                ),
             )
 
     # 執行 invalidate
