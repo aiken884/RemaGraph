@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # Literals
@@ -31,6 +31,19 @@ class StoreRequest(BaseModel):
     handoff_note: str = ""
     tags: list[str] = Field(default_factory=list)
     invalidates: list[str] | None = None
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _validate_tags(cls, v):
+        """Ensure tags is a list of str and reject bytes or other types early."""
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            raise ValueError("tags must be a list of strings")
+        for i, item in enumerate(v):
+            if not isinstance(item, str):
+                raise ValueError(f"tags[{i}] must be str, got {type(item).__name__}")
+        return v
 
 
 class StoreResponse(BaseModel):
