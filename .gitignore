@@ -37,3 +37,4 @@ htmlcov/
 # mutmut
 mutants/
 .mutmut-cache/
+.tmp-remagraph/
