@@ -23,6 +23,7 @@ from remagraph.arbitration import (
     run_arbitration_rules_cheap,
     supersede_status_updates,
 )
+from remagraph.audit import append_audit
 from remagraph.dedup import check_duplicate, encode_summary
 from remagraph.models import Memory, MemoryKind, StoreRequest, StoreResponse
 
@@ -285,17 +286,21 @@ def process_store(
 
         conn.execute("COMMIT")
 
-        return StoreResponse(
+        response = StoreResponse(
             status="stored",
             id=mem_id,
             superseded=superseded_ids,
             invalidated_count=invalidated_count,
         )
+        append_audit(response, request)
+        return response
 
     except Exception as e:
         conn.execute("ROLLBACK")
-        return StoreResponse(
+        response = StoreResponse(
             status="error",
             reason="db_error",
             detail=str(e),
         )
+        append_audit(response, request)
+        return response
