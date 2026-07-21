@@ -10,7 +10,7 @@ pip install remagraph
 
 ## MCP 工具
 
-RemaGraph 透過 MCP（Unix socket）暴露三個 tool：
+RemaGraph 透過 MCP（stdio transport）暴露三個 tool，相容 Claude Desktop、Cursor 等主流 MCP 客戶端（Unix socket daemon 為進階路線圖）：
 
 - **`remagraph_store`** — agent 寫入記憶（task handoff / status update / discovered constraint），通過五條仲裁規則後寫入 SQLite + FTS5。
 - **`remagraph_search`** — agent 查詢記憶，FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。

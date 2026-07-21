@@ -83,10 +83,29 @@ state：`~/.local/state/remagraph/`（db + audit，權限 0700／0600）。
 
 | 項目 | 內容 |
 |------|------|
-| 範圍 | `pyproject.toml` 依賴 pin 上界；entry point；ruff；CI 加入 SQLite≥3.38 + trigram 斷言步驟；**治理 P0 基建**：`.env.example`（可選 env 說明）、pre-commit（ruff + gitleaks）、評估 `uv.lock`；確認 gitleaks／pip-audit workflow 行為 |
+| 範圍 | `pyproject.toml` 依賴 pin 上界；entry point；ruff；CI 加入 SQLite≥3.38 + trigram 斷言步驟；**治理 P0 基建**：`.env.example`（可選 env 說明）、pre-commit（ruff + gitleaks）、**提交 `uv.lock`**（強制，CI 使用 `uv sync --frozen`）、確認 gitleaks／pip-audit workflow 行為 |
 | 依賴 | 無 |
-| 驗收 | editable install；`import remagraph`；CI 有 SQLite 版本 gate；`docs/governance/checklist.md` 中 WU-0 綁定項可勾 |
+| 驗收 | editable install；`import remagraph`；CI 有 SQLite 版本 gate + **trigram gate（見下方 §「Trigram CI Gate」）**；`uv.lock` 已提交且 CI frozen sync 正常；`docs/governance/checklist.md` 中 WU-0 綁定項可勾 |
 | 對應設計 | DESIGN 部署／pyproject；D03；D05 CI；治理 P0-1／P0-5／P0-7 |
+
+**Trigram CI Gate（WU-0 定義，WU-0 實作）**：
+
+```python
+# ci/test_trigram_gate.py — CI 必須通過此 gate
+def test_fts5_trigram_available():
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE VIRTUAL TABLE t USING fts5(content, tokenize='trigram')")
+    conn.execute("INSERT INTO t VALUES ('hello world test')")
+    rows = conn.execute("SELECT * FROM t WHERE t MATCH 'ell'").fetchall()
+    assert len(rows) == 1  # trigram 支援子字串匹配
+
+def test_fts5_trigram_rejects_bigram():
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE VIRTUAL TABLE t USING fts5(content, tokenize='trigram')")
+    conn.execute("INSERT INTO t VALUES ('測試中文 trigram')")
+    rows = conn.execute("SELECT * FROM t WHERE t MATCH 'gl'").fetchall()
+    assert len(rows) == 0  # bigram 不應匹配 trigram
+```
 
 ### WU-1 — models（型別合約）
 
@@ -262,7 +281,10 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 | 範圍蔓延 | 拖期 | 非目標清單 |
 | model2vec encode 格式變更 | BLOB 損壞 | pin 上界；維度 assert |
 | audit 半行損壞 | 讀取失敗 | 完整序列化再 write；文件 trade-off |
-| trigram 1–2 字元空回 | 難診斷 | 短 query 統一 warning 路徑 |
+| **Trigram CJK 短查詢靜默失敗** | 中文 ≤2 字 query 無法形成完整 trigram，查詢被靜默忽略 | WU-6 驗收須測 1字、2字、3字、混合查詢各一組；≤2字失敗必須在 tool response 中回傳明確錯誤而非空結果 |
+| **Trigram BM25 對中文語義無感** | 同字不同義無法區分，BM25 評分失真 | 記錄為 v1 已知限制，v2 考慮 jieba 分詞或 model2vec 語義補充；WU-6 記錄 ≥3 組中文 query 的實際 top-3 召回作為 v1 baseline |
+| **model2vec 模型下載失敗／CI 無網** | 去重不可用，server 崩潰 | fail-fast → tool 回傳結構化錯誤不崩潰；CI 使用 `HF_HUB_OFFLINE=1` + 預載 cache 策略 |
+| trigram 1–2 字元空回 | 難診斷 | 短 query 統一 warning 路徑，與 CJK 短查詢合併處理 |
 
 ---
 
@@ -337,7 +359,7 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 | S3 | 仲裁拒絕可觀測 | 過短 summary → `rejected` + 正確 reason；可選 audit `error` |
 | S4 | search | 對 S2 內容 query（含中文）→ results 非空或可解釋命中 |
 | S5 | status | 回傳結構合法；若寫過 status_update 則可見最新 |
-| S6 | audit 合約 | `~/.local/state/remagraph/audit.jsonl`（或測試 temp state）出現對應 `remagraph_store` 記錄 |
+| S6 | audit 合約 | **強制** 使用 `REMAGRAPH_STATE_DIR` 環境變數或等效機制將 state 指向 pytest `tmp_path`，禁止使用 `~/.local/state/remagraph/` 或任何使用者級路徑。該 `tmp_path` 下的 audit.jsonl 出現對應 `remagraph_store` 記錄 |
 
 - 實作建議路徑：`tests/smoke/`（名稱可調），**WU-8 後必須本機全綠，WU-9 進 CI**。  
 - 冒煙目標：**< 1～2 分鐘**；完整矩陣其後跑。

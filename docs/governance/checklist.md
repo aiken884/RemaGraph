@@ -52,9 +52,10 @@
 ### P0-4 代碼審查與對抗式驗證
 
 - [~] 指揮塔章程：每機制對抗式審查、route() 四眼 — **制度已有，實作 PR 須執行**
-- [ ] 每個功能 WU 合入前：實作 agent ≠ 審查 agent（異質 tier）
+- [ ] 每個功能 WU 合入前：實作 agent ≠ 審查 agent（**異質 tier 可操作定義**：審查 agent 的 `(model_family, tier)` 組合必須至少一個維度不同於實作 agent；不同 model_family 優先選擇；不得同一 binding 重複派工當作「四眼」。若 route() 只剩同家族可選，記 escalation／降低信心，不得標完成）
 - [ ] 對抗審查發現寫入 `docs/reviews/` 或 PR 註記
 - [ ] 問題關閉前不得標 WU done
+- [ ] WU checklist 中 P0-4 欄位須填寫 `實作 agent: <model@tier>` / `審查 agent: <model@tier>`，留存可驗證記錄
 - **驗證**：WU 完成記錄含 review 決議 LGTM／NEEDS_WORK
 
 ### P0-5 Secret 管理
