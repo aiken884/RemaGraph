@@ -13,7 +13,8 @@ authors = [
     { name = "Aiken Lin" },
 ]
 dependencies = [
-    "model2vec>=0.1.0",
+    "model2vec>=0.1.0",   # potion-multilingual-128M（model2vec）
+    "mcp>=1.0.0",          # MCP Python SDK（stdio transport）
     "pydantic>=2.0.0",
 ]
 # sqlite3 是 stdlib，不列
@@ -34,3 +35,5 @@ Homepage = "https://github.com/aiken884/RemaGraph"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# PPLX-CONSENSUS-APPLIED: mcp dependency
