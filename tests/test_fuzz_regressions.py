@@ -11,9 +11,9 @@ Covers representative invalid inputs that previously triggered pydantic Validati
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 import remagraph.server as server
-from pydantic import ValidationError
 
 
 def _reset_conn():

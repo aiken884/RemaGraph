@@ -38,3 +38,7 @@ htmlcov/
 mutants/
 .mutmut-cache/
 .tmp-remagraph/
+coverage.xml
+.command-tower/
+.omo/
+*.bak

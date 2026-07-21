@@ -1,13 +1,14 @@
 """Tests for db migrations and schema version handling.
 
-- test_connect_creates_meta_with_schema_version: fresh DB should get schema_version set to SCHEMA_VERSION.
-- test_connect_raises_on_newer_schema: if DB has newer schema_version than code SCHEMA_VERSION, connect() should raise MigrationError.
+- test_connect_creates_meta_with_schema_version: fresh DB should get
+  schema_version set to SCHEMA_VERSION.
+- test_connect_raises_on_newer_schema: if DB has newer schema_version
+  than code SCHEMA_VERSION, connect() should raise MigrationError.
 """
 
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 
 import pytest
 
@@ -37,7 +38,10 @@ def test_connect_raises_on_newer_schema(tmp_path, monkeypatch):
     conn = sqlite3.connect(db_path)
     # create _meta and insert schema_version using parameterized execute
     conn.execute("CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
-    conn.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)", (str(db.SCHEMA_VERSION + 1),))
+    conn.execute(
+        "INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)",
+        (str(db.SCHEMA_VERSION + 1),),
+    )
     conn.commit()
     conn.close()
 

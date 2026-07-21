@@ -27,7 +27,7 @@ vector = ["sqlite-vec>=0.1.0"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "mutmut>=2.0",
+    "mutmut>=2.0,<3.0",
     "ruff>=0.4",
     "mypy>=1.0",
     "pre-commit>=3.0",
@@ -50,10 +50,10 @@ select = ["E", "F", "I", "N", "W"]
 quote-style = "double"
 
 [tool.mutmut]
-source_paths = [
+paths_to_mutate = [
     "src/remagraph/arbitration.py",
     "src/remagraph/dedup.py",
 ]
-pytest_add_cli_args_test_selection = ["tests/"]
+tests_dir = "tests/"
 runner = "pytest"
 backup = false

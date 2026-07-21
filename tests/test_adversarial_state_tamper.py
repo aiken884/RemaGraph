@@ -1,12 +1,13 @@
 """Adversarial tests: simulate state tampering and permission issues.
 
-- test_db_file_corruption_raises: corrupt the sqlite DB file and assert connect() fails with DatabaseError.
-- test_state_dir_permission_denied: make state dir non-writable and assert connect() raises OSError.
+- test_db_file_corruption_raises: corrupt the sqlite DB file
+  and assert connect() fails with DatabaseError.
+- test_state_dir_permission_denied: make state dir non-writable
+  and assert connect() raises OSError.
 """
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from pathlib import Path
 
@@ -42,9 +43,9 @@ def test_state_dir_permission_denied(tmp_path, monkeypatch):
     monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(state_dir))
 
     # remove write/search permissions for owner
-    orig_mode = state_dir.stat().st_mode
     try:
-        # monkeypatch Path.mkdir to raise OSError for this specific path to simulate permission denied
+        # monkeypatch Path.mkdir to raise OSError for this specific
+        # path to simulate permission denied
         orig_mkdir = Path.mkdir
 
         def fake_mkdir(self, *a, **k):
