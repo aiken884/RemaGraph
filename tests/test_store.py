@@ -48,7 +48,10 @@ def _make_memory(**overrides) -> Memory:
         "agent_id": "test-agent",
         "timestamp": datetime(2026, 7, 21, 14, 30, 0, tzinfo=timezone.utc),
         "kind": "task_handoff",
-        "summary": "this is a test summary that must be at least thirty characters long to pass validation",
+        "summary": (
+            "this is a test summary that must be at least thirty characters long "
+            "to pass validation"
+        ),
         "learnings": ["test learning item one"],
         "handoff_note": "test handoff note for the receiver",
         "tags": ["test", "example"],
@@ -411,7 +414,10 @@ def test_get_latest_status_updates_respects_limit(conn, now):
             id=f"mem-limit-{i:03d}",
             task_id=f"task-limit-{i:03d}",
             kind="status_update",
-            summary=f"status update number {i} that must be at least thirty characters long to pass",
+            summary=(
+                f"status update number {i} that must be at least "
+                f"thirty characters long to pass"
+            ),
             created_at=datetime(2026, 7, 21, i, 0, 0, tzinfo=timezone.utc),
         )
         insert_memory(conn, mem, emb)

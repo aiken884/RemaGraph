@@ -6,9 +6,6 @@ remagraph_status），使用 tmp_path 作為 state 目錄以隔離測試。
 
 from __future__ import annotations
 
-import os
-import sqlite3
-
 import pytest
 
 import remagraph.server as server
@@ -60,7 +57,10 @@ def test_store_status_update_supersede():
         task_id="task-test-002",
         agent_id="oc-test",
         kind="status_update",
-        summary="這是一段足夠長的 status update summary 來通過仲裁規則檢查，至少需要三十個中文字元才能過關",
+        summary=(
+            "這是一段足夠長的 status update summary 來通過仲裁規則檢查，"
+            "至少需要三十個中文字元才能過關"
+        ),
         learnings=["第一次狀態"],
         handoff_note="",
         tags=["test"],
@@ -146,7 +146,9 @@ def test_search_with_data():
     assert len(result["results"]) >= 1
     assert result["has_more"] is False
     found = result["results"][0]
-    assert found["summary"] == "這是一段關於 Python 非同步程式設計的任務交接內容，記錄了重要的學習經驗"
+    assert found["summary"] == (
+        "這是一段關於 Python 非同步程式設計的任務交接內容，記錄了重要的學習經驗"
+    )
 
 
 def test_search_short_query():

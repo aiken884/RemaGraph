@@ -1,0 +1,36 @@
+name: mutmut
+
+# 非 blocking：不 gate PR merge，供開發者參考 mutation score。
+# 本地執行：uv run mutmut run
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # 資訊參考用，不強制通過
+  workflow_dispatch:
+
+jobs:
+  mutmut:
+    name: "mutation testing (arbitration + dedup)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install with frozen lockfile (dev extras)
+        run: uv sync --frozen --extra dev
+
+      - name: Run mutmut
+        run: uv run mutmut run --paths-to-mutate src/remagraph/arbitration.py src/remagraph/dedup.py
+        continue-on-error: true
+
+      - name: Show mutmut results
+        run: uv run mutmut results
+        continue-on-error: true

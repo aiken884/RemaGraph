@@ -178,10 +178,12 @@ def test_reconnect_preserves_data(tmp_path):
     conn1.execute(
         "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, embedding, created_at, updated_at) "
-        "VALUES ('mem-test-002', 'task_handoff', 'task-2', 'test', '2026-07-21T00:00:00Z', "
-        "'this is a test summary that must be at least thirty characters long for the test to pass', "
-        "'[\"test learning\"]', 'test handoff note here', '[\"test\"]', 'active', NULL, "
-        "'2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z')"
+        "VALUES ('mem-test-002', 'task_handoff', 'task-2', 'test', "
+        "'2026-07-21T00:00:00Z', "
+        "'this is a test summary that must be at least thirty characters long "
+        "for the test to pass', "
+        "'[\"test learning\"]', 'test handoff note here', '[\"test\"]', "
+        "'active', NULL, '2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z')"
     )
     conn1.commit()
     conn1.close()
