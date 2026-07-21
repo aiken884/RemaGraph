@@ -19,14 +19,17 @@ from remagraph.models import StoreRequest, StoreResponse
 
 
 def _audit_path() -> Path:
-    """回傳 audit.jsonl 的絕對路徑。
+    """回傳 audit-YYYYMM.jsonl 的絕對路徑（按月分檔，自動 rotation）。
 
     優先序與 db.get_db_path 一致：環境變數 REMAGRAPH_STATE_DIR 覆蓋預設
     ~/.local/state/remagraph/，避免測試或多實例情境寫入真實使用者目錄。
+
+    若目錄下存在舊版 audit.jsonl，後續讀取工具需相容兩者。
     """
     env_dir = os.environ.get("REMAGRAPH_STATE_DIR")
     base = Path(env_dir) if env_dir else Path.home() / ".local" / "state" / "remagraph"
-    return base / "audit.jsonl"
+    month = datetime.now(timezone.utc).strftime("%Y%m")
+    return base / f"audit-{month}.jsonl"
 
 
 def _ensure_dir(path: Path) -> None:

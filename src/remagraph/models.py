@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Literal
 
@@ -20,6 +21,9 @@ MemoryStatus = Literal["active", "superseded", "invalidated"]
 # ---------------------------------------------------------------------------
 
 
+_TASK_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
+
+
 class StoreRequest(BaseModel):
     """remagraph_store 的輸入。不含 id、timestamp、status、embedding（伺服器端填入）。"""
 
@@ -32,10 +36,18 @@ class StoreRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
     invalidates: list[str] | None = None
 
+    @field_validator("task_id", "agent_id", mode="before")
+    @classmethod
+    def _validate_id(cls, v: object) -> str:
+        if not isinstance(v, str) or not _TASK_ID_RE.match(v):
+            raise ValueError(
+                f"task_id/agent_id must match {_TASK_ID_RE.pattern}, got {v!r}"
+            )
+        return v
+
     @field_validator("tags", mode="before")
     @classmethod
-    def _validate_tags(cls, v):
-        """Ensure tags is a list of str and reject bytes or other types early."""
+    def _validate_tags(cls, v: object) -> list[str]:
         if v is None:
             return []
         if not isinstance(v, list):

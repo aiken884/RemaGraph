@@ -212,7 +212,7 @@ Phase 2（短期補上）
   P1-3  ADR 目錄 + 第一篇
   P1-2  Dependabot 策略補強
 
-Phase 3（上線後迭代）
+Phase 3（V3 階段）
   S1-S4 搜尋強化
   T1     Unix socket daemon
   T2     Tool schema 版本化
