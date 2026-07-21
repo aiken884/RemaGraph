@@ -3,7 +3,7 @@
 > **用途**：複製下方「Goal 目標句」與「Plan 本體」啟動 Grok Goal（或等價 `/goal`），讓 agent **以指揮塔模式**協調完成 v1 開發。  
 > **SOT**：[`implementation-plan-v1.md`](./implementation-plan-v1.md)、[`DESIGN.md`](../../DESIGN.md)、[`docs/design/`](../design/)、[`docs/governance/checklist.md`](../governance/checklist.md)  
 > **指揮塔章程**：`~/Projects/herdr-org/docs/command-tower-charter.md`  
-> **現況起點**（撰寫時）：`main` 已凍結設計與計畫；`src/remagraph/*` 核心仍為 stub；`uv.lock` 已存在。
+> **現況**（2026-07-21 收斂）：**v1 Goal 已完成**；證據見 [`docs/reviews/v1-closeout-status.md`](../reviews/v1-closeout-status.md)。下文 Goal／Plan 本體保留為歷史可重跑紀錄；task checklist 已勾選。
 
 ---
 
@@ -85,19 +85,19 @@ Per feature WU loop:
 Do not skip gates to “save time”. Prefer multiple fleet instances over tower coding.
 
 ## Task checklist
-- [ ] Bootstrap: re-read charter + plan §0–§2 + governance checklist; confirm git clean baseline; capture `{SCRATCH}/baseline.txt`
-- [ ] WU-0 工程基線: pin deps, entrypoint, ruff, pre-commit, .env.example, uv.lock frozen CI, SQLite≥3.38 + trigram gate tests; route()+fleet; adversarial optional for pure config
-- [ ] WU-1 models TDD: Memory/Store/Search schemas; test_models; route()+fleet; adversarial
-- [ ] WU-2 db: schema/triggers/trigram/WAL/permissions/idempotent init; route()+fleet; adversarial
-- [ ] WU-3 arbitration cheap rules + uppercase agent_id reject; route()+fleet; adversarial
-- [ ] WU-4 dedup model2vec + EMBEDDING_DIM assert + 0.90 + 2000 cap + fail-fast; route()+fleet; adversarial (high risk)
-- [ ] WU-5 store + supersede + invalidate + transaction; route()+fleet; adversarial
-- [ ] WU-6 search/status has_more + Chinese baseline + short query behavior; route()+fleet; adversarial
-- [ ] WU-7 audit after commit only + temp-safe tests; route()+fleet; adversarial
-- [ ] WU-8 MCP stdio server three tools; route()+fleet; adversarial
-- [ ] WU-9 CI smoke→lint→test+cov+mutmut track; close P0-3; route()+fleet as needed
-- [ ] WU-10 README stdio config, CHANGELOG Unreleased, checklist P0 closeout; route()+fleet
-- [ ] Final: full verification plan; push main; write `{SCRATCH}/wu-status.md` + `{SCRATCH}/dispatch-log.md`; report to user
+- [x] Bootstrap: re-read charter + plan §0–§2 + governance checklist; confirm git clean baseline; capture `{SCRATCH}/baseline.txt`
+- [x] WU-0 工程基線: pin deps, entrypoint, ruff, pre-commit, .env.example, uv.lock frozen CI, SQLite≥3.38 + trigram gate tests; route()+fleet; adversarial optional for pure config
+- [x] WU-1 models TDD: Memory/Store/Search schemas; test_models; route()+fleet; adversarial
+- [x] WU-2 db: schema/triggers/trigram/WAL/permissions/idempotent init; route()+fleet; adversarial
+- [x] WU-3 arbitration cheap rules + uppercase agent_id reject; route()+fleet; adversarial
+- [x] WU-4 dedup model2vec + EMBEDDING_DIM assert + 0.90 + 2000 cap + fail-fast; route()+fleet; adversarial (high risk)
+- [x] WU-5 store + supersede + invalidate + transaction; route()+fleet; adversarial
+- [x] WU-6 search/status has_more + Chinese baseline + short query behavior; route()+fleet; adversarial
+- [x] WU-7 audit after commit only + temp-safe tests; route()+fleet; adversarial
+- [x] WU-8 MCP stdio server three tools; route()+fleet; adversarial
+- [x] WU-9 CI smoke→lint→test+cov+mutmut track; close P0-3; route()+fleet as needed
+- [x] WU-10 README stdio config, CHANGELOG Unreleased, checklist P0 closeout; route()+fleet
+- [x] Final: full verification plan; push main; write dispatch/closeout 紀錄（`docs/reviews/v1-adversarial-dispatch-summary.md`、`docs/reviews/v1-closeout-status.md`）；report to user
 
 ## Risks / Contradictions
 - Tower agent may try to code directly — **hard stop**; re-dispatch fleet

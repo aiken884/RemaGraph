@@ -2,9 +2,10 @@
 
 | 項目 | 內容 |
 |------|------|
-| **狀態** | **PPLX 複審 APPROVE — 計畫已凍結**；v1.2 融入通用治理框架（**禁止實作**直至人類明確同意） |
-| **Date** | 2026-07-21 |
-| **Version** | v1.2（v1.1 + 通用專案治理框架／檢查清單適配） |
+| **狀態** | **v1 已實作並合入 `main`**（WU-0～10）；本檔仍是實作藍圖 SOT，歷史凍結語境見 §0 |
+| **實作收斂** | [`docs/reviews/v1-closeout-status.md`](../reviews/v1-closeout-status.md)；證據 HEAD 含 `ef666a5` |
+| **Date** | 2026-07-21（計畫凍結）／2026-07-21（實作收斂） |
+| **Version** | v1.2.1（v1.2 + 實作完成狀態對齊；不改 §2 凍結決策） |
 | **Orchestrated-by** | CommandTower |
 | **SOT** | [`DESIGN.md`](../../DESIGN.md)（設計凍結 commit `8905d23`） |
 | **設計展開** | [`docs/design/00-index.md`](../design/00-index.md) 及 D01–D05 |
@@ -16,12 +17,12 @@
 
 ## 0. 硬性邊界（本文件與後續執行皆適用）
 
-1. **本文件只規劃實作，不執行實作。** 進入寫碼／改 stub 行為前，必須另有使用者明確指示（例如「同意實作」）。
+1. **歷史**：本文件初稿階段只規劃、不執行實作；進入寫碼前須人類明確「同意實作」。**v1 已於 2026-07-21 經 Goal 授權並由艦隊完成。**
 2. 實作必須對齊凍結設計；若與 `DESIGN.md` 衝突，**以 DESIGN.md 為準**並開 ADR／回報，不得靜默偏離。
 3. **不耦合** herdr-bridge／herdr-gov（程式碼、README、tool 名稱皆不得綁定）。
 4. 依賴新增限設計已列：`model2vec`、`mcp`、`pydantic`；optional `sqlite-vec` 僅 v2。建議 **pin 上界**（如 `model2vec>=0.1.0,<2.0`、`mcp>=1.0,<2`）於 WU-0。
-5. 指揮塔／艦隊紀律：實作由艦隊經 `route()` 派工；本計畫可被派工作為「實作藍圖」，**不是**授權立刻開工。
-6. **本計畫 APPROVE ≠ 開工令**；仍需人類「同意實作」。
+5. 指揮塔／艦隊紀律：實作由艦隊經 `route()` 派工；本計畫為「實作藍圖」。
+6. **本計畫 APPROVE ≠ 開工令**（歷史規則保留）；v1 開工已另有人類 Goal 同意。**PyPI publish 仍須另開 HITL**，不因 v1 完成而自動授權。
 
 ---
 
@@ -232,12 +233,12 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 
 ### 6.1 每 WU
 
-- [ ] 對應驗收列通過
-- [ ] 無 herdr 耦合
-- [ ] 無未核准依賴
-- [ ] guilty-until-proven
-- [ ] **P0-4 對抗式審查完成**（異質 tier／不同實例；結論可追溯）
-- [ ] 該 WU 綁定之 `docs/governance/checklist.md` 項已更新
+- [x] 對應驗收列通過（WU-0～10；見 closeout）
+- [x] 無 herdr 耦合
+- [x] 無未核准依賴
+- [x] guilty-until-proven
+- [x] **P0-4 對抗式審查完成**（異質 tier／不同實例；結論可追溯）— [`docs/reviews/v1-adversarial-dispatch-summary.md`](../reviews/v1-adversarial-dispatch-summary.md)
+- [x] 該 WU 綁定之 `docs/governance/checklist.md` 項已更新
 
 ### 6.2 Pre-merge（對齊治理 P0-3／P0-5／P0-7）
 
@@ -258,14 +259,14 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 
 ### 6.3 內容驗收（防半殘；對齊治理「驗內容不是只驗 exit code」）
 
-- [ ] store 後 SQLite 可讀預期欄位；FTS 可查
-- [ ] store 成功 → BLOB `np.frombuffer(blob, dtype='<f4').shape == (EMBEDDING_DIM,)`
-- [ ] audit：`action=remagraph_store` 且 `status=stored`（成功）或 `error`+reason（拒絕）
-- [ ] search 中文有合理命中；短 query 空 + warning
-- [ ] **remagraph_status 同 task_id 多筆只回最新 1 筆**
-- [ ] top_k=1 且有 2 筆 → `has_more=True`；僅 1 筆 → `has_more=False`
-- [ ] 仲裁拒絕 reason_code 正確
-- [ ] 冒煙套件覆蓋 §11.3 清單且斷言實際輸出內容
+- [x] store 後 SQLite 可讀預期欄位；FTS 可查
+- [x] store 成功 → BLOB `np.frombuffer(blob, dtype='<f4').shape == (EMBEDDING_DIM,)`（`EMBEDDING_DIM=256`）
+- [x] audit：`action=remagraph_store` 且 `status=stored`（成功）或 `error`+reason（拒絕）— **audit.jsonl**
+- [x] search 中文有合理命中；短 query 空 + warning
+- [x] **remagraph_status 同 task_id 多筆只回最新 1 筆**
+- [x] top_k=1 且有 2 筆 → `has_more=True`；僅 1 筆 → `has_more=False`
+- [x] 仲裁拒絕 reason_code 正確
+- [x] 冒煙套件覆蓋 §11.3 清單且斷言實際輸出內容
 
 ---
 
@@ -290,12 +291,12 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 
 ## 8. 交付物檢查清單（實作階段結束時）
 
-- [ ] 三 MCP tool 可用（stdio）
-- [ ] Audit Contract 可驗證
-- [ ] coverage ≥80、CI 綠（含冒煙）
-- [ ] README 更新；CHANGELOG `[Unreleased]` 存在
-- [ ] `docs/governance/checklist.md` P0 項無未解釋的 `[ ]`
-- [ ] **不**自動 PyPI publish
+- [x] 三 MCP tool 可用（stdio）
+- [x] Audit Contract 可驗證（`docs/audit.md` + smoke）
+- [x] coverage ≥80、CI 綠（含冒煙）— 本地 192+smoke 4 於收斂時重驗
+- [x] README 更新；CHANGELOG `[Unreleased]` 存在
+- [x] `docs/governance/checklist.md` P0 項無未解釋的 `[ ]`（僅剩**人類 GitHub 設定面** open 項，已標註 owner）
+- [x] **不**自動 PyPI publish
 
 ---
 
@@ -319,6 +320,7 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 | v1.0-draft | 2026-07-21 | 初稿送 PPLX |
 | v1.1 | 2026-07-21 | 依 PPLX 初審：B-1 維度鎖定、B-2 依賴圖／WU-7、B-3 status 去重驗收；A–F + 關鍵 N |
 | v1.2 | 2026-07-21 | 融入 Vault《通用專案治理框架與檢查清單》：§11 對齊、冒煙定義、對抗審查流程、P0/P1/P2 映射；新增 `docs/governance/checklist.md`；強化 WU-0／9／10 與 pre-merge 閘門 |
+| v1.2.1 | 2026-07-21 | 實作收斂：狀態改「v1 已實作」；§6／§8 勾選；§11 現況表對齊；見 `docs/reviews/v1-closeout-status.md` |
 
 ---
 
@@ -332,8 +334,8 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 
 | 級 | 框架定義 | RemaGraph 現況與計畫 | 執行時機 |
 |----|----------|----------------------|----------|
-| **P0** | 任何專案無例外 | 部分已有（git、LICENSE、DESIGN、CI 骨架）；測試／冒煙／對抗審查執行鏈待實作 | **WU-0～WU-10 強制** |
-| **P1** | 規模化前 3～6 月 | coverage 門檻已採 80%；CHANGELOG／ADR／CONTRIBUTING／Dependabot 待補 | WU-9／WU-10 與首次 public 前 |
+| **P0** | 任何專案無例外 | **v1 已關閉實作期 P0**（測試／冒煙／對抗審查／SPDX 等）；僅剩人類 GitHub branch protection 設定面 | WU-0～WU-10 **已完成** |
+| **P1** | 規模化前 3～6 月 | cov 80、CHANGELOG、Dependabot **已有**；mypy 強制／ADR 目錄／CONTRIBUTING 仍待 public 前 | 首次 public 前補齊 |
 | **P2** | 社群／敏感 | 私人 side project；SECURITY／CoC／SBOM 等 | **明確延後**（清單標 `[-]`） |
 
 ### 11.2 P0 七項 → 實作綁定
@@ -342,7 +344,7 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 |----|--------|------|----------|
 | P0-1 | Git 流程 | private repo、有意義 commit | 實作期 branch／PR 慣例；公開前 branch protection |
 | P0-2 | License | Apache-2.0 `LICENSE` | 維持；可選 SPDX 標頭於 WU-0／10 |
-| P0-3 | 測試+覆蓋率+**冒煙** | CI test／cov 設定；測試仍 stub | WU-1～9 真測；§11.3 冒煙；CI smoke→lint→test |
+| P0-3 | 測試+覆蓋率+**冒煙** | **已真測**；smoke→lint→test；cov≥80 | 維持；mutmut 非 blocking 追蹤 |
 | P0-4 | 審查+**對抗式驗證** | 指揮塔章程＋設計期 PPLX | 每功能 WU：route() 異質審查；紀錄可追溯 |
 | P0-5 | Secret | gitleaks CI；無 secret 進庫設計 | WU-0：`.env.example`、pre-commit gitleaks |
 | P0-6 | 決策文件 | DESIGN + design docs + 計畫 + PPLX 紀錄 | WU-10 README；重大偏離寫 ADR |
@@ -378,7 +380,7 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 
 | 級 | 納入 v1 實作期 | 延後 |
 |----|----------------|------|
-| P1 | ruff 嚴格化、cov 80、CHANGELOG Unreleased、實作期 ADR（有決策時） | Dependabot、完整 CONTRIBUTING、自動 publish |
+| P1 | ruff、cov 80、CHANGELOG Unreleased、**Dependabot 已落地**；ADR 僅在有決策時 | 完整 CONTRIBUTING、mypy 強制 CI、自動 publish |
 | P2 | 無強制 | SECURITY、CoC、簽章、SBOM、CodeQL、GOVERNANCE |
 
 公開開源或邀請外部貢獻前：回頭用 `docs/governance/checklist.md` 把 P1 缺口關閉。
@@ -388,20 +390,20 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 | 框架建議 | RemaGraph |
 |----------|-----------|
 | README / LICENSE | 已有 |
-| tests/ | 已有骨架 → WU 填實；建議 `tests/smoke/` |
-| docs/architecture | DESIGN.md 為 SOT；WU-10 可加薄索引 |
-| docs/decisions | 實作期建立（P1-3） |
-| .github/workflows | test／gitleaks／pip-audit 已有 |
-| .pre-commit-config.yaml | **WU-0 補** |
-| .env.example | **WU-0 補** |
-| CHANGELOG | **WU-10 補** |
+| tests/ | 已填實；含 `tests/smoke/` |
+| docs/architecture | DESIGN.md 為 SOT（未另建 architecture.md，刻意 `[-]`） |
+| docs/decisions | 無重大偏離設計 → 尚未建目錄（P1-3 有決策時再建） |
+| .github/workflows | test／gitleaks／pip-audit／mutmut；Dependabot |
+| .pre-commit-config.yaml | **已有**（ruff + gitleaks） |
+| .env.example | **已有** |
+| CHANGELOG | **已有** `[Unreleased]` |
 | CONTRIBUTING／SECURITY／… | P1／P2 延後 |
 
 ### 11.7 完成定義加嚴（治理）
 
 v1「可交付」除 §1.1 功能完成外，另需：
 
-1. `docs/governance/checklist.md` 之 **P0** 無未解釋的 `[ ]`（`[~]` 須註明剩餘工作與 owner）。  
-2. 冒煙 §11.3 在 CI 綠。  
-3. 至少一份功能 WU 的對抗審查樣例留存（證明流程可跑）。  
-4. 仍遵守 §0：**無人類「同意實作」前不寫功能碼**；無人類 release 同意不 PyPI publish。
+1. `docs/governance/checklist.md` 之 **P0** 無未解釋的 `[ ]`（`[~]` 須註明剩餘工作與 owner）。→ **已對齊**；open 項僅人類 GitHub 設定。  
+2. 冒煙 §11.3 在 CI 綠。→ **已落地**。  
+3. 至少一份功能 WU 的對抗審查樣例留存（證明流程可跑）。→ **`docs/reviews/v1-adversarial-dispatch-summary.md`**。  
+4. 仍遵守：無人類 release 同意不 PyPI publish。→ **維持**。

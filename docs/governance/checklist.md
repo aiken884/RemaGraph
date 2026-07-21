@@ -3,11 +3,13 @@
 | 項目 | 內容 |
 |------|------|
 | **來源** | Vault《通用專案治理框架與檢查清單》（P0／P1／P2） |
-| **專案適配** | RemaGraph v1 實作階段（一人 side project + 艦隊／指揮塔） |
+| **專案適配** | RemaGraph v1 **已交付**（一人 side project + 艦隊／指揮塔）；套件 `0.1.0` |
 | **對應計畫** | [`docs/plans/implementation-plan-v1.md`](../plans/implementation-plan-v1.md) §11 |
+| **收斂狀態** | [`docs/reviews/v1-closeout-status.md`](../reviews/v1-closeout-status.md) |
 | **標記** | `[x]` 已完成 · `[~]` 進行中／部分 · `[ ]` 未做 · `[-]` 刻意延後（附理由） |
 
-> 新專案：完成 **P0** 後可發布 v0.1 級可用；**P1** 完成後較適合對外邀請貢獻；**P2** 社群化／公開敏感時再推。
+> 新專案：完成 **P0** 後可發布 v0.1 級可用；**P1** 完成後較適合對外邀請貢獻；**P2** 社群化／公開敏感時再推。  
+> **v1 現況**：實作期 P0 已關；open `[ ]` 僅 **人類 GitHub 設定面**（branch protection 等）。
 
 ---
 
@@ -97,11 +99,11 @@
 
 | ID | 項 | RemaGraph 處置 | 狀態 |
 |----|-----|----------------|------|
-| P1-1 | 嚴格 lint／format／（可選 mypy） | WU-0：ruff 設定完成、全綠；coverage 已 80 門檻；mypy 待 WU-9 | [x] ruff / [ ] mypy |
-| P1-2 | Dependabot／Renovate | 首次 public 或有使用者前 | [ ] |
-| P1-3 | ADR `docs/decisions/` | 實作期重大偏離設計時必寫；可補「stdio 優先」等 | [ ] |
+| P1-1 | 嚴格 lint／format／（可選 mypy） | ruff 全綠；coverage ≥80；mypy 在 dev deps **未**進 CI 閘門 | [x] ruff / [ ] mypy CI |
+| P1-2 | Dependabot／Renovate | `.github/dependabot.yml`（pip + github-actions 週更）已落地 | [x] |
+| P1-3 | ADR `docs/decisions/` | 實作期無重大偏離設計；有決策時再建 | [ ] 有決策再建 |
 | P1-4 | CONTRIBUTING + PR template | 開源前；私人期可簡版 | [ ] |
-| P1-5 | CHANGELOG | WU-10 完成 `[Unreleased]` | [x] |
+| P1-5 | CHANGELOG | `[Unreleased]` 已有（對齊 closeout 敘述） | [x] |
 | P1-6 | 發布自動化 | **HITL**：不自動 PyPI；可先 tag+CI 測 | [-] 自動 publish 禁止至人類 release |
 
 ---

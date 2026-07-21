@@ -12,9 +12,10 @@
 | **詞源** | Remanent（殘磁）——外部力量走了，痕跡還在 |
 | **定位** | 獨立開源 MCP server，agent 工具箱裡的一把工具 |
 | **擁有者** | Aiken Lin 個人 side project |
-| **GitHub** | 個人帳號 |
+| **GitHub** | 個人帳號（private `aiken884/RemaGraph`） |
 | **授權** | Apache-2.0（與 CodeGraph 相同） |
-| **PyPI** | `pip install remagraph` |
+| **PyPI** | 目標 `pip install remagraph`；**v1 尚未 publish**（目前 `pip install -e .`／原始碼安裝） |
+| **套件版本** | `0.1.0`（見 `pyproject.toml`）；實作收斂 [`docs/reviews/v1-closeout-status.md`](docs/reviews/v1-closeout-status.md) |
 | **Python** | 3.11+，uv 管理依賴 |
 | **與外部專案的關係** | 完全獨立。不屬於 herdr-bridge / herdr-gov，不認識 Herdr 生態系。任何 AI coding agent 都可以直接使用 |
 
