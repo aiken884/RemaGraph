@@ -26,7 +26,7 @@ from remagraph.models import MemoryKind, StoreRequest
 # ---------------------------------------------------------------------------
 
 ArbitrationReason = Literal[
-    "summary_too_short",
+    "XXsummary_too_shortXX",
     "learnings_empty",
     "handoff_note_too_short",
     "duplicate_content",

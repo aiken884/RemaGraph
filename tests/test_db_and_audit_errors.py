@@ -1,7 +1,10 @@
 """Tests for DB failure and audit write failure handling.
 
-- test_db_insert_failure_returns_error: simulate insert_memory raising to ensure remagraph_store returns status 'error' with reason 'db_error'.
-- test_audit_write_failure_is_silent: simulate file write OSError during append_audit; remagraph_store should still return stored and not raise.
+- test_db_insert_failure_returns_error: simulate insert_memory raising
+  to ensure remagraph_store returns status 'error' with reason 'db_error'.
+- test_audit_write_failure_is_silent: simulate file write OSError
+  during append_audit; remagraph_store should still return stored
+  and not raise.
 """
 
 from __future__ import annotations
@@ -13,7 +16,6 @@ import pytest
 
 import remagraph.server as server
 import remagraph.store as store
-import remagraph.audit as audit
 
 
 def _reset_conn():
