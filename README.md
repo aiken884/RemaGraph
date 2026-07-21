@@ -4,12 +4,15 @@
 
 | 項目 | 現況 |
 |------|------|
-| **版本** | `0.1.0`（private repo；**尚未** PyPI） |
-| **狀態** | v1 可用：stdio MCP 三 tool |
+| **版本** | `0.2.0`（開發中；**尚未** PyPI） |
+| **狀態** | v2 完成：安全強化 + 治理準備 + 可靠度提升 |
 | **設計 SOT** | [`DESIGN.md`](./DESIGN.md) |
 | **收斂狀態** | [`docs/reviews/v1-closeout-status.md`](./docs/reviews/v1-closeout-status.md) |
+| **架構文件** | [`docs/architecture.md`](./docs/architecture.md) |
 | **Audit 合約** | [`docs/audit.md`](./docs/audit.md) |
 | **治理清單** | [`docs/governance/checklist.md`](./docs/governance/checklist.md) |
+| **貢獻指南** | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
+| **變更日誌** | [`CHANGELOG.md`](./CHANGELOG.md) |
 
 ## 安裝
 
@@ -58,7 +61,7 @@ pip install -e .
 }
 ```
 
-**OpenCode / Claude Code** — 任何支援 stdio MCP 的 client 皆可，設定方式同上，指定 `command: "remagraph"`、`args: ["serve"]`。
+**OpenCode / Claude Code** — 任何支援 stdio MCP 的 client 皆可，設定方式同上。
 
 ### 2. 環境變數
 
@@ -66,7 +69,7 @@ pip install -e .
 |------|------|--------|
 | `REMAGRAPH_STATE_DIR` | SQLite DB 存放目錄 | `~/.local/state/remagraph/` |
 
-目錄不存在時自動建立（權限 0700），DB 檔案權限 0600。
+目錄不存在時自動建立（權限 0700），DB 檔案權限 0600。路徑已加入安全性檢查（禁止系統目錄）。
 
 ### 3. CLI 入門
 
@@ -88,8 +91,8 @@ agent 寫入記憶，通過五條仲裁規則後寫入 SQLite + FTS5 index。
 
 | 參數 | 型別 | 說明 |
 |------|------|------|
-| `task_id` | `str` | 任務識別碼 |
-| `agent_id` | `str` | agent 識別碼 |
+| `task_id` | `str` | 任務識別碼（格式：英數字 + `-_`，最多 64 字元） |
+| `agent_id` | `str` | agent 識別碼（同 task_id 格式限制） |
 | `kind` | `"task_handoff" \| "status_update" \| "discovered_constraint"` | 記憶類型 |
 | `summary` | `str` | 一句話摘要（供 FTS5 全文檢索） |
 | `learnings` | `list[str]` | 學到的要點 |
@@ -126,19 +129,30 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 |------|------|------|
 | `limit` | `int` | 回傳筆數上限（預設 20，最大 100） |
 
+## 治理與安全
+
+- **Rate limiting**：per-agent token bucket（60 calls/60 秒），防止濫用
+- **輸入驗證**：`task_id` / `agent_id` 經 Pydantic validator 檢核格式
+- **路徑安全**：`REMAGRAPH_STATE_DIR` 禁止系統目錄路徑
+- **Audit rotation**：`audit-YYYYMM.jsonl` 按月自動分檔
+- **DB 容量**：SQLite `max_page_count` 設定 100MB soft limit
+- **Migration**：內建 schema 版本追蹤與 migration chain
+- **超期清理**：`cleanup_superseded()` 可清理 90 天前的非 active 記錄
+
 詳細規格見 [`DESIGN.md`](./DESIGN.md)；對外穩定合約見 [`docs/audit.md`](./docs/audit.md)。
 
 ## 開發與驗證
 
 ```bash
 # 建議使用 uv
-uv sync --all-extras   # 或依專案慣例安裝 dev deps
+uv sync --all-extras
 uv run ruff check src tests
+uv run mypy src/
 uv run pytest -m 'not slow'
 REMAGRAPH_STATE_DIR=$(mktemp -d) uv run pytest tests/smoke
 ```
 
-- CI：smoke → lint → test（coverage ≥80）；另有 gitleaks、pip-audit、mutmut（非 blocking）。
+- CI：smoke → lint（ruff + mypy）→ test（coverage ≥80）；另有 gitleaks、pip-audit、mutmut（非 blocking）。
 - 勿在測試中預設寫入生產 state；冒煙必須使用 `REMAGRAPH_STATE_DIR` 或 pytest `tmp_path`。
 
 ## 授權

@@ -2,7 +2,7 @@
 
 **日期**：2026-07-22
 
-**狀態**：Accepted
+**狀態**：Completed
 
 ## Context
 
