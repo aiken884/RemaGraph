@@ -18,8 +18,14 @@ from remagraph.models import StoreRequest, StoreResponse
 
 
 def _audit_path() -> Path:
-    """回傳 audit.jsonl 的絕對路徑。"""
-    return Path.home() / ".local" / "state" / "remagraph" / "audit.jsonl"
+    """回傳 audit.jsonl 的絕對路徑。
+
+    優先序與 db.get_db_path 一致：環境變數 REMAGRAPH_STATE_DIR 覆蓋預設
+    ~/.local/state/remagraph/，避免測試或多實例情境寫入真實使用者目錄。
+    """
+    env_dir = os.environ.get("REMAGRAPH_STATE_DIR")
+    base = Path(env_dir) if env_dir else Path.home() / ".local" / "state" / "remagraph"
+    return base / "audit.jsonl"
 
 
 def _ensure_dir(path: Path) -> None:

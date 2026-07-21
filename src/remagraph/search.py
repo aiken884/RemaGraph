@@ -204,7 +204,7 @@ def get_status(
         "  WHERE kind = 'status_update' AND status = 'active' "
         "  GROUP BY task_id"
         ") latest ON m.task_id = latest.task_id AND m.created_at = latest.max_ts "
-        "WHERE m.kind = 'status_update' "
+        "WHERE m.kind = 'status_update' AND m.status = 'active' "
         "ORDER BY m.created_at DESC "
         "LIMIT ?",
         (request.limit,),

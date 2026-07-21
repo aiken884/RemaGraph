@@ -23,8 +23,13 @@ from remagraph.store import (
 
 
 @pytest.fixture
-def conn():
-    """in-memory SQLite，含完整 schema。"""
+def conn(tmp_path, monkeypatch):
+    """in-memory SQLite，含完整 schema。
+
+    process_store() 會透過 append_audit() 寫 audit.jsonl，隔離
+    REMAGRAPH_STATE_DIR 避免測試汙染真實 ~/.local/state/remagraph/。
+    """
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(tmp_path))
     c = sqlite3.connect(":memory:", isolation_level=None)
     c.row_factory = sqlite3.Row
     db_mod._init_schema(c)
