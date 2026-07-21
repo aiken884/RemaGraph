@@ -6,7 +6,8 @@ on:
   pull_request:
 
 jobs:
-  test:
+  smoke:
+    name: "smoke (py${{ matrix.python-version }} on ${{ matrix.os }})"
     strategy:
       fail-fast: false
       matrix:
@@ -26,13 +27,60 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install with frozen lockfile
-        run: uv sync --frozen --all-extras
+        run: uv sync --frozen
 
       - name: Verify SQLite >= 3.38 and trigram support
         run: uv run python -c "import sqlite3; v=sqlite3.sqlite_version_info; assert v>=(3,38,0), f'SQLite {v} < 3.38'; conn=sqlite3.connect(':memory:'); conn.execute(\"CREATE VIRTUAL TABLE t USING fts5(x, tokenize='trigram')\"); print(f'SQLite {v} + trigram OK')"
 
       - name: Run trigram CI gate
         run: uv run python ci/test_trigram_gate.py
+
+      - name: Verify import
+        run: uv run python -c "import remagraph; print(f'RemaGraph {remagraph.__version__} OK')"
+
+  lint:
+    name: lint
+    needs: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install with frozen lockfile (dev extras)
+        run: uv sync --frozen --extra dev
+
+      - name: Run ruff
+        run: uv run ruff check .
+
+  test:
+    name: "test + coverage (py${{ matrix.python-version }} on ${{ matrix.os }})"
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install with frozen lockfile (dev extras)
+        run: uv sync --frozen --extra dev
 
       - name: Run tests with coverage
         run: uv run pytest --cov=src/remagraph --cov-fail-under=80

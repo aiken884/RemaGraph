@@ -61,11 +61,11 @@
 ### P0-5 Secret 管理
 
 - [x] 無 production secret 進 repo 設計；state 在 `~/.local/state/`
-- [~] `.env.example` — v1 可能僅需可選 env（state path／log）；**WU-0 補**
+- [x] `.env.example` — v1 可選 env（state path／log）；**WU-0 完成**
 - [x] CI gitleaks workflow 已存在
-- [ ] pre-commit gitleaks — **WU-0 建議補**
+- [x] pre-commit gitleaks — **WU-0 完成**
 - [x] 金鑰不進程式：model 走 HF cache／env，不寫死 token
-- **驗證**：`gitleaks`；無硬編碼 token
+- **驗證**：`gitleaks`；無硬編碼 token；`.env.example` 存在且無真實 secret
 
 ### P0-6 決策與文件
 
@@ -79,11 +79,11 @@
 ### P0-7 依賴管理與掃描
 
 - [x] `pyproject.toml` 列依賴（model2vec／mcp／pydantic）
-- [ ] lockfile（`uv.lock` 或同等）— **WU-0 建議**
+- [x] lockfile（`uv.lock` 或同等）— **WU-0 完成**
 - [x] CI `pip-audit` workflow 已存在
-- [~] HIGH/CRITICAL fail — 確認 workflow 設定與實作期對齊
+- [x] HIGH/CRITICAL fail — 確認 workflow 設定與實作期對齊
 - [ ] Dependabot — **P1**
-- **驗證**：本地／CI pip-audit
+- **驗證**：本地／CI pip-audit；`uv.lock` 已提交
 
 ---
 
@@ -91,7 +91,7 @@
 
 | ID | 項 | RemaGraph 處置 | 狀態 |
 |----|-----|----------------|------|
-| P1-1 | 嚴格 lint／format／（可選 mypy） | WU-0／WU-9：ruff；coverage 已 80 | [ ] |
+| P1-1 | 嚴格 lint／format／（可選 mypy） | WU-0：ruff 設定完成、全綠；coverage 已 80 門檻；mypy 待 WU-9 | [x] ruff / [ ] mypy |
 | P1-2 | Dependabot／Renovate | 首次 public 或有使用者前 | [ ] |
 | P1-3 | ADR `docs/decisions/` | 實作期重大偏離設計時必寫；可補「stdio 優先」等 | [ ] |
 | P1-4 | CONTRIBUTING + PR template | 開源前；私人期可簡版 | [ ] |
@@ -132,3 +132,4 @@
 | 日期 | 說明 |
 |------|------|
 | 2026-07-21 | 自 Vault 通用框架適配 RemaGraph；納入實作計畫 §11 |
+| 2026-07-21 | WU-0 完成：pin 上界、`.env.example`、`pre-commit`（ruff+gitleaks）、`uv.lock` 更新、CI 重排 smoke→lint→test、trigram gate、ruff 全綠 |

@@ -8,26 +8,29 @@ version = "0.1.0"
 description = "輕量 MCP 工具：記錄 AI coding agent 處理任務時留下的痕跡（task handoff / status update / discovered constraint），供後續 agent 查詢。"
 readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [
     { name = "Aiken Lin" },
 ]
 dependencies = [
-    "model2vec>=0.1.0",   # potion-multilingual-128M（model2vec）
-    "mcp>=1.0.0",          # MCP Python SDK（stdio transport）
-    "pydantic>=2.0.0",
+    "model2vec>=0.1.0,<2.0",
+    "mcp>=1.0.0,<2.0",
+    "pydantic>=2.0.0,<3.0",
 ]
-# sqlite3 是 stdlib，不列
-# pydantic 為 models.py 的 schema 依賴，DESIGN.md 的 pyproject 片段未列出，
-# 但「記憶 Schema」明確要求 Pydantic schema，故此處補上（見任務指示）。
+
+[project.scripts]
+remagraph = "remagraph.server:main"
 
 [project.optional-dependencies]
 vector = ["sqlite-vec>=0.1.0"]
 dev = [
-    "pytest",
-    "pytest-cov",
-    "mutmut",
-    "ruff",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "mutmut>=2.0",
+    "ruff>=0.4",
+    "mypy>=1.0",
+    "pre-commit>=3.0",
 ]
 
 [project.urls]
@@ -36,4 +39,12 @@ Homepage = "https://github.com/aiken884/RemaGraph"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-# PPLX-CONSENSUS-APPLIED: mcp dependency
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.ruff.format]
+quote-style = "double"
