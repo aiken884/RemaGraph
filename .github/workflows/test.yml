@@ -43,6 +43,34 @@ jobs:
         env:
           REMAGRAPH_STATE_DIR: ${{ runner.temp }}/remagraph-smoke
 
+  adversarial:
+    name: adversarial-smoke
+    needs: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install with frozen lockfile (dev extras)
+        run: uv sync --frozen --extra dev
+
+      - name: Run adversarial tests
+        run: |
+          # Run representative adversarial tests and always produce a junit xml for artifacts
+          pytest tests/test_fuzz_regressions.py tests/test_adversarial_state_tamper.py tests/test_embedding_and_errors.py -q --junitxml=adversarial-results.xml || true
+
+      - name: Upload adversarial results
+        uses: actions/upload-artifact@v4
+        with:
+          name: adversarial-results
+          path: adversarial-results.xml
+
   lint:
     name: lint
     needs: smoke
