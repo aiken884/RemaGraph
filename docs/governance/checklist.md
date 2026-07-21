@@ -141,3 +141,8 @@
 | 2026-07-21 | WU-0 完成：pin 上界、`.env.example`、`pre-commit`（ruff+gitleaks）、`uv.lock` 更新、CI 重排 smoke→lint→test、trigram gate、ruff 全綠 |
 | 2026-07-21 | WU-10 完成：README（stdio 安裝／MCP config／REMAGRAPH_STATE_DIR／三 tool 參數表）、CHANGELOG [Unreleased]、P0-3 測試全綠、P0-6 勾完、P1-5 勾完 |
 | 2026-07-21 | WU-9 完成：smoke job 執行 pytest tests/smoke/ + REMAGRAPH_STATE_DIR 隔離、mutmut 設定（arbitration+dedup）+ CI workflow（非 blocking）、coverage.xml artifact、checklist P0-3 可勾項更新 |
+
+
+## 修訂（v1 交付）
+
+- 2026-07-21：v1 實作完成；P0-4 派工摘要見 `docs/reviews/v1-adversarial-dispatch-summary.md`。仍開著的 `[ ]`：廢分支清理、SPDX 標頭（可選）、branch protection（GitHub 設定）、Dependabot（P1）。
