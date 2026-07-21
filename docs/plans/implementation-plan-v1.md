@@ -2,14 +2,15 @@
 
 | 項目 | 內容 |
 |------|------|
-| **狀態** | **PPLX 複審 APPROVE — 計畫已凍結**（**禁止實作**直至人類明確同意） |
+| **狀態** | **PPLX 複審 APPROVE — 計畫已凍結**；v1.2 融入通用治理框架（**禁止實作**直至人類明確同意） |
 | **Date** | 2026-07-21 |
-| **Version** | v1.1（依 PPLX 初審修訂 A–F + 關鍵 N） |
+| **Version** | v1.2（v1.1 + 通用專案治理框架／檢查清單適配） |
 | **Orchestrated-by** | CommandTower |
 | **SOT** | [`DESIGN.md`](../../DESIGN.md)（設計凍結 commit `8905d23`） |
 | **設計展開** | [`docs/design/00-index.md`](../design/00-index.md) 及 D01–D05 |
+| **治理框架** | Vault《通用專案治理框架與檢查清單》→ 本計畫 §11 + [`docs/governance/checklist.md`](../governance/checklist.md) |
 | **設計複審** | [`docs/design/reviews/pplx-recheck-2026-07-21.md`](../design/reviews/pplx-recheck-2026-07-21.md) → **APPROVE** |
-| **計畫初審** | [`docs/plans/reviews/pplx-impl-plan-review-2026-07-21.md`](reviews/pplx-impl-plan-review-2026-07-21.md) → APPROVE_WITH_CHANGES → 本版修訂 |
+| **計畫初審** | [`docs/plans/reviews/pplx-impl-plan-review-2026-07-21.md`](reviews/pplx-impl-plan-review-2026-07-21.md) → APPROVE_WITH_CHANGES → v1.1 修訂 |
 
 ---
 
@@ -82,10 +83,10 @@ state：`~/.local/state/remagraph/`（db + audit，權限 0700／0600）。
 
 | 項目 | 內容 |
 |------|------|
-| 範圍 | `pyproject.toml` 依賴 pin 上界；entry point；ruff；CI 加入 SQLite≥3.38 + trigram 斷言步驟 |
+| 範圍 | `pyproject.toml` 依賴 pin 上界；entry point；ruff；CI 加入 SQLite≥3.38 + trigram 斷言步驟；**治理 P0 基建**：`.env.example`（可選 env 說明）、pre-commit（ruff + gitleaks）、評估 `uv.lock`；確認 gitleaks／pip-audit workflow 行為 |
 | 依賴 | 無 |
-| 驗收 | editable install；`import remagraph`；CI 有 SQLite 版本 gate |
-| 對應設計 | DESIGN 部署／pyproject；D03；D05 CI |
+| 驗收 | editable install；`import remagraph`；CI 有 SQLite 版本 gate；`docs/governance/checklist.md` 中 WU-0 綁定項可勾 |
+| 對應設計 | DESIGN 部署／pyproject；D03；D05 CI；治理 P0-1／P0-5／P0-7 |
 
 ### WU-1 — models（型別合約）
 
@@ -163,19 +164,19 @@ state：`~/.local/state/remagraph/`（db + audit，權限 0700／0600）。
 
 | 項目 | 內容 |
 |------|------|
-| 範圍 | 矩陣補齊；coverage ≥80；mutmut arbitration+dedup **目標 ≥70%**；ruff；gitleaks |
+| 範圍 | 矩陣補齊；coverage ≥80；mutmut arbitration+dedup **目標 ≥70%**；ruff；gitleaks；**冒煙測試套件進 CI 且失敗 block**（§11.3）；CI 順序：smoke → lint → full tests+cov |
 | 依賴 | WU-1–WU-8 |
-| 驗收 | 本地與 CI 綠；mutation 報告可追蹤 |
-| 對應設計 | D05 |
+| 驗收 | 本地與 CI 綠；mutation 報告可追蹤；P0-3 檢查清單對應項可勾 |
+| 對應設計 | D05；治理 P0-3／P1-1 |
 
-### WU-10 — 文件
+### WU-10 — 文件與治理交付
 
 | 項目 | 內容 |
 |------|------|
-| 範圍 | README 安裝／stdio MCP config；說明 v1 tool schema **不做版本化**（記 v2 技術債）或標 `_schema_version`；短 query／首次模型下載說明 |
+| 範圍 | README 安裝／stdio MCP config；短 query／首次模型下載；`CHANGELOG.md` 建 `[Unreleased]`（P1-5）；可選 `docs/architecture.md` 指向 DESIGN；更新 `docs/governance/checklist.md` 進度；說明 v1 tool schema 不做版本化（v2 債） |
 | 依賴 | WU-8 |
-| 驗收 | README 可複製即用；**不** publish |
-| 對應設計 | DESIGN；D03 |
+| 驗收 | README 可複製即用；**不**自動 publish（HITL release）；P0-6／P1-5 可勾 |
+| 對應設計 | DESIGN；D03；治理 P0-6／P1-5 |
 
 ---
 
@@ -203,7 +204,8 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 | MCP server | implement | S1 |
 | 對抗式審查 | review／audit | S1–S2 |
 
-一律 `route()`，禁止手挑模型。
+一律 `route()`，禁止手挑模型。  
+**每完成一個功能 WU** 必須再 dispatch 一次審查任務（§11.4），與實作分開派工。
 
 ---
 
@@ -215,21 +217,27 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 - [ ] 無 herdr 耦合
 - [ ] 無未核准依賴
 - [ ] guilty-until-proven
+- [ ] **P0-4 對抗式審查完成**（異質 tier／不同實例；結論可追溯）
+- [ ] 該 WU 綁定之 `docs/governance/checklist.md` 項已更新
 
-### 6.2 Pre-merge
+### 6.2 Pre-merge（對齊治理 P0-3／P0-5／P0-7）
 
-| Gate | 條件 |
-|------|------|
-| lint | ruff 0 |
-| tests | pytest 全綠 |
-| coverage | ≥ 80 |
-| secret | gitleaks clean |
-| dep | pip-audit 無未處理 HIGH/CRITICAL |
-| mutation | arbitration+dedup 目標 ≥70% 或 PR 說明 |
-| sqlite | version ≥ 3.38 + trigram |
-| design | 抽樣 §2 凍結表 |
+建議 CI 順序（治理附錄 Q8）：**smoke → lint → full tests + coverage →（可選）mutmut 報告**。
 
-### 6.3 內容驗收（防半殘）
+| Gate | 條件 | 治理對應 |
+|------|------|----------|
+| smoke | §11.3 冒煙全綠 | P0-3 |
+| lint | ruff 0 | P0-3／P1-1 |
+| tests | pytest 全綠 | P0-3 |
+| coverage | ≥ 80 | P0-3（專案採 P1 門檻） |
+| secret | gitleaks clean | P0-5 |
+| dep | pip-audit 無未處理 HIGH/CRITICAL | P0-7 |
+| mutation | arbitration+dedup 目標 ≥70% 或 PR 說明 | 專案強化 |
+| sqlite | version ≥ 3.38 + trigram | 設計凍結 |
+| design | 抽樣 §2 凍結表 | P0-6 |
+| adversarial | 功能 PR 有異質審查紀錄 | P0-4 |
+
+### 6.3 內容驗收（防半殘；對齊治理「驗內容不是只驗 exit code」）
 
 - [ ] store 後 SQLite 可讀預期欄位；FTS 可查
 - [ ] store 成功 → BLOB `np.frombuffer(blob, dtype='<f4').shape == (EMBEDDING_DIM,)`
@@ -238,6 +246,7 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 - [ ] **remagraph_status 同 task_id 多筆只回最新 1 筆**
 - [ ] top_k=1 且有 2 筆 → `has_more=True`；僅 1 筆 → `has_more=False`
 - [ ] 仲裁拒絕 reason_code 正確
+- [ ] 冒煙套件覆蓋 §11.3 清單且斷言實際輸出內容
 
 ---
 
@@ -261,8 +270,9 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 
 - [ ] 三 MCP tool 可用（stdio）
 - [ ] Audit Contract 可驗證
-- [ ] coverage ≥80、CI 綠
-- [ ] README 更新
+- [ ] coverage ≥80、CI 綠（含冒煙）
+- [ ] README 更新；CHANGELOG `[Unreleased]` 存在
+- [ ] `docs/governance/checklist.md` P0 項無未解釋的 `[ ]`
 - [ ] **不**自動 PyPI publish
 
 ---
@@ -272,9 +282,11 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 | 禁止 | 說明 |
 |------|------|
 | 將本計畫 APPROVE 視為開工令 | 仍需人類「同意實作」 |
-| 假實作騙 coverage | 禁止 |
+| 假實作騙 coverage | 禁止；成功須驗內容（治理精神） |
 | 繞過 route() | 禁止 |
+| 跳過 P0-4 對抗審查即合入 | 禁止 |
 | 未再審核改重大架構 | 需再送 PPLX |
+| 未達 P0 就公開邀請外部貢獻 | 禁止（治理：先 P0 再 P1） |
 
 ---
 
@@ -283,4 +295,91 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 | 版本 | 日期 | 說明 |
 |------|------|------|
 | v1.0-draft | 2026-07-21 | 初稿送 PPLX |
-| v1.1 | 2026-07-21 | 依 PPLX 初審：B-1 維度鎖定、B-2 依賴圖／WU-7、B-3 status 去重驗收；A–F + 關鍵 N（has_more 演算法、短 query、fail-fast 語意、mutmut 70%、SQLite 3.38、audit 寫入、pin 上界） |
+| v1.1 | 2026-07-21 | 依 PPLX 初審：B-1 維度鎖定、B-2 依賴圖／WU-7、B-3 status 去重驗收；A–F + 關鍵 N |
+| v1.2 | 2026-07-21 | 融入 Vault《通用專案治理框架與檢查清單》：§11 對齊、冒煙定義、對抗審查流程、P0/P1/P2 映射；新增 `docs/governance/checklist.md`；強化 WU-0／9／10 與 pre-merge 閘門 |
+
+---
+
+## 11. 通用專案治理框架融入（RemaGraph 適配）
+
+> **來源**：`ObsidianVault/通用專案治理框架與檢查清單.md`（P0／P1／P2）。  
+> **活檢查表**：[`docs/governance/checklist.md`](../governance/checklist.md)（狀態以該檔為準，本節為計畫綁定規則）。  
+> **原則**：按部就班——**v1 實作必須關閉 P0**；P1 在實作後半／首次對外前；P2 延後至公開社群或合規需要。
+
+### 11.1 優先序與本專案階段對照
+
+| 級 | 框架定義 | RemaGraph 現況與計畫 | 執行時機 |
+|----|----------|----------------------|----------|
+| **P0** | 任何專案無例外 | 部分已有（git、LICENSE、DESIGN、CI 骨架）；測試／冒煙／對抗審查執行鏈待實作 | **WU-0～WU-10 強制** |
+| **P1** | 規模化前 3～6 月 | coverage 門檻已採 80%；CHANGELOG／ADR／CONTRIBUTING／Dependabot 待補 | WU-9／WU-10 與首次 public 前 |
+| **P2** | 社群／敏感 | 私人 side project；SECURITY／CoC／SBOM 等 | **明確延後**（清單標 `[-]`） |
+
+### 11.2 P0 七項 → 實作綁定
+
+| ID | 治理項 | 已有 | 計畫落地 |
+|----|--------|------|----------|
+| P0-1 | Git 流程 | private repo、有意義 commit | 實作期 branch／PR 慣例；公開前 branch protection |
+| P0-2 | License | Apache-2.0 `LICENSE` | 維持；可選 SPDX 標頭於 WU-0／10 |
+| P0-3 | 測試+覆蓋率+**冒煙** | CI test／cov 設定；測試仍 stub | WU-1～9 真測；§11.3 冒煙；CI smoke→lint→test |
+| P0-4 | 審查+**對抗式驗證** | 指揮塔章程＋設計期 PPLX | 每功能 WU：route() 異質審查；紀錄可追溯 |
+| P0-5 | Secret | gitleaks CI；無 secret 進庫設計 | WU-0：`.env.example`、pre-commit gitleaks |
+| P0-6 | 決策文件 | DESIGN + design docs + 計畫 + PPLX 紀錄 | WU-10 README；重大偏離寫 ADR |
+| P0-7 | 依賴掃描 | pyproject、pip-audit CI | WU-0 pin／lock；HIGH+ fail |
+
+### 11.3 RemaGraph 冒煙測試定義（P0-3）
+
+對齊框架「關鍵路徑、快速、失敗即 block」，**斷言實際行為／產出，不只 exit code**：
+
+| # | 步驟 | 通過條件 |
+|---|------|----------|
+| S1 | 套件／server 啟動 | `import remagraph` 成功；stdio MCP 可握手（或等價 entry） |
+| S2 | 最小 store | 合法 `task_handoff`（達字數門檻）→ `status=stored` 且 DB 可讀到該 id |
+| S3 | 仲裁拒絕可觀測 | 過短 summary → `rejected` + 正確 reason；可選 audit `error` |
+| S4 | search | 對 S2 內容 query（含中文）→ results 非空或可解釋命中 |
+| S5 | status | 回傳結構合法；若寫過 status_update 則可見最新 |
+| S6 | audit 合約 | `~/.local/state/remagraph/audit.jsonl`（或測試 temp state）出現對應 `remagraph_store` 記錄 |
+
+- 實作建議路徑：`tests/smoke/`（名稱可調），**WU-8 後必須本機全綠，WU-9 進 CI**。  
+- 冒煙目標：**< 1～2 分鐘**；完整矩陣其後跑。
+
+### 11.4 對抗式審查流程（P0-4 × 指揮塔）
+
+對齊框架 Q7 與 command-tower-charter §3.5.1：
+
+1. 實作：`route()` 選 implement tier，完成 WU 程式與測試。  
+2. 審查：`route()` 再選 **review／audit** tier（**不同實例**；能力地板達標；避免與實作者同一未隔離 session）。  
+3. 審查者 **guilty-until-proven**：攻擊真實路徑（stdio、state 權限、FTS 中文、仲裁、audit）。  
+4. 產出：PR 或 `docs/reviews/WU-xx-adversarial.md`（問題列表 + 是否已修）。  
+5. **未 LGTM 不得標 WU 完成、不得 merge。**
+
+### 11.5 P1／P2 刻意範圍
+
+| 級 | 納入 v1 實作期 | 延後 |
+|----|----------------|------|
+| P1 | ruff 嚴格化、cov 80、CHANGELOG Unreleased、實作期 ADR（有決策時） | Dependabot、完整 CONTRIBUTING、自動 publish |
+| P2 | 無強制 | SECURITY、CoC、簽章、SBOM、CodeQL、GOVERNANCE |
+
+公開開源或邀請外部貢獻前：回頭用 `docs/governance/checklist.md` 把 P1 缺口關閉。
+
+### 11.6 檔案結構對齊（框架 §2）
+
+| 框架建議 | RemaGraph |
+|----------|-----------|
+| README / LICENSE | 已有 |
+| tests/ | 已有骨架 → WU 填實；建議 `tests/smoke/` |
+| docs/architecture | DESIGN.md 為 SOT；WU-10 可加薄索引 |
+| docs/decisions | 實作期建立（P1-3） |
+| .github/workflows | test／gitleaks／pip-audit 已有 |
+| .pre-commit-config.yaml | **WU-0 補** |
+| .env.example | **WU-0 補** |
+| CHANGELOG | **WU-10 補** |
+| CONTRIBUTING／SECURITY／… | P1／P2 延後 |
+
+### 11.7 完成定義加嚴（治理）
+
+v1「可交付」除 §1.1 功能完成外，另需：
+
+1. `docs/governance/checklist.md` 之 **P0** 無未解釋的 `[ ]`（`[~]` 須註明剩餘工作與 owner）。  
+2. 冒煙 §11.3 在 CI 綠。  
+3. 至少一份功能 WU 的對抗審查樣例留存（證明流程可跑）。  
+4. 仍遵守 §0：**無人類「同意實作」前不寫功能碼**；無人類 release 同意不 PyPI publish。
