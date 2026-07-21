@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Pydantic schema — 定義所有 MCP tool 的 request/response 模型與核心資料型別。"""
 
 from __future__ import annotations

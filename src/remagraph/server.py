@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """MCP server entrypoint (stdio transport) — v1 以 stdio 為主要傳輸模式。
 
 透過 FastMCP (mcp SDK) 註冊三個 tool：

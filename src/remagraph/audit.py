@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """自管 audit writer —— 在 store transaction commit 之後寫入 audit.jsonl。
 
 對外提供 append_audit API：

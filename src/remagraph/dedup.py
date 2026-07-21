@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """model2vec 語意去重（仲裁規則 #4）。
 
 本模組負責：

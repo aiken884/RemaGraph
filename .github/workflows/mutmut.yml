@@ -28,7 +28,7 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Run mutmut
-        run: uv run mutmut run --paths-to-mutate src/remagraph/arbitration.py src/remagraph/dedup.py
+        run: uv run mutmut run
         continue-on-error: true
 
       - name: Show mutmut results
