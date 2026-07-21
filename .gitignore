@@ -33,3 +33,7 @@ htmlcov/
 # Type checkers
 .mypy_cache/
 .ruff_cache/
+
+# mutmut
+mutants/
+.mutmut-cache/

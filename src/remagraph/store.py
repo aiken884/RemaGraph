@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """SQLite + FTS5 讀寫。
 
 本模組負責：

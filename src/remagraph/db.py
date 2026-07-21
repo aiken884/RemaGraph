@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """SQLite 連線管理與 schema 初始化。
 
 本模組負責：

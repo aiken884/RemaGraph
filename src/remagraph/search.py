@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """FTS5 BM25 全文檢索與狀態查詢邏輯。
 
 本模組負責：

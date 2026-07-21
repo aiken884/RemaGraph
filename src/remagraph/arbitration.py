@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """五條仲裁規則。
 
 本模組負責：

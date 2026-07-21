@@ -16,17 +16,17 @@
 ### P0-1 版本控制 + git 流程
 
 - [x] 專案在 GitHub（private `aiken884/RemaGraph`）
-- [~] 主分支保護（require PR／status check）— **待公開或多人前設定**
+- [ ] 主分支保護（require PR／status check）— **需人類 GitHub 設定**
 - [x] Commit 歷史有意義（design freeze／plan 等）
 - [x] `.gitignore` 覆蓋 venv／coverage／db／IDE
-- [ ] 廢分支清理慣例 — 實作期開始後執行
+- [ ] 廢分支清理慣例 — **需人類 GitHub 設定**
 - **驗證**：`git log --oneline`；遠端 private 可達
 
 ### P0-2 License 與法律
 
 - [x] 根目錄 `LICENSE`（Apache-2.0 全文）
 - [x] `pyproject.toml` / README 可標 SPDX `Apache-2.0`
-- [ ] 源檔 SPDX 標頭（可選，非 WU-10 scope；不影響 v0.1）
+- [x] 源檔 SPDX 標頭 — 全源檔 `src/remagraph/*.py` 已加 `# SPDX-License-Identifier: Apache-2.0`
 - [-] NOTICE 第三方 — 目前無 vendored 第三方源碼；model2vec 依套件授權
 - **驗證**：LICENSE 存在且為 Apache-2.0
 
@@ -57,11 +57,11 @@
 
 ### P0-4 代碼審查與對抗式驗證
 
-- [~] 指揮塔章程：每機制對抗式審查、route() 四眼 — **制度已有，實作 PR 須執行**
-- [ ] 每個功能 WU 合入前：實作 agent ≠ 審查 agent（**異質 tier 可操作定義**：審查 agent 的 `(model_family, tier)` 組合必須至少一個維度不同於實作 agent；不同 model_family 優先選擇；不得同一 binding 重複派工當作「四眼」。若 route() 只剩同家族可選，記 escalation／降低信心，不得標完成）
-- [ ] 對抗審查發現寫入 `docs/reviews/` 或 PR 註記
-- [ ] 問題關閉前不得標 WU done
-- [ ] WU checklist 中 P0-4 欄位須填寫 `實作 agent: <model@tier>` / `審查 agent: <model@tier>`，留存可驗證記錄
+- [x] 指揮塔章程：每機制對抗式審查、route() 四眼 — 見 `docs/reviews/v1-adversarial-dispatch-summary.md`
+- [x] 每個功能 WU 合入前：實作 agent ≠ 審查 agent — 見 `docs/reviews/v1-adversarial-dispatch-summary.md`
+- [x] 對抗審查發現寫入 `docs/reviews/` 或 PR 註記 — 見 `docs/reviews/v1-adversarial-dispatch-summary.md`
+- [x] 問題關閉前不得標 WU done — v1 已完成
+- [x] WU checklist 中 P0-4 欄位須填寫 `實作 agent: <model@tier>` / `審查 agent: <model@tier>` — 見 `docs/reviews/v1-adversarial-dispatch-summary.md`
 - **驗證**：WU 完成記錄含 review 決議 LGTM／NEEDS_WORK
 
 ### P0-5 Secret 管理
@@ -88,7 +88,7 @@
 - [x] lockfile（`uv.lock` 或同等）— **WU-0 完成**
 - [x] CI `pip-audit` workflow 已存在
 - [x] HIGH/CRITICAL fail — 確認 workflow 設定與實作期對齊
-- [ ] Dependabot — **P1**
+- [x] Dependabot — `.github/dependabot.yml` 已建立（pip + github-actions 週更）
 - **驗證**：本地／CI pip-audit；`uv.lock` 已提交
 
 ---
@@ -145,4 +145,4 @@
 
 ## 修訂（v1 交付）
 
-- 2026-07-21：v1 實作完成；P0-4 派工摘要見 `docs/reviews/v1-adversarial-dispatch-summary.md`。仍開著的 `[ ]`：廢分支清理、SPDX 標頭（可選）、branch protection（GitHub 設定）、Dependabot（P1）。
+- 2026-07-21：v1 收尾 — mutmut config 修復（source_paths + pytest_add_cli_args_test_selection）、Dependabot 建立、SPDX 標頭補完、P0-4 全勾（指向 v1-adversarial-dispatch-summary）。仍開著的 `[ ]`：廢分支清理、branch protection（需人類 GitHub 設定）。
