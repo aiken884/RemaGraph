@@ -1,26 +1,98 @@
-"""Pydantic schema"""
+"""Pydantic schema — 定義所有 MCP tool 的 request/response 模型與核心資料型別。"""
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+# ---------------------------------------------------------------------------
+# Literals
+# ---------------------------------------------------------------------------
 
 MemoryKind = Literal["task_handoff", "status_update", "discovered_constraint"]
 MemoryStatus = Literal["active", "superseded", "invalidated"]
 
+# ---------------------------------------------------------------------------
+# Store
+# ---------------------------------------------------------------------------
+
+
+class StoreRequest(BaseModel):
+    """remagraph_store 的輸入。不含 id、timestamp、status、embedding（伺服器端填入）。"""
+
+    task_id: str
+    agent_id: str
+    kind: MemoryKind
+    summary: str
+    learnings: list[str] = Field(default_factory=list)
+    handoff_note: str = ""
+    tags: list[str] = Field(default_factory=list)
+    invalidates: list[str] | None = None
+
+
+class StoreResponse(BaseModel):
+    """remagraph_store 的回應。"""
+
+    status: Literal["stored", "rejected", "error"]
+    id: str | None = None
+    superseded: list[str] = Field(default_factory=list)
+    invalidated_count: int = 0
+    reason: str | None = None
+    detail: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Search
+# ---------------------------------------------------------------------------
+
+
+class SearchRequest(BaseModel):
+    """remagraph_search 的輸入。"""
+
+    query: str
+    top_k: int = Field(default=20, ge=1, le=100)
+    kind: MemoryKind | None = None
+    status: MemoryStatus | None = None
+    tags: list[str] | None = None
+    agent_id: str | None = None
+    task_id: str | None = None
+
+
+class SearchResponse(BaseModel):
+    """remagraph_search 的回應。"""
+
+    results: list[dict[str, Any]]
+    has_more: bool
+
+
+# ---------------------------------------------------------------------------
+# Status
+# ---------------------------------------------------------------------------
+
+
+class StatusRequest(BaseModel):
+    """remagraph_status 的輸入。"""
+
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class StatusResponse(BaseModel):
+    """remagraph_status 的回應。"""
+
+    latest: list[dict[str, Any]]
+
+
+# ---------------------------------------------------------------------------
+# Memory
+# ---------------------------------------------------------------------------
+
 
 class Memory(BaseModel):
-    """單筆記憶記錄。
+    """完整記憶記錄（含伺服器端填入的欄位）。
 
-    對應 DESIGN.md「記憶 Schema」章節：三種 ``kind``
-    （``task_handoff`` / ``status_update`` / ``discovered_constraint``），
-    每條記錄包含 id、task_id、agent_id、timestamp、kind、summary、
-    learnings、handoff_note、tags、status。
-
-    注意：此類別只定義資料形狀，不包含仲裁規則（五條仲裁規則見
-    ``arbitration.py``），例如 summary/handoff_note 的長度門檻不在此驗證。
+    注意：embedding 不在此 Pydantic model 中（以 BLOB 形式獨立儲存）。
     """
 
     id: str
@@ -30,6 +102,8 @@ class Memory(BaseModel):
     kind: MemoryKind
     summary: str
     learnings: list[str] = Field(default_factory=list)
-    handoff_note: str
+    handoff_note: str = ""
     tags: list[str] = Field(default_factory=list)
     status: MemoryStatus = "active"
+    created_at: datetime
+    updated_at: datetime
