@@ -1,3 +1,3 @@
-"""MCP server entrypoint (Unix socket daemon)."""
+"""MCP server entrypoint (stdio transport)."""
 
 raise NotImplementedError
