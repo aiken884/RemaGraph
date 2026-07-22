@@ -53,9 +53,7 @@ def _get_model() -> "StaticModel":
 
             _model = StaticModel.from_pretrained(MODEL_NAME)
         except Exception as e:
-            raise ModelLoadError(
-                f"無法載入 model2vec 模型 '{MODEL_NAME}'：{e}"
-            ) from e
+            raise ModelLoadError(f"無法載入 model2vec 模型 '{MODEL_NAME}'：{e}") from e
     return _model
 
 
@@ -89,7 +87,7 @@ def encode_summary(summary: str) -> bytes:
     """
     model = _get_model()
     # 取前 MAX_TOKENS token（model2vec 內部處理 tokenizer 限制）
-    vec = model.encode(summary[:MAX_TOKENS * 4])  # 粗略估算 char→token
+    vec = model.encode(summary[: MAX_TOKENS * 4])  # 粗略估算 char→token
     # 確保是 float32
     vec = vec.astype(np.float32)
     return vec.tobytes()
@@ -99,6 +97,7 @@ def check_duplicate(
     summary: str,
     kind: MemoryKind,
     conn: sqlite3.Connection,
+    project_id: str | None = None,
 ) -> ArbitrationResult:
     """model2vec 語意去重（仲裁規則 #4）。
 
@@ -113,16 +112,24 @@ def check_duplicate(
     """
     # 編碼新 summary
     model = _get_model()
-    new_vec = model.encode(summary[:MAX_TOKENS * 4])
+    new_vec = model.encode(summary[: MAX_TOKENS * 4])
     new_vec = new_vec.astype(np.float32)
 
     # 載入同 kind 的 active embedding（上限 DEDUP_MAX_CANDIDATES，取最新）
-    rows = conn.execute(
-        "SELECT id, embedding FROM memories "
-        "WHERE kind=? AND status='active' AND embedding IS NOT NULL "
-        "ORDER BY created_at DESC LIMIT ?",
-        (kind, DEDUP_MAX_CANDIDATES),
-    ).fetchall()
+    if project_id:
+        rows = conn.execute(
+            "SELECT id, embedding FROM memories "
+            "WHERE project_id=? AND kind=? AND status='active' AND embedding IS NOT NULL "
+            "ORDER BY created_at DESC LIMIT ?",
+            (project_id, kind, DEDUP_MAX_CANDIDATES),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, embedding FROM memories "
+            "WHERE kind=? AND status='active' AND embedding IS NOT NULL "
+            "ORDER BY created_at DESC LIMIT ?",
+            (kind, DEDUP_MAX_CANDIDATES),
+        ).fetchall()
 
     if not rows:
         return ArbitrationResult(passed=True)
@@ -146,10 +153,7 @@ def check_duplicate(
         return ArbitrationResult(
             passed=False,
             reason="duplicate_content",
-            detail=(
-                f"與既有記憶高度相似（similarity={best_sim:.2f}），"
-                f"最接近的記憶：{best_id}"
-            ),
+            detail=(f"與既有記憶高度相似（similarity={best_sim:.2f}），最接近的記憶：{best_id}"),
             closest_memory_id=best_id,
             closest_similarity=best_sim,
         )

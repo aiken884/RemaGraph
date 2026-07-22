@@ -40,6 +40,7 @@ def test_search_by_task_id_without_query(state_env):
     conn = db_mod.connect()
     process_store(
         StoreRequest(
+            project_id="testproj",
             task_id="task-cli-001",
             agent_id="agent-a",
             kind="status_update",
@@ -50,7 +51,7 @@ def test_search_by_task_id_without_query(state_env):
     )
     resp = search_memories(
         conn,
-        SearchRequest(query="", task_id="task-cli-001", top_k=5),
+        SearchRequest(query="", project_id="testproj", task_id="task-cli-001", top_k=5),
     )
     assert len(resp.results) >= 1
     assert resp.results[0]["task_id"] == "task-cli-001"
@@ -110,6 +111,7 @@ def test_main_search_task_id_cli(state_env, capsys):
     conn = db_mod.connect()
     process_store(
         StoreRequest(
+            project_id="testproj",
             task_id="task-main-1",
             agent_id="agent-1",
             kind="status_update",
@@ -121,7 +123,7 @@ def test_main_search_task_id_cli(state_env, capsys):
     assert conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0] >= 1
     db_mod.close(conn)
 
-    main(["search", "--task-id", "task-main-1", "--top-k", "3"])
+    main(["search", "--project", "testproj", "--task-id", "task-main-1", "--top-k", "3"])
     out = capsys.readouterr().out.strip()
     data = json.loads(out)
     assert "results" in data

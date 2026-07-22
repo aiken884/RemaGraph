@@ -39,6 +39,7 @@ ArbitrationReason = Literal[
 @dataclass
 class ArbitrationResult:
     """仲裁結果。"""
+
     passed: bool
     reason: ArbitrationReason | None = None
     detail: str | None = None
@@ -49,12 +50,14 @@ class ArbitrationResult:
 @dataclass
 class SupersedeResult:
     """status_update supersede 結果。"""
+
     superseded_count: int
 
 
 @dataclass
 class InvalidateResult:
     """discovered_constraint invalidates 結果。"""
+
     invalidated_count: int
     invalidated_ids: list[str] = field(default_factory=list)
 
@@ -181,17 +184,14 @@ def run_arbitration_rules_cheap(request: StoreRequest) -> ArbitrationResult:
 # ---------------------------------------------------------------------------
 
 
-def supersede_status_updates(task_id: str, conn: sqlite3.Connection) -> SupersedeResult:
-    """將同 task_id 的所有 active status_update 標記為 superseded。
-
-    應在 transaction 內、INSERT 新 status_update 之前呼叫。
-    回傳被影響的筆數。
-    """
+def supersede_status_updates(
+    project_id: str, task_id: str, conn: sqlite3.Connection
+) -> SupersedeResult:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-    cursor = conn.execute(
+    cursor = conn.execute(  # noqa: E501
         "UPDATE memories SET status='superseded', updated_at=? "
-        "WHERE task_id=? AND kind='status_update' AND status='active'",
-        (now, task_id),
+        "WHERE project_id=? AND task_id=? AND kind='status_update' AND status='active'",
+        (now, project_id, task_id),
     )
     return SupersedeResult(superseded_count=cursor.rowcount)
 
@@ -202,8 +202,7 @@ def cleanup_superseded(conn: sqlite3.Connection, max_age_days: int = 90) -> int:
     回傳被刪除的筆數。僅作用於非 active 狀態且建立時間超過指定天數的記錄。
     """
     cursor = conn.execute(
-        "DELETE FROM memories WHERE status != 'active' "
-        "AND created_at < datetime('now', ?)",
+        "DELETE FROM memories WHERE status != 'active' AND created_at < datetime('now', ?)",
         (f"-{max_age_days} days",),
     )
     return cursor.rowcount

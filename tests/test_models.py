@@ -21,14 +21,14 @@ def test_memory_has_all_fields():
     """M1: Memory 應包含 DESIGN.md 定義的全部欄位。"""
     now = datetime.now(timezone.utc)
     m = Memory(
+        project_id="testproj",
         id="mem-20260721-001",
         task_id="task-2026-07-21-003",
         agent_id="oc-dspro",
         timestamp=now,
         kind="task_handoff",
         summary=(
-            "嘗試修復 subagent 委派 + deny-all 時的 acpx 連線錯誤，"
-            "這是一個需要深入調查的複雜問題"
+            "嘗試修復 subagent 委派 + deny-all 時的 acpx 連線錯誤，這是一個需要深入調查的複雜問題"
         ),
         learnings=["錯誤發生在 opencode task tool 生成 child session 之後"],
         handoff_note="接手者請注意：此錯誤與 G1 不同，G1 是 child session 未被註冊",
@@ -59,6 +59,7 @@ def test_store_request_fields():
     """M2: StoreRequest 應包含 task_id, agent_id, kind, summary, learnings, handoff_note, tags,
     invalidates。"""
     req = StoreRequest(
+        project_id="testproj",
         task_id="task-2026-07-21-003",
         agent_id="oc-dspro",
         kind="task_handoff",
@@ -75,6 +76,7 @@ def test_store_request_fields():
 def test_store_request_defaults():
     """M2: learnings/tags 預設空 list、handoff_note 預設空字串。"""
     req = StoreRequest(
+        project_id="testproj",
         task_id="task-1",
         agent_id="test-agent",
         kind="status_update",
@@ -88,6 +90,7 @@ def test_store_request_defaults():
 def test_store_request_with_invalidates():
     """M2: invalidates 欄位可選。"""
     req = StoreRequest(
+        project_id="testproj",
         task_id="task-1",
         agent_id="test-agent",
         kind="discovered_constraint",
@@ -204,6 +207,7 @@ def test_memory_kind_literals():
     valid = ["task_handoff", "status_update", "discovered_constraint"]
     for k in valid:
         req = StoreRequest(
+            project_id="testproj",
             task_id="task-1",
             agent_id="test-agent",
             kind=k,  # type: ignore[arg-type]
@@ -218,6 +222,7 @@ def test_memory_status_literals():
     valid = ["active", "superseded", "invalidated"]
     for s in valid:
         m = Memory(
+            project_id="testproj",
             id="mem-001",
             task_id="task-1",
             agent_id="test",
@@ -279,6 +284,7 @@ def test_missing_required_field_raises():
 def test_learnings_defaults_to_empty_list():
     """M7: learnings 預設空 list。"""
     req = StoreRequest(
+        project_id="testproj",
         task_id="task-1",
         agent_id="test",
         kind="task_handoff",
@@ -291,6 +297,7 @@ def test_tags_defaults_to_empty_list():
     """M7: tags 預設空 list。"""
     now = datetime.now(timezone.utc)
     m = Memory(
+        project_id="testproj",
         id="mem-001",
         task_id="task-1",
         agent_id="test",
@@ -307,6 +314,7 @@ def test_handoff_note_defaults_to_empty_string():
     """M7: handoff_note 預設空字串。"""
     now = datetime.now(timezone.utc)
     m = Memory(
+        project_id="testproj",
         id="mem-001",
         task_id="task-1",
         agent_id="test",

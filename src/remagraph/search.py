@@ -80,6 +80,7 @@ def _build_fts5_match(sanitized: str) -> str:
 def _row_to_result(row: sqlite3.Row, score: float | None = None) -> dict[str, Any]:
     result: dict[str, Any] = {
         "id": row["id"],
+        "project_id": row["project_id"],
         "summary": row["summary"],
         "agent_id": row["agent_id"],
         "kind": row["kind"],
@@ -107,6 +108,9 @@ def _list_by_filters(
     else:
         where.append("status = ?")
         params.append("active")
+    if request.project_id is not None:
+        where.append("project_id = ?")
+        params.append(request.project_id)
     if request.agent_id is not None:
         where.append("agent_id = ?")
         params.append(request.agent_id)
@@ -178,6 +182,9 @@ def search_memories(
     if request.status is not None:
         where.append("m.status = ?")
         params.append(request.status)
+    if request.project_id is not None:
+        where.append("m.project_id = ?")
+        params.append(request.project_id)
     if request.agent_id is not None:
         where.append("m.agent_id = ?")
         params.append(request.agent_id)
@@ -186,9 +193,7 @@ def search_memories(
         params.append(request.task_id)
     if request.tags:
         for tag in request.tags:
-            where.append(
-                "EXISTS (SELECT 1 FROM json_each(m.tags) WHERE value = ?)"
-            )
+            where.append("EXISTS (SELECT 1 FROM json_each(m.tags) WHERE value = ?)")
             params.append(tag)
 
     where_sql = (" AND " + " AND ".join(where)) if where else ""
@@ -244,25 +249,39 @@ def get_status(
     Returns:
         StatusResponse（latest 陣列依 created_at 降冪排列）
     """
-    rows = conn.execute(
+    if request.project_id:
+        inner_sql = (
+            "SELECT task_id, MAX(created_at) AS max_ts "
+            "FROM memories "
+            "WHERE kind = 'status_update' AND status = 'active' AND project_id = ? "
+            "GROUP BY task_id"
+        )
+        outer_where = " AND m.project_id = ?"
+        params = (request.project_id, request.project_id, request.limit)
+    else:
+        inner_sql = (
+            "SELECT task_id, MAX(created_at) AS max_ts "
+            "FROM memories "
+            "WHERE kind = 'status_update' AND status = 'active' "
+            "GROUP BY task_id"
+        )
+        outer_where = ""
+        params = (request.limit,)  # type: ignore[assignment]
+    sql = (
         "SELECT m.* FROM memories m "
-        "INNER JOIN ("
-        "  SELECT task_id, MAX(created_at) AS max_ts "
-        "  FROM memories "
-        "  WHERE kind = 'status_update' AND status = 'active' "
-        "  GROUP BY task_id"
-        ") latest ON m.task_id = latest.task_id AND m.created_at = latest.max_ts "
-        "WHERE m.kind = 'status_update' AND m.status = 'active' "
-        "ORDER BY m.created_at DESC "
-        "LIMIT ?",
-        (request.limit,),
-    ).fetchall()
+        f"INNER JOIN ({inner_sql}) latest "
+        "ON m.task_id = latest.task_id AND m.created_at = latest.max_ts "
+        f"WHERE m.kind = 'status_update' AND m.status = 'active'{outer_where} "
+        "ORDER BY m.created_at DESC LIMIT ?"
+    )
+    rows = conn.execute(sql, params).fetchall()
 
     latest: list[dict[str, Any]] = []
     for row in rows:
         latest.append(
             {
                 "id": row["id"],
+                "project_id": row["project_id"],
                 "task_id": row["task_id"],
                 "agent_id": row["agent_id"],
                 "kind": row["kind"],

@@ -48,6 +48,7 @@ def _make_request(
 ):
     """建立 StoreRequest。"""
     return StoreRequest(
+        project_id="testproj",
         task_id=task_id,
         agent_id=agent_id,
         kind=kind,

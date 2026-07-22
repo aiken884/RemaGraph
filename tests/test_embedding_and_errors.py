@@ -41,6 +41,7 @@ def test_model_load_failure_propagates(monkeypatch):
 
     with pytest.raises(dedup.ModelLoadError):
         server.remagraph_store(
+            project_id="testproj",
             task_id="t-embed-1",
             agent_id="embed-tester",
             kind="task_handoff",
@@ -65,6 +66,7 @@ def test_store_tolerates_late_encoding_failure(monkeypatch):
     monkeypatch.setattr(dedup, "encode_summary", fake_encode_summary)
 
     res = server.remagraph_store(
+        project_id="testproj",
         task_id="t-embed-2",
         agent_id="embed-tester",
         kind="task_handoff",

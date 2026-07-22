@@ -14,6 +14,7 @@ import os
 import re
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # 常數
@@ -21,9 +22,10 @@ from pathlib import Path
 
 DEFAULT_STATE_DIR = Path.home() / ".local" / "state" / "remagraph"
 DB_FILENAME = "remagraph.db"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MAX_DB_SIZE_MB = 100  # soft limit via PRAGMA max_page_count
 _ALLOWED_STATE_DIR_RE = re.compile(r"^[a-zA-Z0-9_/.-]+$")
+DEFAULT_PROJECT_ID = "default"
 
 
 class MigrationError(RuntimeError):
@@ -36,36 +38,54 @@ class MigrationError(RuntimeError):
 
 
 def get_db_path(state_dir: Path | None = None) -> Path:
-    """回傳 SQLite 資料庫的完整路徑。
+    resolved = get_state_dir(state_dir)
+    return resolved / DB_FILENAME
 
-    優先順序：
-    1. 環境變數 REMAGRAPH_STATE_DIR
-    2. 傳入的 state_dir
-    3. 預設 ~/.local/state/remagraph/
 
-    若目錄不存在，自動建立（mode=0o700）。
-    """
+def get_state_dir(state_dir: Path | None = None) -> Path:
     env_dir = os.environ.get("REMAGRAPH_STATE_DIR")
     if env_dir:
         if not _ALLOWED_STATE_DIR_RE.match(env_dir):
-            raise ValueError(
-                f"REMAGRAPH_STATE_DIR contains invalid characters: {env_dir!r}"
-            )
+            raise ValueError(f"REMAGRAPH_STATE_DIR contains invalid characters: {env_dir!r}")
         resolved = Path(env_dir).resolve()
-        # 確保解析後的路徑不在 /etc, /usr 等系統目錄（基本防禦）
         forbidden_prefixes = ("/etc", "/usr", "/bin", "/sbin", "/dev", "/proc", "/sys")
         if str(resolved).startswith(forbidden_prefixes):
-            raise ValueError(
-                f"REMAGRAPH_STATE_DIR must not be in a system directory: {resolved}"
-            )
+            raise ValueError(f"REMAGRAPH_STATE_DIR invalid: {resolved}")
     elif state_dir is not None:
         resolved = state_dir
     else:
         resolved = DEFAULT_STATE_DIR
-
     resolved.mkdir(parents=True, exist_ok=True)
     resolved.chmod(0o700)
-    return resolved / DB_FILENAME
+    return resolved
+
+
+def is_using_default_state_dir(state_dir: Path | None = None) -> bool:
+    resolved = get_state_dir(state_dir)
+    return resolved == DEFAULT_STATE_DIR
+
+
+def load_project_metadata(state_dir: Path | None = None) -> dict[str, Any]:
+    state = get_state_dir(state_dir)
+    meta_file = state / "project.json"
+    if not meta_file.exists():
+        return {"project_id": DEFAULT_PROJECT_ID}
+    try:
+        import json
+
+        data = json.loads(meta_file.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {"project_id": DEFAULT_PROJECT_ID}
+    except Exception:
+        return {"project_id": DEFAULT_PROJECT_ID}
+
+
+def validate_project_metadata(
+    expected_project: str | None = None, state_dir: Path | None = None
+) -> None:
+    meta = load_project_metadata(state_dir)
+    current = meta.get("project_id", DEFAULT_PROJECT_ID)
+    if expected_project and current != expected_project and current != DEFAULT_PROJECT_ID:
+        raise ValueError(f"Project metadata mismatch: expected {expected_project}, found {current}")
 
 
 def connect(state_dir: Path | None = None) -> sqlite3.Connection:
@@ -138,6 +158,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         -- 主表（含 timestamp 欄位）
         CREATE TABLE IF NOT EXISTS memories (
             id          TEXT PRIMARY KEY,
+            project_id  TEXT NOT NULL DEFAULT 'default',
             kind        TEXT NOT NULL CHECK (
                 kind IN ('task_handoff', 'status_update', 'discovered_constraint')
             ),
@@ -189,6 +210,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
 
         -- 效能 indexes
         CREATE INDEX IF NOT EXISTS idx_memories_kind ON memories(kind);
+        CREATE INDEX IF NOT EXISTS idx_memories_project_id ON memories(project_id);
         CREATE INDEX IF NOT EXISTS idx_memories_task_id ON memories(task_id);
         CREATE INDEX IF NOT EXISTS idx_memories_agent_id ON memories(agent_id);
         CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
@@ -217,9 +239,7 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         )
     """)
 
-    row = conn.execute(
-        "SELECT value FROM _meta WHERE key='schema_version'"
-    ).fetchone()
+    row = conn.execute("SELECT value FROM _meta WHERE key='schema_version'").fetchone()
 
     if row is None:
         # 全新資料庫 —— 寫入初始版本
@@ -242,6 +262,9 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if current_version == 1:
         _migrate_v1_to_v2(conn)
         current_version = 2
+    if current_version == 2:
+        _migrate_v2_to_v3(conn)
+        current_version = 3
 
     if current_version > SCHEMA_VERSION:
         raise MigrationError(
@@ -251,12 +274,9 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
-    """v1 → v2 migration：v2 預留的向下相容 schema 變更。
+    conn.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', '2')")
 
-    目前 v2 尚未有 schema 變更，此 migration 為純版本號更新。
-    v2 schema 與 v1 完全一致，無需任何 DDL。
-    日後若有 actual migration，在此依序執行 DDL 後才更新版本號。
-    """
-    conn.execute(
-        "INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', '2')"
-    )
+
+def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
+    conn.execute("ALTER TABLE memories ADD COLUMN project_id TEXT NOT NULL DEFAULT 'default'")
+    conn.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', '3')")

@@ -29,6 +29,7 @@ def setup_test_env(tmp_path, monkeypatch):
 def test_invalidate_discovered_constraint_success():
     # create a discovered_constraint memory to be invalidated
     r1 = server.remagraph_store(
+        project_id="testproj",
         task_id="task-inv-001",
         agent_id="inv-tester",
         kind="discovered_constraint",
@@ -45,6 +46,7 @@ def test_invalidate_discovered_constraint_success():
 
     # now store another discovered_constraint that invalidates the first
     r2 = server.remagraph_store(
+        project_id="testproj",
         task_id="task-inv-002",
         agent_id="inv-tester",
         kind="discovered_constraint",
@@ -65,6 +67,7 @@ def test_invalidate_discovered_constraint_success():
 def test_invalidate_not_found_rejected():
     # attempt to invalidate a non-existent id
     r = server.remagraph_store(
+        project_id="testproj",
         task_id="task-inv-003",
         agent_id="inv-tester",
         kind="discovered_constraint",
@@ -82,6 +85,7 @@ def test_invalidate_not_found_rejected():
 def test_invalidate_kind_mismatch_rejected():
     # create a task_handoff memory
     r1 = server.remagraph_store(
+        project_id="testproj",
         task_id="task-inv-004",
         agent_id="inv-tester",
         kind="task_handoff",
@@ -101,12 +105,12 @@ def test_invalidate_kind_mismatch_rejected():
 
     # attempt to invalidate the task_handoff with a discovered_constraint
     r2 = server.remagraph_store(
+        project_id="testproj",
         task_id="task-inv-005",
         agent_id="inv-tester",
         kind="discovered_constraint",
         summary=(
-            "嘗試用 discovered_constraint invalidates 一個非 discovered_constraint，"
-            "應被拒絕。"
+            "嘗試用 discovered_constraint invalidates 一個非 discovered_constraint，應被拒絕。"
         ),
         learnings=["testing kind mismatch"],
         handoff_note="",

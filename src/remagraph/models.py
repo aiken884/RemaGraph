@@ -27,6 +27,7 @@ _TASK_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 class StoreRequest(BaseModel):
     """remagraph_store 的輸入。不含 id、timestamp、status、embedding（伺服器端填入）。"""
 
+    project_id: str
     task_id: str
     agent_id: str
     kind: MemoryKind
@@ -36,12 +37,12 @@ class StoreRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
     invalidates: list[str] | None = None
 
-    @field_validator("task_id", "agent_id", mode="before")
+    @field_validator("project_id", "task_id", "agent_id", mode="before")
     @classmethod
     def _validate_id(cls, v: object) -> str:
         if not isinstance(v, str) or not _TASK_ID_RE.match(v):
             raise ValueError(
-                f"task_id/agent_id must match {_TASK_ID_RE.pattern}, got {v!r}"
+                f"project_id/task_id/agent_id must match {_TASK_ID_RE.pattern}, got {v!r}"
             )
         return v
 
@@ -82,6 +83,7 @@ class SearchRequest(BaseModel):
     kind: MemoryKind | None = None
     status: MemoryStatus | None = None
     tags: list[str] | None = None
+    project_id: str | None = None
     agent_id: str | None = None
     task_id: str | None = None
 
@@ -102,6 +104,7 @@ class StatusRequest(BaseModel):
     """remagraph_status 的輸入。"""
 
     limit: int = Field(default=20, ge=1, le=100)
+    project_id: str | None = None
 
 
 class StatusResponse(BaseModel):
@@ -122,6 +125,7 @@ class Memory(BaseModel):
     """
 
     id: str
+    project_id: str
     task_id: str
     agent_id: str
     timestamp: datetime

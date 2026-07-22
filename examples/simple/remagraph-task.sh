@@ -16,6 +16,11 @@
 # 注意：TASK_ID / AGENT_ID 只能用英文、數字、底線、連字號。
 # 若已安裝 remagraph CLI，也可用更簡單的：
 #   remagraph auto --task-id fix-login-001 --agent-id my-ai -- python my_agent.py
+#
+# 指揮塔想先查記憶（不執行不儲存）可用：
+#   remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
+#
+# 內部 Alpha 測試建議請看：docs/internal/alpha-test-playbook.md
 
 set -u
 

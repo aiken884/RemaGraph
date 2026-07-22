@@ -21,6 +21,7 @@ from remagraph.search import get_status, sanitize_fts5_query, search_memories
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -36,15 +37,16 @@ def _insert_memory(
     status: str = "active",
     tags: list[str] | None = None,
     timestamp: str | None = None,
+    project_id: str = "default",
 ) -> None:
     """插入一筆記憶記錄，自動觸發 FTS5 同步。"""
     tags_json = json.dumps(tags or [], ensure_ascii=False)
     ts = timestamp or _now_iso()
     conn.execute(
-        "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
+        "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, '[]', '', ?, ?, ?, ?)",
-        (id, kind, task_id, agent_id, ts, summary, tags_json, status, ts, ts),
+        "VALUES (?, ?, ?, ?, ?, ?, ?, '[]', '', ?, ?, ?, ?)",
+        (id, project_id, kind, task_id, agent_id, ts, summary, tags_json, status, ts, ts),
     )
 
 
@@ -110,7 +112,7 @@ class TestSanitizeFts5Query:
         assert sanitize_fts5_query("") == ""
 
     def test_only_special_chars(self):
-        assert sanitize_fts5_query("**\"\"()") == ""
+        assert sanitize_fts5_query('**""()') == ""
 
     def test_cjk_passes_through(self):
         assert sanitize_fts5_query("測試中文查詢") == "測試中文查詢"
@@ -171,7 +173,7 @@ class TestSearchMemories:
         """sanitize 後為空字串時，應回傳空結果。"""
         _insert_memory(conn, id="mem-1", kind="task_handoff", summary="test data")
         with caplog.at_level(logging.WARNING):
-            req = SearchRequest(query="**\"\"")
+            req = SearchRequest(query='**""')
             resp = search_memories(conn, req)
         assert len(resp.results) == 0
 
@@ -201,9 +203,7 @@ class TestSearchMemories:
         _insert_memory(
             conn, id="mem-1", kind="task_handoff", summary="hello", tags=["auth", "login"]
         )
-        _insert_memory(
-            conn, id="mem-2", kind="task_handoff", summary="hello", tags=["auth", "api"]
-        )
+        _insert_memory(conn, id="mem-2", kind="task_handoff", summary="hello", tags=["auth", "api"])
         req = SearchRequest(query="hello", tags=["login"], top_k=10)
         resp = search_memories(conn, req)
         assert len(resp.results) == 1
@@ -211,7 +211,10 @@ class TestSearchMemories:
 
     def test_tags_filter_multiple(self, conn):
         _insert_memory(
-            conn, id="mem-1", kind="task_handoff", summary="hello",
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="hello",
             tags=["auth", "login", "oauth"],
         )
         _insert_memory(
@@ -245,7 +248,9 @@ class TestSearchMemories:
     def test_has_more_true(self, conn):
         for i in range(10):
             _insert_memory(
-                conn, id=f"mem-{i}", kind="task_handoff",
+                conn,
+                id=f"mem-{i}",
+                kind="task_handoff",
                 summary=f"hello world test {i}",
             )
         req = SearchRequest(query="hello world", top_k=5)
@@ -256,7 +261,9 @@ class TestSearchMemories:
     def test_has_more_false_when_exact(self, conn):
         for i in range(5):
             _insert_memory(
-                conn, id=f"mem-{i}", kind="task_handoff",
+                conn,
+                id=f"mem-{i}",
+                kind="task_handoff",
                 summary=f"hello world test {i}",
             )
         req = SearchRequest(query="hello world", top_k=5)
@@ -267,7 +274,9 @@ class TestSearchMemories:
     def test_has_more_false_when_less(self, conn):
         for i in range(3):
             _insert_memory(
-                conn, id=f"mem-{i}", kind="task_handoff",
+                conn,
+                id=f"mem-{i}",
+                kind="task_handoff",
                 summary=f"hello world test {i}",
             )
         req = SearchRequest(query="hello world", top_k=5)
@@ -280,7 +289,9 @@ class TestSearchMemories:
     def test_top_k_default_20(self, conn):
         for i in range(25):
             _insert_memory(
-                conn, id=f"mem-{i}", kind="task_handoff",
+                conn,
+                id=f"mem-{i}",
+                kind="task_handoff",
                 summary=f"hello world test {i}",
             )
         req = SearchRequest(query="hello world")  # 預設 top_k=20
@@ -291,15 +302,40 @@ class TestSearchMemories:
     # -- 複合過濾 --
 
     def test_combined_filters(self, conn):
-        _insert_memory(conn, id="mem-1", kind="task_handoff", summary="hello", status="active",
-                       tags=["auth"], agent_id="agent-a")
-        _insert_memory(conn, id="mem-2", kind="task_handoff", summary="hello", status="superseded",
-                       tags=["auth"], agent_id="agent-a")
-        _insert_memory(conn, id="mem-3", kind="status_update", summary="hello", status="active",
-                       tags=["auth"], agent_id="agent-a")
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="hello",
+            status="active",
+            tags=["auth"],
+            agent_id="agent-a",
+        )
+        _insert_memory(
+            conn,
+            id="mem-2",
+            kind="task_handoff",
+            summary="hello",
+            status="superseded",
+            tags=["auth"],
+            agent_id="agent-a",
+        )
+        _insert_memory(
+            conn,
+            id="mem-3",
+            kind="status_update",
+            summary="hello",
+            status="active",
+            tags=["auth"],
+            agent_id="agent-a",
+        )
         req = SearchRequest(
-            query="hello", kind="task_handoff", status="active",
-            tags=["auth"], agent_id="agent-a", top_k=10,
+            query="hello",
+            kind="task_handoff",
+            status="active",
+            tags=["auth"],
+            agent_id="agent-a",
+            top_k=10,
         )
         resp = search_memories(conn, req)
         assert len(resp.results) == 1
@@ -311,10 +347,12 @@ class TestSearchMemories:
 
     def test_cjk_search_three_chars(self, conn):
         """三字元中文查詢應正常匹配 trigram。"""
-        _insert_memory(conn, id="mem-1", kind="task_handoff",
-                       summary="處理使用者登入錯誤，修正密碼驗證邏輯")
-        _insert_memory(conn, id="mem-2", kind="task_handoff",
-                       summary="修復資料庫連線池問題，增加重試機制")
+        _insert_memory(
+            conn, id="mem-1", kind="task_handoff", summary="處理使用者登入錯誤，修正密碼驗證邏輯"
+        )
+        _insert_memory(
+            conn, id="mem-2", kind="task_handoff", summary="修復資料庫連線池問題，增加重試機制"
+        )
         req = SearchRequest(query="登入錯誤", top_k=10)
         resp = search_memories(conn, req)
         assert len(resp.results) >= 1
@@ -322,10 +360,15 @@ class TestSearchMemories:
 
     def test_cjk_search_long_query(self, conn):
         """長中文查詢（≥3 字）應正常匹配。"""
-        _insert_memory(conn, id="mem-1", kind="task_handoff",
-                       summary="API 回應逾時可能與網路延遲有關，需檢查 CDN 設定")
-        _insert_memory(conn, id="mem-2", kind="task_handoff",
-                       summary="前端頁面重構為 React Server Components")
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="API 回應逾時可能與網路延遲有關，需檢查 CDN 設定",
+        )
+        _insert_memory(
+            conn, id="mem-2", kind="task_handoff", summary="前端頁面重構為 React Server Components"
+        )
         req = SearchRequest(query="API 回應逾時", top_k=10)
         resp = search_memories(conn, req)
         assert len(resp.results) == 1
@@ -333,10 +376,15 @@ class TestSearchMemories:
 
     def test_cjk_search_mixed_lang(self, conn):
         """中英混合查詢應正常匹配。"""
-        _insert_memory(conn, id="mem-1", kind="task_handoff",
-                       summary="修復 SSR hydration mismatch 問題，改用 Next.js dynamic import")
-        _insert_memory(conn, id="mem-2", kind="task_handoff",
-                       summary="更新 CI pipeline，加入 pnpm cache")
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="修復 SSR hydration mismatch 問題，改用 Next.js dynamic import",
+        )
+        _insert_memory(
+            conn, id="mem-2", kind="task_handoff", summary="更新 CI pipeline，加入 pnpm cache"
+        )
         req = SearchRequest(query="SSR hydration 問題", top_k=10)
         resp = search_memories(conn, req)
         assert len(resp.results) >= 1
@@ -344,12 +392,13 @@ class TestSearchMemories:
 
     def test_cjk_multiple_results_ordered(self, conn):
         """多筆中文結果應依 BM25 分數排序。"""
-        _insert_memory(conn, id="mem-1", kind="task_handoff",
-                       summary="資料庫遷移完成，使用者資料表結構已變更")
-        _insert_memory(conn, id="mem-2", kind="task_handoff",
-                       summary="資料庫連線池調整，提高並發處理能力")
-        _insert_memory(conn, id="mem-3", kind="task_handoff",
-                       summary="前端頁面重新設計配色")
+        _insert_memory(
+            conn, id="mem-1", kind="task_handoff", summary="資料庫遷移完成，使用者資料表結構已變更"
+        )
+        _insert_memory(
+            conn, id="mem-2", kind="task_handoff", summary="資料庫連線池調整，提高並發處理能力"
+        )
+        _insert_memory(conn, id="mem-3", kind="task_handoff", summary="前端頁面重新設計配色")
         req = SearchRequest(query="資料庫", top_k=10)
         resp = search_memories(conn, req)
         assert len(resp.results) == 2
@@ -358,10 +407,20 @@ class TestSearchMemories:
 
     def test_cjk_search_by_tags_with_chinese(self, conn):
         """中文摘要 + tag 過濾應正常運作。"""
-        _insert_memory(conn, id="mem-1", kind="task_handoff",
-                       summary="修復使用者登入頁面錯誤，調整表單驗證邏輯", tags=["auth", "緊急"])
-        _insert_memory(conn, id="mem-2", kind="task_handoff",
-                       summary="修復資料庫連線逾時問題", tags=["db", "緊急"])
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="修復使用者登入頁面錯誤，調整表單驗證邏輯",
+            tags=["auth", "緊急"],
+        )
+        _insert_memory(
+            conn,
+            id="mem-2",
+            kind="task_handoff",
+            summary="修復資料庫連線逾時問題",
+            tags=["db", "緊急"],
+        )
         req = SearchRequest(query="使用者登入", tags=["auth"], top_k=10)
         resp = search_memories(conn, req)
         assert len(resp.results) == 1
@@ -369,8 +428,7 @@ class TestSearchMemories:
 
     def test_cjk_short_query_two_chars_warns(self, conn, caplog):
         """2 字元中文查詢（如「登入」）無法形成 trigram，應回傳空結果 + warning。"""
-        _insert_memory(conn, id="mem-1", kind="task_handoff",
-                       summary="處理登入錯誤與密碼驗證")
+        _insert_memory(conn, id="mem-1", kind="task_handoff", summary="處理登入錯誤與密碼驗證")
         with caplog.at_level(logging.WARNING):
             req = SearchRequest(query="登入", top_k=10)
             resp = search_memories(conn, req)
@@ -389,8 +447,14 @@ class TestSearchMemories:
     # -- 結果結構驗證 --
 
     def test_result_includes_all_fields(self, conn):
-        _insert_memory(conn, id="mem-1", kind="task_handoff", summary="hello world",
-                       agent_id="test-agent", task_id="task-x")
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="hello world",
+            agent_id="test-agent",
+            task_id="task-x",
+        )
         req = SearchRequest(query="hello world", top_k=10)
         resp = search_memories(conn, req)
         r = resp.results[0]
@@ -412,8 +476,14 @@ class TestGetStatus:
     """get_status 整合測試 — 涵蓋去重、active 過濾、limit。"""
 
     def test_basic_status_query(self, conn):
-        _insert_memory(conn, id="mem-1", kind="status_update",
-                       task_id="task-a", summary="進度 50%", status="active")
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="status_update",
+            task_id="task-a",
+            summary="進度 50%",
+            status="active",
+        )
         resp = get_status(conn, StatusRequest(limit=10))
         assert len(resp.latest) == 1
         assert resp.latest[0]["id"] == "mem-1"
@@ -422,12 +492,22 @@ class TestGetStatus:
 
     def test_dedup_by_task_id_latest_wins(self, conn):
         """同一 task_id 多筆 status_update 時只取最新。"""
-        _insert_memory(conn, id="mem-1", kind="status_update",
-                       task_id="task-a", summary="第一筆狀態",
-                       timestamp="2024-01-01T00:00:00.000000Z")
-        _insert_memory(conn, id="mem-2", kind="status_update",
-                       task_id="task-a", summary="第二筆（最新）",
-                       timestamp="2024-01-02T00:00:00.000000Z")
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="status_update",
+            task_id="task-a",
+            summary="第一筆狀態",
+            timestamp="2024-01-01T00:00:00.000000Z",
+        )
+        _insert_memory(
+            conn,
+            id="mem-2",
+            kind="status_update",
+            task_id="task-a",
+            summary="第二筆（最新）",
+            timestamp="2024-01-02T00:00:00.000000Z",
+        )
         resp = get_status(conn, StatusRequest(limit=10))
         assert len(resp.latest) == 1
         assert resp.latest[0]["id"] == "mem-2"
@@ -435,32 +515,74 @@ class TestGetStatus:
 
     def test_only_active_status(self, conn):
         """只回傳 status='active' 的記錄。"""
-        _insert_memory(conn, id="mem-1", kind="status_update",
-                       task_id="task-a", summary="active", status="active")
-        _insert_memory(conn, id="mem-2", kind="status_update",
-                       task_id="task-b", summary="superseded", status="superseded")
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="status_update",
+            task_id="task-a",
+            summary="active",
+            status="active",
+        )
+        _insert_memory(
+            conn,
+            id="mem-2",
+            kind="status_update",
+            task_id="task-b",
+            summary="superseded",
+            status="superseded",
+        )
         resp = get_status(conn, StatusRequest(limit=10))
         assert len(resp.latest) == 1
         assert resp.latest[0]["summary"] == "active"
 
     def test_only_status_update_kind(self, conn):
         """只回傳 kind='status_update' 的記錄。"""
-        _insert_memory(conn, id="mem-1", kind="status_update",
-                       task_id="task-a", summary="狀態更新", status="active")
-        _insert_memory(conn, id="mem-2", kind="task_handoff",
-                       task_id="task-b", summary="交接記錄", status="active")
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="status_update",
+            task_id="task-a",
+            summary="狀態更新",
+            status="active",
+        )
+        _insert_memory(
+            conn,
+            id="mem-2",
+            kind="task_handoff",
+            task_id="task-b",
+            summary="交接記錄",
+            status="active",
+        )
         resp = get_status(conn, StatusRequest(limit=10))
         assert len(resp.latest) == 1
         assert resp.latest[0]["kind"] == "status_update"
 
     def test_multiple_tasks_all_returned(self, conn):
         """多個不同 task 的 active status 應全部回傳。"""
-        _insert_memory(conn, id="mem-1", kind="status_update",
-                       task_id="task-a", summary="Task A 進行中", status="active")
-        _insert_memory(conn, id="mem-2", kind="status_update",
-                       task_id="task-b", summary="Task B 進行中", status="active")
-        _insert_memory(conn, id="mem-3", kind="status_update",
-                       task_id="task-c", summary="Task C 進行中", status="active")
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="status_update",
+            task_id="task-a",
+            summary="Task A 進行中",
+            status="active",
+        )
+        _insert_memory(
+            conn,
+            id="mem-2",
+            kind="status_update",
+            task_id="task-b",
+            summary="Task B 進行中",
+            status="active",
+        )
+        _insert_memory(
+            conn,
+            id="mem-3",
+            kind="status_update",
+            task_id="task-c",
+            summary="Task C 進行中",
+            status="active",
+        )
         resp = get_status(conn, StatusRequest(limit=10))
         assert len(resp.latest) == 3
 
@@ -475,8 +597,14 @@ class TestGetStatus:
     def test_limit_respected(self, conn):
         """確認 limit 參數被實際套用。"""
         for i in range(5):
-            _insert_memory(conn, id=f"mem-{i}", kind="status_update",
-                           task_id=f"task-{i}", summary=f"狀態 {i}", status="active")
+            _insert_memory(
+                conn,
+                id=f"mem-{i}",
+                kind="status_update",
+                task_id=f"task-{i}",
+                summary=f"狀態 {i}",
+                status="active",
+            )
         resp = get_status(conn, StatusRequest(limit=3))
         assert len(resp.latest) == 3
 
@@ -486,10 +614,16 @@ class TestGetStatus:
         assert resp.latest == []
 
     def test_response_field_completeness(self, conn):
-        _insert_memory(conn, id="mem-1", kind="status_update",
-                       task_id="task-a", summary="完整欄位測試",
-                       status="active", agent_id="agent-x",
-                       tags=["urgent"])
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="status_update",
+            task_id="task-a",
+            summary="完整欄位測試",
+            status="active",
+            agent_id="agent-x",
+            tags=["urgent"],
+        )
         resp = get_status(conn, StatusRequest(limit=10))
         r = resp.latest[0]
         assert r["id"] == "mem-1"

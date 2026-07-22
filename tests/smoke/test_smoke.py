@@ -33,6 +33,7 @@ def test_full_lifecycle_write_search_status():
     """端對端：寫入 → 查詢 → 狀態。"""
     # 1. 寫入一筆 task_handoff
     r1 = server.remagraph_store(
+        project_id="default",
         task_id="task-smoke-001",
         agent_id="oc-smoke",
         kind="task_handoff",
@@ -53,6 +54,7 @@ def test_full_lifecycle_write_search_status():
 
     # 3. 寫入 status_update
     r3 = server.remagraph_store(
+        project_id="default",
         task_id="task-smoke-001",
         agent_id="oc-smoke",
         kind="status_update",
@@ -74,6 +76,7 @@ def test_status_update_supersede_chain():
     """同 task_id 連續三次 status_update，確認 supersede 行為。"""
     # 第一次
     r1 = server.remagraph_store(
+        project_id="default",
         task_id="task-smoke-002",
         agent_id="oc-smoke",
         kind="status_update",
@@ -87,6 +90,7 @@ def test_status_update_supersede_chain():
 
     # 第二次（應 supersede 第一次）
     r2 = server.remagraph_store(
+        project_id="default",
         task_id="task-smoke-002",
         agent_id="oc-smoke",
         kind="status_update",
@@ -100,6 +104,7 @@ def test_status_update_supersede_chain():
 
     # 第三次（應 supersede 前兩次）
     r3 = server.remagraph_store(
+        project_id="default",
         task_id="task-smoke-002",
         agent_id="oc-smoke",
         kind="status_update",
@@ -122,6 +127,7 @@ def test_discovered_constraint_with_invalidates():
     """寫入一筆 discovered_constraint，再用另一筆 invalidate 它。"""
     # 寫入 constraint
     r1 = server.remagraph_store(
+        project_id="default",
         task_id="task-smoke-003",
         agent_id="oc-smoke",
         kind="discovered_constraint",
@@ -135,6 +141,7 @@ def test_discovered_constraint_with_invalidates():
 
     # 用 invalidates 標記為 invalidated
     r2 = server.remagraph_store(
+        project_id="default",
         task_id="task-smoke-004",
         agent_id="oc-smoke",
         kind="discovered_constraint",
@@ -152,6 +159,7 @@ def test_kind_filter():
     """驗證 kind 過濾：只查 task_handoff 時不回傳 status_update。"""
     # 寫入 task_handoff
     server.remagraph_store(
+        project_id="default",
         task_id="task-smoke-005",
         agent_id="oc-smoke",
         kind="task_handoff",
@@ -163,12 +171,12 @@ def test_kind_filter():
 
     # 寫入 status_update（不同 task_id 避免 supersede）
     server.remagraph_store(
+        project_id="default",
         task_id="task-smoke-006",
         agent_id="oc-smoke",
         kind="status_update",
         summary=(
-            "這是一段 status update 用來測試 kind 過濾功能，"
-            "需要寫夠三十個中文字元來通過長度檢查"
+            "這是一段 status update 用來測試 kind 過濾功能，需要寫夠三十個中文字元來通過長度檢查"
         ),
         learnings=["status 過濾測試"],
         handoff_note="",
