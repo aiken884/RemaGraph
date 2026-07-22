@@ -527,7 +527,7 @@ def cmd_maintain(args: argparse.Namespace) -> None:
         print("[dry-run] 將執行：WAL/FTS/prune/vacuum/analyze")
         return
 
-    policy = MaintenancePolicy()
+    policy = MaintenancePolicy()  # type: ignore[no-untyped-call]
     try:
         stats = run_maintenance(policy, project, force=args.force)
         print("維護完成：")
@@ -596,7 +596,7 @@ def cmd_migrate_project(args: argparse.Namespace) -> None:
             cols = [k for k in row.keys() if k != "project_id"]
             vals = [row[k] for k in cols]
             placeholders = ",".join("?" for _ in cols)
-            cols_str = ','.join(cols)
+            cols_str = ",".join(cols)
             sql = (
                 f"INSERT OR IGNORE INTO memories "
                 f"(project_id, {cols_str}) VALUES (?, {placeholders})"

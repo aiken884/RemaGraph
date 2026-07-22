@@ -218,6 +218,7 @@ def process_store(
     """
     # 安全閥門（PPLX 共識版）：強制 project + state_dir 對映
     from remagraph.maintenance import safety_validate_project
+
     if request.project_id:
         safety_validate_project(request.project_id)  # 違規直接 raise SafetyValveError
 

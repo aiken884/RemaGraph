@@ -161,7 +161,7 @@ def test_memories_fts_trigram_tokenizer(tmp_path):
     conn.execute(
         "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, embedding, created_at, updated_at) "
-        "VALUES ('mem-test-001', 'default', 'task_handoff', 'task-1', 'test', '2026-07-21T00:00:00Z', "
+        "VALUES ('mem-test-001', 'default', 'task_handoff', 'task-1', 'test', '2026-07-21T00:00:00Z', "  # noqa: E501
         "'測試中文 trigram 是否正確分詞', '[]', '', '[]', 'active', NULL, "
         "'2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z')"
     )

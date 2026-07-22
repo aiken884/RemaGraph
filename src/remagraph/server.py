@@ -201,10 +201,7 @@ def remagraph_status(
 
 @mcp.tool(
     name="remagraph_maintain",
-    description=(
-        "執行 DB 自動維護（WAL/FTS/prune/vacuum/integrity）。"
-        " 必須提供 project_id。"
-    ),
+    description=("執行 DB 自動維護（WAL/FTS/prune/vacuum/integrity）。 必須提供 project_id。"),
 )
 def remagraph_maintain(
     project_id: str,
@@ -214,7 +211,7 @@ def remagraph_maintain(
     _check_rate_limit("maintenance")
     try:
         safety_validate_project(project_id)
-        policy = MaintenancePolicy()
+        policy = MaintenancePolicy()  # type: ignore[no-untyped-call]
         stats = run_maintenance(policy, project_id, force=force)
         return {"status": "ok", "stats": stats}
     except Exception as e:
