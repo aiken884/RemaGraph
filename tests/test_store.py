@@ -44,13 +44,13 @@ def now():
 def _make_memory(**overrides) -> Memory:
     defaults = {
         "id": "mem-20260721-001",
+        "project_id": "testproj",
         "task_id": "task-001",
         "agent_id": "test-agent",
         "timestamp": datetime(2026, 7, 21, 14, 30, 0, tzinfo=timezone.utc),
         "kind": "task_handoff",
         "summary": (
-            "this is a test summary that must be at least thirty characters long "
-            "to pass validation"
+            "this is a test summary that must be at least thirty characters long to pass validation"
         ),
         "learnings": ["test learning item one"],
         "handoff_note": "test handoff note for the receiver",
@@ -125,9 +125,7 @@ def test_insert_memory_fts5_sync(conn, now):
 
     insert_memory(conn, mem, emb)
 
-    rows = conn.execute(
-        "SELECT * FROM memories_fts WHERE memories_fts MATCH 'acpx'"
-    ).fetchall()
+    rows = conn.execute("SELECT * FROM memories_fts WHERE memories_fts MATCH 'acpx'").fetchall()
     assert len(rows) >= 1
 
 
@@ -148,6 +146,7 @@ def test_process_store_supersedes_old_status_updates(conn, now):
 
     # 模擬新 status_update store 請求
     req = StoreRequest(
+        project_id="testproj",
         task_id="task-status-001",
         agent_id="test-agent",
         kind="status_update",
@@ -184,6 +183,7 @@ def test_process_store_no_supersede_for_task_handoff(conn, now):
     insert_memory(conn, old_mem, emb)
 
     req = StoreRequest(
+        project_id="testproj",
         task_id="task-handoff-001",
         agent_id="test-agent",
         kind="task_handoff",
@@ -221,6 +221,7 @@ def test_process_store_invalidates_constraints(conn, now):
     insert_memory(conn, old_mem, emb)
 
     req = StoreRequest(
+        project_id="testproj",
         task_id="task-dc-001",
         agent_id="test-agent",
         kind="discovered_constraint",
@@ -250,6 +251,7 @@ def test_process_store_invalidates_constraints(conn, now):
 def test_process_store_returns_correct_response(conn, now):
     """S5: 成功寫入回傳正確 StoreResponse。"""
     req = StoreRequest(
+        project_id="testproj",
         task_id="task-resp-001",
         agent_id="test-agent",
         kind="task_handoff",
@@ -279,6 +281,7 @@ def test_process_store_returns_correct_response(conn, now):
 def test_process_store_rejects_short_summary(conn, now):
     """S5: summary 太短回傳 rejected。"""
     req = StoreRequest(
+        project_id="testproj",
         task_id="task-rej-001",
         agent_id="test-agent",
         kind="task_handoff",
@@ -305,9 +308,9 @@ def test_insert_memory_rollback_on_failure(conn, now):
         insert_memory(conn, valid_mem, emb)
         # 插入一個會觸發 constraint violation 的記錄（重複 id）
         conn.execute(
-            "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
+            "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
             "learnings, handoff_note, tags, status, embedding, created_at, updated_at) "
-            "VALUES ('mem-valid-001', 'task_handoff', 'task-x', 'test', '2026-01-01T00:00:00Z', "
+            "VALUES ('mem-valid-001', 'default', 'task_handoff', 'task-x', 'test', '2026-01-01T00:00:00Z', "
             "'duplicate id should cause a constraint violation and rollback the transaction', "
             "'[]', '', '[]', 'active', NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
         )
@@ -415,8 +418,7 @@ def test_get_latest_status_updates_respects_limit(conn, now):
             task_id=f"task-limit-{i:03d}",
             kind="status_update",
             summary=(
-                f"status update number {i} that must be at least "
-                f"thirty characters long to pass"
+                f"status update number {i} that must be at least thirty characters long to pass"
             ),
             created_at=datetime(2026, 7, 21, i, 0, 0, tzinfo=timezone.utc),
         )
@@ -442,4 +444,3 @@ def test_row_to_memory(conn, now):
     assert result.task_id == mem.task_id
     assert isinstance(result.learnings, list)
     assert isinstance(result.tags, list)
-

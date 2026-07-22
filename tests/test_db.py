@@ -93,9 +93,7 @@ def test_init_schema_creates_fts_table(tmp_path):
 def test_init_schema_creates_triggers(tmp_path):
     """B2: _init_schema 建立三個 FTS5 同步 trigger（ai, ad, au）。"""
     conn = db_mod.connect(state_dir=tmp_path / "state")
-    triggers = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='trigger'"
-    ).fetchall()
+    triggers = conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall()
     trigger_names = {row[0] for row in triggers}
     assert "memories_ai" in trigger_names
     assert "memories_ad" in trigger_names
@@ -106,9 +104,7 @@ def test_init_schema_creates_triggers(tmp_path):
 def test_init_schema_creates_indexes(tmp_path):
     """B2: _init_schema 建立所有效能 index。"""
     conn = db_mod.connect(state_dir=tmp_path / "state")
-    indexes = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='index'"
-    ).fetchall()
+    indexes = conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
     index_names = {row[0] for row in indexes}
     expected = [
         "idx_memories_kind",
@@ -128,7 +124,7 @@ def test_init_schema_creates_meta_table(tmp_path):
     conn = db_mod.connect(state_dir=tmp_path / "state")
     row = conn.execute("SELECT value FROM _meta WHERE key='schema_version'").fetchone()
     assert row is not None
-    assert row[0] == "2"
+    assert row[0] == "3"
     conn.close()
 
 
@@ -138,9 +134,19 @@ def test_memories_table_has_all_columns(tmp_path):
     cols = conn.execute("PRAGMA table_info(memories)").fetchall()
     col_names = {row[1] for row in cols}
     expected_cols = {
-        "id", "kind", "task_id", "agent_id", "timestamp",
-        "summary", "learnings", "handoff_note", "tags",
-        "status", "embedding", "created_at", "updated_at",
+        "id",
+        "kind",
+        "task_id",
+        "agent_id",
+        "timestamp",
+        "summary",
+        "learnings",
+        "handoff_note",
+        "tags",
+        "status",
+        "embedding",
+        "created_at",
+        "updated_at",
     }
     for col in expected_cols:
         assert col in col_names, f"Missing column: {col}"
@@ -152,16 +158,14 @@ def test_memories_fts_trigram_tokenizer(tmp_path):
     conn = db_mod.connect(state_dir=tmp_path / "state")
     # 用 FTS5 的內建功能確認 tokenizer
     conn.execute(
-        "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
+        "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, embedding, created_at, updated_at) "
-        "VALUES ('mem-test-001', 'task_handoff', 'task-1', 'test', '2026-07-21T00:00:00Z', "
+        "VALUES ('mem-test-001', 'default', 'task_handoff', 'task-1', 'test', '2026-07-21T00:00:00Z', "
         "'測試中文 trigram 是否正確分詞', '[]', '', '[]', 'active', NULL, "
         "'2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z')"
     )
     # trigram: 'tri' 應可匹配到 'trigram' 的 trigram
-    rows = conn.execute(
-        "SELECT * FROM memories_fts WHERE memories_fts MATCH 'tri'"
-    ).fetchall()
+    rows = conn.execute("SELECT * FROM memories_fts WHERE memories_fts MATCH 'tri'").fetchall()
     assert len(rows) >= 1, "trigram tokenizer should match substrings"
     conn.close()
 
@@ -176,9 +180,9 @@ def test_reconnect_preserves_data(tmp_path):
 
     # 插入一筆測試資料
     conn1.execute(
-        "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
+        "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, embedding, created_at, updated_at) "
-        "VALUES ('mem-test-002', 'task_handoff', 'task-2', 'test', "
+        "VALUES ('mem-test-002', 'default', 'task_handoff', 'task-2', 'test', "
         "'2026-07-21T00:00:00Z', "
         "'this is a test summary that must be at least thirty characters long "
         "for the test to pass', "
@@ -214,7 +218,7 @@ def test_run_migrations_noop_for_v1(tmp_path):
     # _run_migrations 應正常完成，不拋錯
     db_mod._run_migrations(conn)
     row = conn.execute("SELECT value FROM _meta WHERE key='schema_version'").fetchone()
-    assert row[0] == "2"
+    assert row[0] == "3"
     conn.close()
 
 

@@ -28,7 +28,7 @@ from remagraph.store import process_store
 # ---------------------------------------------------------------------------
 
 _RATE_LIMIT_WINDOW = 60  # seconds
-_RATE_LIMIT_MAX = 60     # calls per window
+_RATE_LIMIT_MAX = 60  # calls per window
 
 
 class _RateLimiter:
@@ -53,9 +53,9 @@ _rate_limiter = _RateLimiter()
 def _check_rate_limit(key: str) -> None:
     if not _rate_limiter.check(key):
         raise RuntimeError(
-            f"rate limit exceeded for {key!r} "
-            f"(max {_RATE_LIMIT_MAX} calls/{_RATE_LIMIT_WINDOW}s)"
+            f"rate limit exceeded for {key!r} (max {_RATE_LIMIT_MAX} calls/{_RATE_LIMIT_WINDOW}s)"
         )
+
 
 # ---------------------------------------------------------------------------
 # FastMCP 伺服器實例
@@ -73,10 +73,21 @@ mcp = FastMCP(
 _conn: sqlite3.Connection | None = None
 
 
+def _maybe_warn_default() -> None:
+    try:
+        if _db.is_using_default_state_dir():
+            print(
+                "WARNING: default state dir, set REMAGRAPH_PROJECT for isolation", file=sys.stderr
+            )
+    except Exception:
+        pass
+
+
 def _get_conn() -> sqlite3.Connection:
     """取得 SQLite 連線（lazy init，首次呼叫時建立）。"""
     global _conn
     if _conn is None:
+        _maybe_warn_default()
         _conn = _db.connect()
         atexit.register(_safe_close)
     return _conn
@@ -102,6 +113,7 @@ def _safe_close() -> None:
     "discovered_constraint（發現的限制，可 invalidate 既有記憶）。",
 )
 def remagraph_store(
+    project_id: str,
     task_id: str,
     agent_id: str,
     kind: str,
@@ -114,6 +126,7 @@ def remagraph_store(
     """agent 寫入記憶。"""
     _check_rate_limit(agent_id)
     request = StoreRequest(
+        project_id=project_id,
         task_id=task_id,
         agent_id=agent_id,
         kind=kind,  # type: ignore[arg-type]
@@ -149,17 +162,21 @@ def remagraph_search(
     kind: str | None = None,
     status: str | None = None,
     tags: list[str] | None = None,
+    project_id: str | None = None,
     agent_id: str | None = None,
     task_id: str | None = None,
+    all_projects: bool = False,
 ) -> dict[str, Any]:
     """agent 查詢記憶（FTS5 BM25）。"""
     _check_rate_limit(agent_id or "anonymous")
+    eff_project = None if all_projects else project_id
     request = SearchRequest(
         query=query,
         top_k=top_k,
         kind=kind,  # type: ignore[arg-type]
         status=status,  # type: ignore[arg-type]
         tags=tags,
+        project_id=eff_project,
         agent_id=agent_id,
         task_id=task_id,
     )
@@ -169,13 +186,15 @@ def remagraph_search(
 
 @mcp.tool(
     name="remagraph_status",
-    description="查詢專案最新現況。回傳所有 active 的 status_update 型記憶，"
-    "以 task_id 去重（只留每 task_id 最新一筆）。limit 預設 20，最大 100。",
+    description="查詢最新現況（預設限 project）。",
 )
-def remagraph_status(limit: int = 20) -> dict[str, Any]:
+def remagraph_status(
+    project_id: str | None = None, limit: int = 20, all_projects: bool = False
+) -> dict[str, Any]:
     """查詢所有 active status_update（依 task_id 去重取最新）。"""
     _check_rate_limit("status")
-    request = StatusRequest(limit=limit)
+    eff_project = None if all_projects else project_id
+    request = StatusRequest(limit=limit, project_id=eff_project)
     response = get_status(_get_conn(), request)
     return {"latest": response.latest}
 
