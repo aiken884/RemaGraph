@@ -189,9 +189,10 @@ def main() -> None:
     """程式入口：自動判斷 CLI 或 MCP 模式。
 
     - `remagraph serve` → MCP stdio server
-    - `remagraph store/search/status` → CLI 子命令（JSON 輸出）
+    - `remagraph store/search/status/init/auto` → CLI 子命令
     """
-    if len(sys.argv) >= 2 and sys.argv[1] in ("store", "search", "status"):
+    cli_commands = ("store", "search", "status", "init", "auto")
+    if len(sys.argv) >= 2 and sys.argv[1] in cli_commands:
         from remagraph.cli import main as cli_main
 
         cli_main(sys.argv[1:])
