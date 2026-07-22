@@ -1,5 +1,8 @@
 # CLI Subcommand 實作計畫
 
+> **狀態（2026-07-22）**：已落地於 v0.2.0 — `store`/`search`/`status`/`init`/`auto`。  
+> 後續極簡與 herdr 整合見 [`remagraph-herdr-integration-plan.md`](./remagraph-herdr-integration-plan.md)。
+
 ## 目標
 
 讓 headless agent（經 herdr bridge）可直接透過 shell 指令呼叫 RemaGraph，不需要走 MCP protocol。

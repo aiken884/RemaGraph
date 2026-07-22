@@ -77,7 +77,7 @@ class StoreResponse(BaseModel):
 class SearchRequest(BaseModel):
     """remagraph_search 的輸入。"""
 
-    query: str
+    query: str = ""
     top_k: int = Field(default=20, ge=1, le=100)
     kind: MemoryKind | None = None
     status: MemoryStatus | None = None

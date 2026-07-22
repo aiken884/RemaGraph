@@ -77,6 +77,61 @@ def _build_fts5_match(sanitized: str) -> str:
     return sanitized
 
 
+def _row_to_result(row: sqlite3.Row, score: float | None = None) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "id": row["id"],
+        "summary": row["summary"],
+        "agent_id": row["agent_id"],
+        "kind": row["kind"],
+        "task_id": row["task_id"],
+        "timestamp": row["timestamp"],
+        "score": score if score is not None else 0.0,
+    }
+    return result
+
+
+def _list_by_filters(
+    conn: sqlite3.Connection,
+    request: SearchRequest,
+) -> SearchResponse:
+    """無全文查詢時，依 task_id/agent_id 等過濾直接列出（給 auto/recall 用）。"""
+    where: list[str] = []
+    params: list[Any] = []
+
+    if request.kind is not None:
+        where.append("kind = ?")
+        params.append(request.kind)
+    if request.status is not None:
+        where.append("status = ?")
+        params.append(request.status)
+    else:
+        where.append("status = ?")
+        params.append("active")
+    if request.agent_id is not None:
+        where.append("agent_id = ?")
+        params.append(request.agent_id)
+    if request.task_id is not None:
+        where.append("task_id = ?")
+        params.append(request.task_id)
+    if request.tags:
+        for tag in request.tags:
+            where.append("EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)")
+            params.append(tag)
+
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+    params.append(request.top_k + 1)
+    sql = f"""
+        SELECT * FROM memories
+        {where_sql}
+        ORDER BY timestamp DESC
+        LIMIT ?
+    """
+    rows = conn.execute(sql, params).fetchall()
+    has_more = len(rows) > request.top_k
+    results = [_row_to_result(r) for r in rows[: request.top_k]]
+    return SearchResponse(results=results, has_more=has_more)
+
+
 def search_memories(
     conn: sqlite3.Connection,
     request: SearchRequest,
@@ -85,7 +140,7 @@ def search_memories(
 
     流程：
     1. sanitize 查詢字串（移除 FTS5 特殊字元）
-    2. 短查詢（≤2 字元）→ 回傳空 results + warning log
+    2. 短查詢（≤2 字元）→ 若有 task_id/agent_id 過濾則改走列表模式；否則回傳空
     3. 建立 FTS5 MATCH 條件
     4. 套用 kind/status/tags/agent_id/task_id 過濾
     5. LIMIT top_k + 1 以判斷 has_more
@@ -98,10 +153,12 @@ def search_memories(
     Returns:
         SearchResponse（results 依 BM25 score 遞增排序，分數越低越相關）
     """
-    sanitized = sanitize_fts5_query(request.query)
+    sanitized = sanitize_fts5_query(request.query or "")
 
-    # 短查詢處理：≤2 字元無法形成 trigram
+    # 無有效全文查詢時：有過濾條件就直接列表，否則空結果
     if _trigram_char_len(sanitized) < 3:
+        if request.task_id or request.agent_id or request.kind or request.tags:
+            return _list_by_filters(conn, request)
         logger.warning(
             "FTS5 query too short for trigram tokenizer: %r → %r",
             request.query,
@@ -158,19 +215,9 @@ def search_memories(
     has_more = len(rows) > request.top_k
     results = rows[: request.top_k]
 
-    result_dicts: list[dict[str, Any]] = []
-    for row in results:
-        result_dicts.append(
-            {
-                "id": row["id"],
-                "summary": row["summary"],
-                "agent_id": row["agent_id"],
-                "kind": row["kind"],
-                "task_id": row["task_id"],
-                "timestamp": row["timestamp"],
-                "score": row["score"],
-            }
-        )
+    result_dicts: list[dict[str, Any]] = [
+        _row_to_result(row, score=row["score"]) for row in results
+    ]
 
     return SearchResponse(results=result_dicts, has_more=has_more)
 
