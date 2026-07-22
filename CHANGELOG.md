@@ -7,38 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added (v2 — Phase 1 公開前必做)
+## [0.2.0] — 2026-07-22
 
-- **CLI subcommand**: `remagraph store`, `remagraph search`, `remagraph status` for headless agent integration. JSON output to stdout. Uses argparse (zero new deps). MCP mode keeps `remagraph serve`.
-- **路徑穿越防禦 (A3)**: `REMAGRAPH_STATE_DIR` 字元正則驗證 + `resolve()` 後禁止系統目錄（`/etc`, `/usr`, `/bin` 等）
-- **Rate limiting (A1)**: per-agent thread-safe token bucket（60 calls/60 秒 window），防止濫用與 DoS
-- **輸入驗證 (A2)**: `task_id` / `agent_id` 經 Pydantic `@field_validator` 檢核格式 `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`
-- **mypy CI gate (D1)**: strict mode 設定（`pyproject.toml`）+ CI 流程加入 `mypy src/`，目前 9 源檔零錯誤
-- **Migration 框架 (O5)**: `_migrate_v1_to_v2` 函式啟用，schema 版本 `1→2`
-- **CONTRIBUTING.md**: 貢獻者指南（開發環境、測試、程式碼風格、PR 流程、安全考量）
-- **PR template**: `.github/PULL_REQUEST_TEMPLATE.md`（checklist 含 ruff/mypy/pytest/CHANGELOG）
-- **PyPI publish workflow**: `.github/workflows/publish.yml`（tag `v*` 觸發、trusted publishing、GitHub Release）
-- **架構文件**: `docs/architecture.md`（系統圖 + 模組說明 + 資料流）
+### Added
 
-### Added (v2 — Phase 2 短期補上)
+#### 極簡任務記憶 / headless CLI
+- **`remagraph init`**：一行初始化專案記憶目錄，並產生可 `source` 的 `env.sh`
+- **`remagraph auto`**：一鍵 recall → 執行指令 → 自動 store（非技術使用者主入口）
+- **`remagraph store` / `search` / `status`**：CLI 子命令，JSON 輸出到 stdout（argparse、零新依賴）；MCP 模式維持 `remagraph serve`
+- **`search` 支援只帶 `--task-id`**（不必 `--query`），方便任務軌跡回顧
+- **極簡包裝腳本**：`examples/simple/remagraph-task.sh`
+- **herdr Bridge 範例**：`examples/herdr-bridge/dispatch_with_memory.py`、`simple-memory-helper.sh`
+- **白話慣例文件**：`docs/task-memory-convention.md`
+- **一鍵安裝腳本**：`scripts/one-key-install.sh`
 
-- **Audit rotation (O1)**: `audit.jsonl` → `audit-YYYYMM.jsonl` 按月自動分檔
-- **DB 容量上限 (O3)**: `PRAGMA max_page_count` 設定 100MB soft limit
-- **Superseded 清理 (O2)**: `arbitration.cleanup_superseded(conn, max_age_days=90)` 清除超期非 active 記錄
-- **ADR 0001**: `docs/decisions/0001-v2-plan-and-governance.md` 決策紀錄
-- **Dependabot 策略強化**: labels + reviewers 設定
+#### 安全 / 治理 / 可靠度（v2 Phase 1–2）
+- **路徑穿越防禦 (A3)**：`REMAGRAPH_STATE_DIR` 字元正則驗證 + `resolve()` 後禁止系統目錄
+- **Rate limiting (A1)**：per-agent thread-safe token bucket（60 calls/60 秒）
+- **輸入驗證 (A2)**：`task_id` / `agent_id` 經 Pydantic `@field_validator` 檢核
+- **mypy CI gate (D1)**：strict mode + CI `mypy src/`
+- **Migration 框架 (O5)**：schema 版本 `1→2`
+- **Audit rotation (O1)**：`audit.jsonl` → `audit-YYYYMM.jsonl` 按月分檔
+- **DB 容量上限 (O3)**：`PRAGMA max_page_count` 100MB soft limit
+- **Superseded 清理 (O2)**：`cleanup_superseded(conn, max_age_days=90)`
+- **CONTRIBUTING.md**、**PR template**、**PyPI publish workflow**（tag `v*`）、**ADR 0001**、**架構文件**
 
 ### Security
-
-- `_RateLimiter` 使用 `threading.Lock` 確保原子操作（修復 race condition）
-- `ArbitrationReason` literal 型別修復（`XXsummary_too_shortXX` → `summary_too_short`）
+- `_RateLimiter` 使用 `threading.Lock` 確保原子操作
 - `pathlib.Path.resolve()` + forbidden prefixes 雙層路徑防禦
 - PPLX 對抗式審查執行完畢，發現問題已全數修復
 
 ### Notes
-
-- CI workflows 因 Actions 額度不足暫停（`disabled_manually`），可透過 GitHub UI 重新啟用
-- 包版本 `0.2.0-dev`（尚未 publish PyPI；HITL only）
+- CI workflows 可能因 Actions 額度暫停；本地 gate：`ruff` / `mypy` / `pytest`（≥224 tests）
+- PyPI 發布需 HITL：確認後打 `v0.2.0` tag 觸發 `.github/workflows/publish.yml`
+- `task_id` / `agent_id` 僅允許英數與 `_`/`-`（agent_id 另須小寫、長度 3–64）
 
 ## [0.1.0] — 2026-07-21
 
@@ -56,3 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Engineering baseline**: ruff (lint + format), pytest with coverage ≥80%, mypy as optional dev dependency, pre-commit (ruff + gitleaks), CI matrix (Python 3.11–3.13) with smoke → lint → test, pip-audit, gitleaks, Dependabot, mutmut workflow (non-blocking) for arbitration + dedup.
 - **Apache-2.0** license and SPDX headers on `src/remagraph/*.py`.
 - **Test suite**: unit tests for models, DB, arbitration, dedup, store, search, audit, server; smoke tests under `tests/smoke/` with isolated temp state.
+
+[Unreleased]: https://github.com/aiken884/RemaGraph/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/aiken884/RemaGraph/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/aiken884/RemaGraph/releases/tag/v0.1.0

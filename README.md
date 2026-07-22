@@ -4,8 +4,10 @@
 
 | 項目 | 現況 |
 |------|------|
-| **版本** | `0.2.0`（開發中；**尚未** PyPI） |
-| **狀態** | v2 完成：安全強化 + 治理準備 + 可靠度提升 |
+| **版本** | `0.2.0`（發行準備中；**尚未** PyPI，需 HITL tag） |
+| **狀態** | v2：安全/治理/可靠度 + CLI（init/auto/store/search/status） |
+| **任務記憶慣例** | [`docs/task-memory-convention.md`](./docs/task-memory-convention.md) |
+| **發行準備** | [`docs/reviews/v2-release-prep.md`](./docs/reviews/v2-release-prep.md) |
 | **設計 SOT** | [`DESIGN.md`](./DESIGN.md) |
 | **收斂狀態** | [`docs/reviews/v1-closeout-status.md`](./docs/reviews/v1-closeout-status.md) |
 | **架構文件** | [`docs/architecture.md`](./docs/architecture.md) |
@@ -16,7 +18,13 @@
 
 ## 安裝
 
-RemaGraph 尚未發布到 PyPI，請從原始碼安裝：
+**推薦（一行）：**
+
+```bash
+uv tool install git+https://github.com/aiken884/RemaGraph.git
+```
+
+或從原始碼：
 
 ```bash
 git clone https://github.com/aiken884/RemaGraph.git
@@ -26,7 +34,28 @@ pip install -e .
 
 依賴：Python ≥3.11、model2vec、mcp (FastMCP)、pydantic。
 
-## 快速開始
+## 快速開始（非技術使用者，5 分鐘上手）
+
+1. 安裝（見上方一行指令）
+2. 初始化：
+   ```bash
+   remagraph init --project myproject
+   source ~/.local/state/remagraph-myproject/env.sh
+   ```
+3. 一鍵跑任務（自動讀記憶 + 執行 + 寫記憶）：
+   ```bash
+   remagraph auto --task-id fix-login-001 --agent-id my-ai -- echo "這裡換成你的真正指令"
+   ```
+   或用包裝腳本：
+   ```bash
+   curl -O https://raw.githubusercontent.com/aiken884/RemaGraph/main/examples/simple/remagraph-task.sh
+   chmod +x remagraph-task.sh
+   TASK_ID=fix-login-001 AGENT_ID=my-ai ./remagraph-task.sh python my_agent.py
+   ```
+
+不需要寫任何程式碼。完整白話說明見 [`docs/task-memory-convention.md`](./docs/task-memory-convention.md)。
+
+## MCP 快速開始
 
 ### 1. MCP Client 設定
 
@@ -74,12 +103,37 @@ pip install -e .
 ### 3. CLI 入門
 
 ```bash
-# 啟動 stdio MCP server（client 會自行管理生命週期）
+# 啟動 stdio MCP server
 remagraph serve
 
-# 自訂 state 目錄
-REMAGRAPH_STATE_DIR=/tmp/remagraph-dev remagraph serve
+# 初始化 / 一鍵任務
+remagraph init --project myproject
+remagraph auto --task-id T001 --agent-id my-agent -- make test
+
+# 查詢（可只帶 task-id）
+remagraph search --task-id T001
+remagraph search --query "FastMCP 生命週期" --top-k 5
+remagraph status --limit 10
 ```
+
+## 與 herdr Bridge 整合（指揮塔派工自動帶記憶）
+
+如果你已經用 herdr Bridge 當指揮塔派工給 headless agent：
+
+1. 在你的指揮塔程式中，使用我們提供的極簡幫手：
+   ```bash
+   # 下載
+   curl -O https://raw.githubusercontent.com/aiken884/RemaGraph/main/examples/herdr-bridge/simple-memory-helper.sh
+   chmod +x simple-memory-helper.sh
+   ```
+
+2. 在派工前呼叫它來取得記憶上下文，然後塞進送給 agent 的文字裡。
+
+或者最簡單：讓 agent 啟動時使用上面的 `remagraph-task.sh` 包裝你的 agent 指令。
+
+這樣指揮塔只要傳 task_id 給 agent，agent 就會自動記錄。
+
+（詳細範例見 examples/herdr-bridge/ ）
 
 ## MCP 工具
 
@@ -141,25 +195,32 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 
 ## CLI 子命令（headless agent 用）
 
-除 MCP mode 外，`remagraph` 也支援三種 CLI 子命令，輸出 JSON 到 stdout，適合 shell script 或 headless agent 直接呼叫：
+除 MCP mode 外，`remagraph` 支援以下 CLI 子命令（JSON 輸出）：
 
 ```bash
+# 一鍵（最推薦）：讀記憶 → 跑指令 → 寫記憶
+remagraph auto --task-id task-001 --agent-id my-agent -- make test
+
+# 初始化
+remagraph init --project myproject
+
 # 寫入記憶
 remagraph store \
   --task-id task-001 --agent-id my-agent --kind status_update \
-  --summary "任務完成，所有測試通過" \
+  --summary "任務完成，所有測試通過，已確認無回歸問題" \
   --learnings '["使用 FastMCP 要注意生命週期"]' \
-  --handoff-note "交接給下一位" \
   --tags '["python","mcp"]'
 
-# 查詢記憶（FTS5 全文檢索）
+# 查詢（可只帶 task-id，不必 query）
+remagraph search --task-id task-001
 remagraph search --query "FastMCP 生命週期" --top-k 5
 
 # 查詢最新現況
 remagraph status --limit 10
 ```
 
-詳細規格見 [`DESIGN.md`](./DESIGN.md)；對外穩定合約見 [`docs/audit.md`](./docs/audit.md)。
+白話慣例：[`docs/task-memory-convention.md`](./docs/task-memory-convention.md)  
+詳細規格：[`DESIGN.md`](./DESIGN.md)；Audit 合約：[`docs/audit.md`](./docs/audit.md)。
 
 ## 開發與驗證
 

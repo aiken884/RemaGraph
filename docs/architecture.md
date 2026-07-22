@@ -1,6 +1,6 @@
 # RemaGraph 架構文件
 
-> 版本：0.1.0 | 最後更新：2026-07-22
+> 版本：0.2.0 | 最後更新：2026-07-22
 
 ---
 
@@ -8,21 +8,47 @@
 
 RemaGraph 是一把輕量的 MCP 工具，讓 AI coding agent 在處理任務時留下結構化的殘跡（任務交接、狀態更新、發現的限制），供後續 agent 循跡查詢，與 CodeGraph 互補。
 
+v0.2 起同時提供 **CLI**（`store` / `search` / `status` / `init` / `auto`），供 headless agent 與非 MCP 流程使用。
+
 ---
 
 ## 2. 核心架構
 
 ```
+┌──────────────────────────────┐   ┌──────────────────────────────────┐
+│  MCP Client                  │   │  CLI / headless agent            │
+│  Claude / Cursor / OpenCode  │   │  remagraph init|auto|store|...   │
+└──────────────┬───────────────┘   └────────────────┬─────────────────┘
+               │ stdio MCP tools                     │ argv → cli.py
+               ▼                                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                         MCP Client                              │
-│  (Claude Desktop / Cursor / OpenCode / Claude Code)             │
-└──────────────┬──────────────────────┬──────────────────┬───────┘
-               │ remagraph_store      │ remagraph_search  │ remagraph_status
-               ▼                      ▼                   ▼
+│                    remagraph/server.py::main()                   │
+│         路由：CLI 子命令  vs  FastMCP stdio (serve)               │
+└──────────────┬───────────────────────────────┬──────────────────┘
+               │                               │
+               ▼                               ▼
+┌──────────────────────┐         ┌────────────────────────────────┐
+│ cli.py               │         │ FastMCP tools                  │
+│ init / auto / store  │         │ remagraph_store/search/status  │
+│ search / status      │         └────────────────┬───────────────┘
+└──────────┬───────────┘                          │
+           │                                      │
+           └──────────────────┬───────────────────┘
+                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    FastMCP (stdio transport)                     │
-│                    remagraph/server.py                           │
-│                                                                 │
+│  store.py / search.py / arbitration.py / dedup.py / db.py       │
+│  （CLI 與 MCP 共用同一套核心邏輯）                                  │
+└─────────────────────────────────────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  SQLite + FTS5 + audit.jsonl  （REMAGRAPH_STATE_DIR）             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+（以下為 MCP 工具與仲裁層細節，與 v1 相同。）
+
+```
 │  ┌───────────────┐  ┌────────────┐  ┌────────────────────────┐ │
 │  │ store.py      │  │ search.py  │  │ server.py              │ │
 │  │ process_store │  │ search_    │  │ (FastMCP dispatch)     │ │
@@ -75,12 +101,13 @@ RemaGraph 是一把輕量的 MCP 工具，讓 AI coding agent 在處理任務時
 
 | 模組 | 職責 |
 |------|------|
-| `server.py` | MCP server 進入點。透過 FastMCP (mcp SDK) 註冊三個 tool，管理 DB 連線生命週期。 |
+| `server.py` | 程式進入點。路由 CLI 子命令與 MCP stdio；FastMCP 註冊三個 tool；管理 DB 連線生命週期。 |
+| `cli.py` | Headless CLI：`init` / `auto` / `store` / `search` / `status`。JSON stdout；與 MCP 共用 store/search 核心。 |
 | `models.py` | Pydantic schema 定義。`StoreRequest`、`SearchRequest`、`StatusRequest` 及對應 Response、核心 `Memory` 型別。 |
 | `store.py` | 完整的 store 流程編排（仲裁 → 去重 → supersede/invalidate → ID 生成 → INSERT → audit）。SQLite + FTS5 讀寫。 |
 | `arbitration.py` | 五條非 LLM 仲裁規則（summary 長度、learnings 非空、handoff_note 長度、model2vec 去重、agent_id 格式），status_update supersede，discovered_constraint invalidate。 |
 | `dedup.py` | model2vec 語意去重（仲裁規則 #4）。載入 `potion-multilingual-128M` 模型，計算 cosine similarity，門檻 0.90。fail-fast。 |
-| `search.py` | FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）與狀態查詢。包含 query sanitization、has_more 判定。 |
+| `search.py` | FTS5 BM25 全文檢索（trigram，CJK）+ 無 query 時依 task_id/agent_id 列表模式；status 查詢。 |
 | `db.py` | SQLite 連線管理、state 路徑展開、Schema 初始化與 migration。 |
 | `audit.py` | 自管 audit writer。store transaction commit 後 append 到 `audit.jsonl`，僅記錄 stored/error 兩種狀態。 |
 
@@ -186,11 +213,23 @@ RemaGraph 以 stdio transport 作為 MCP server，由 client 管理子 process �
 }
 ```
 
+### CLI 入口（v0.2）
+
+| 指令 | 用途 |
+|------|------|
+| `remagraph init --project NAME` | 建立專案 state 目錄與 `env.sh` |
+| `remagraph auto --task-id T --agent-id A -- CMD` | 一鍵 recall → 執行 → store |
+| `remagraph store / search / status` | 與 MCP 工具對等的 JSON CLI |
+| `remagraph serve`（或無子命令） | MCP stdio server |
+
+白話慣例見 [`docs/task-memory-convention.md`](./task-memory-convention.md)。
+
 ### 環境變數
 
 | 變數 | 說明 | 預設值 |
 |------|------|--------|
 | `REMAGRAPH_STATE_DIR` | SQLite DB 與 audit.jsonl 存放目錄 | `~/.local/state/remagraph/` |
+| `TASK_ID` / `AGENT_ID` | 供 `auto` / wrapper 使用的預設識別碼 | 自動產生 / `default-agent` |
 
 ### Process 模型
 
