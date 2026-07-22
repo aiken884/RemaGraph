@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **herdr 整合層級澄清**：明確區分工具層（herdr-bridge ACP hooks + on_event）與治理層為目前進行中；組織層（herdr-org 指揮塔正式接入 + 實際 workload 驗證）僅設計階段，開發稍後。
+- 所有相關文件已對齊現狀（整合計劃、README、task-memory-convention、dispatch_with_memory.py、governance 文件等）。
+- 跨專案溝通持續使用 ACP 直接協調；已要求 Herdr Bridge 將「herdr-org 正式接實際 workload」與「技術接線細節」加入 Herdr org 藍圖（設計階段）。
+- 里程碑狀態更新：M1~M3 完成，M4 進入組織層設計準備。
+
 ## [0.2.0-alpha] — 2026-07-22（內部 Alpha 測試版）
 
 > **注意**：此版本僅供內部使用，尚未對外發布 PyPI。僅用於 herdr Bridge 內部測試與獨立 headless agent 測試。
@@ -16,12 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### 極簡任務記憶 / headless CLI
 - **`remagraph init`**：一行初始化專案記憶目錄，並產生可 `source` 的 `env.sh`
 - **`remagraph auto`**：一鍵 recall → 執行指令 → 自動 store（非技術使用者主入口）
+  - 新增 `--recall-only`：指揮塔派工前可只讀取記憶、不執行、不儲存
 - **`remagraph store` / `search` / `status`**：CLI 子命令，JSON 輸出到 stdout（argparse、零新依賴）；MCP 模式維持 `remagraph serve`
 - **`search` 支援只帶 `--task-id`**（不必 `--query`），方便任務軌跡回顧
 - **極簡包裝腳本**：`examples/simple/remagraph-task.sh`
 - **herdr Bridge 範例**：`examples/herdr-bridge/dispatch_with_memory.py`、`simple-memory-helper.sh`
 - **白話慣例文件**：`docs/task-memory-convention.md`
+- **內部測試 Playbook**：`docs/internal/alpha-test-playbook.md`（含測試場景、命名規則、回饋模板）
+- **指揮塔自動化提示詞**：`docs/internal/指揮塔自動化提示詞.md`（供另一 Agent 實作）
 - **一鍵安裝腳本**：`scripts/one-key-install.sh`
+- init 與 quickstart 大幅強化非技術使用者與 herdr 使用說明
 
 #### 安全 / 治理 / 可靠度（v2 Phase 1–2）
 - **路徑穿越防禦 (A3)**：`REMAGRAPH_STATE_DIR` 字元正則驗證 + `resolve()` 後禁止系統目錄

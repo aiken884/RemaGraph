@@ -19,7 +19,7 @@
 
 1. **歷史**：本文件初稿階段只規劃、不執行實作；進入寫碼前須人類明確「同意實作」。**v1 已於 2026-07-21 經 Goal 授權並由艦隊完成。**
 2. 實作必須對齊凍結設計；若與 `DESIGN.md` 衝突，**以 DESIGN.md 為準**並開 ADR／回報，不得靜默偏離。
-3. **不耦合** herdr-bridge／herdr-gov（程式碼、README、tool 名稱皆不得綁定）。
+3. **不耦合** herdr-bridge／herdr-gov（程式碼層/API層不得直接 import/依賴）。目前透過 ACP 直接協調 + examples/ 範例對接；組織層（herdr-org）僅設計階段。
 4. 依賴新增限設計已列：`model2vec`、`mcp`、`pydantic`；optional `sqlite-vec` 僅 v2。建議 **pin 上界**（如 `model2vec>=0.1.0,<2.0`、`mcp>=1.0,<2`）於 WU-0。
 5. 指揮塔／艦隊紀律：實作由艦隊經 `route()` 派工；本計畫為「實作藍圖」。
 6. **本計畫 APPROVE ≠ 開工令**（歷史規則保留）；v1 開工已另有人類 Goal 同意。**PyPI publish 仍須另開 HITL**，不因 v1 完成而自動授權。

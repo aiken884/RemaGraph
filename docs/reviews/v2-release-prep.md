@@ -91,7 +91,7 @@ remagraph search --task-id release-check-001
 | CI Actions | 可能額度不足；以本機 gate 為準 |
 | ID 格式 | `task_id`/`agent_id` 不可用中文；agent_id 須小寫 3–64 |
 | summary | ≥ 30 字；`auto` 會自動補足 |
-| herdr 正式接入 | 範例已提供；指揮塔專案側另開 |
+| herdr 正式接入 | 工具層+治理層已完成（herdr-bridge hooks + RemaGraph wrapper）；組織層（herdr-org）僅設計階段，開發稍後；範例已提供 |
 
 ---
 

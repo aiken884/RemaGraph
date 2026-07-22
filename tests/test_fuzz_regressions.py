@@ -31,6 +31,7 @@ def setup_env(tmp_path, monkeypatch):
 def test_missing_agent_id_raises_validation_error():
     with pytest.raises(ValidationError):
         server.remagraph_store(
+            project_id="testproj",
             task_id="t-fuzz-1",
             agent_id=None,  # type: ignore[arg-type]
             kind="task_handoff",
@@ -44,6 +45,7 @@ def test_missing_agent_id_raises_validation_error():
 def test_learnings_not_list_raises_validation_error():
     with pytest.raises(ValidationError):
         server.remagraph_store(
+            project_id="testproj",
             task_id="t-fuzz-2",
             agent_id="fuzz",
             kind="task_handoff",
@@ -57,6 +59,7 @@ def test_learnings_not_list_raises_validation_error():
 def test_summary_none_raises_validation_error():
     with pytest.raises(ValidationError):
         server.remagraph_store(
+            project_id="testproj",
             task_id="t-fuzz-3",
             agent_id="fuzz",
             kind="task_handoff",
@@ -70,6 +73,7 @@ def test_summary_none_raises_validation_error():
 def test_unknown_kind_raises_validation_error():
     with pytest.raises(ValidationError):
         server.remagraph_store(
+            project_id="testproj",
             task_id="t-fuzz-4",
             agent_id="fuzz",
             kind="unknown_kind",  # type: ignore[arg-type]
@@ -83,11 +87,12 @@ def test_unknown_kind_raises_validation_error():
 def test_tags_bytes_raises_validation_error():
     with pytest.raises(ValidationError):
         server.remagraph_store(
+            project_id="testproj",
             task_id="t-fuzz-5",
             agent_id="fuzz",
             kind="task_handoff",
             summary=("A" * 60),
             learnings=["l1"],
             handoff_note=("n" * 20),
-            tags=[b'bad_tag'],  # type: ignore[arg-type]
+            tags=[b"bad_tag"],  # type: ignore[arg-type]
         )

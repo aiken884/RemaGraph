@@ -9,6 +9,9 @@
 #
 # 或者自動包裝：
 #   ./simple-memory-helper.sh wrap "task-001" "agent-name" "你的原始指令"
+#
+# 指揮塔想只先 recall（不執行）可直接用：
+#   remagraph auto --recall-only --task-id "task-001" --agent-id "..." 
 
 set -e
 

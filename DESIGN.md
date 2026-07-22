@@ -17,7 +17,7 @@
 | **PyPI** | 目標 `pip install remagraph`；**v1 尚未 publish**（目前 `pip install -e .`／原始碼安裝） |
 | **套件版本** | `0.1.0`（見 `pyproject.toml`）；實作收斂 [`docs/reviews/v1-closeout-status.md`](docs/reviews/v1-closeout-status.md) |
 | **Python** | 3.11+，uv 管理依賴 |
-| **與外部專案的關係** | 完全獨立。不屬於 herdr-bridge / herdr-gov，不認識 Herdr 生態系。任何 AI coding agent 都可以直接使用 |
+| **與外部專案的關係** | 完全獨立（無程式碼耦合）。與 herdr-bridge 透過 ACP 直接協調 + 範例整合；組織層（herdr-org）僅設計階段。目前工具層+治理層已完成，任何 AI coding agent 都可直接使用 |
 
 ---
 
@@ -31,7 +31,7 @@ RemaGraph **不知道**以下專案的存在，它的程式碼、README、CHANGE
 
 | 專案 | 關係 |
 |------|------|
-| herdr-bridge | RemaGraph 與 herdr-bridge 沒有程式碼層級或 API 層級的互動。RemaGraph 不引用 herdr-bridge，herdr-bridge 亦不引用 RemaGraph |
+| herdr-bridge | 無程式碼/API 耦合。透過 ACP 直接跨專案溝通 + examples/herdr-bridge/ 範例對接。herdr-bridge 提供 hooks，RemaGraph 提供 MemoryDispatcher。目前組織層（herdr-org）設計階段 |
 | herdr-gov | 同上，RemaGraph 不認識 herdr-gov |
 
 ### 外部排程系統如何消費 RemaGraph

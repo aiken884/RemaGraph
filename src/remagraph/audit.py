@@ -64,6 +64,7 @@ def append_audit(response: StoreResponse, request: StoreRequest) -> None:
 
     record: dict[str, str | None] = {
         "action": "remagraph_store",
+        "project_id": getattr(request, "project_id", None),
         "task_id": request.task_id,
         "agent_id": request.agent_id,
         "kind": request.kind,

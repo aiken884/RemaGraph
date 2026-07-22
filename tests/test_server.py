@@ -34,6 +34,7 @@ def setup_test_env(tmp_path, monkeypatch):
 def test_store_task_handoff_success():
     """寫入 task_handoff 成功回傳 stored。"""
     result = server.remagraph_store(
+        project_id="testproj",
         task_id="task-test-001",
         agent_id="oc-test",
         kind="task_handoff",
@@ -54,6 +55,7 @@ def test_store_status_update_supersede():
     """連續兩次寫入同 task_id 的 status_update，第二次應 supersede 第一次。"""
     # 第一次
     r1 = server.remagraph_store(
+        project_id="testproj",
         task_id="task-test-002",
         agent_id="oc-test",
         kind="status_update",
@@ -69,6 +71,7 @@ def test_store_status_update_supersede():
 
     # 第二次（同 task_id）
     r2 = server.remagraph_store(
+        project_id="testproj",
         task_id="task-test-002",
         agent_id="oc-test",
         kind="status_update",
@@ -84,6 +87,7 @@ def test_store_status_update_supersede():
 def test_store_rejected_summary_too_short():
     """summary 太短應被拒絕。"""
     result = server.remagraph_store(
+        project_id="testproj",
         task_id="task-test-003",
         agent_id="oc-test",
         kind="task_handoff",
@@ -100,6 +104,7 @@ def test_store_rejected_summary_too_short():
 def test_store_rejected_learnings_empty():
     """learnings 為空應被拒絕。"""
     result = server.remagraph_store(
+        project_id="testproj",
         task_id="task-test-004",
         agent_id="oc-test",
         kind="status_update",
@@ -130,6 +135,7 @@ def test_search_with_data():
     """先寫入一筆，再查詢確認能找到。"""
     # 寫入
     store_result = server.remagraph_store(
+        project_id="testproj",
         task_id="task-test-005",
         agent_id="oc-test",
         kind="task_handoff",
@@ -174,6 +180,7 @@ def test_status_empty_db():
 def test_status_with_updates():
     """寫入 status_update 後，status 查詢能回傳。"""
     server.remagraph_store(
+        project_id="testproj",
         task_id="task-test-006",
         agent_id="oc-test",
         kind="status_update",

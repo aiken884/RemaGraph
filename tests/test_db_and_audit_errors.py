@@ -38,6 +38,7 @@ def test_db_insert_failure_returns_error(monkeypatch):
     monkeypatch.setattr(store, "insert_memory", fake_insert_memory)
 
     res = server.remagraph_store(
+        project_id="testproj",
         task_id="t-db-fail",
         agent_id="dbtester",
         kind="task_handoff",
@@ -63,6 +64,7 @@ def test_audit_write_failure_is_silent(monkeypatch):
 
     try:
         res = server.remagraph_store(
+            project_id="default",
             task_id="t-audit-fail",
             agent_id="audit-tester",
             kind="task_handoff",
