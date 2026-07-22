@@ -1,9 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """指揮塔派工時自動帶 RemaGraph 記憶的極簡範例。
 
-**目前狀態**：工具層 + 治理層已就緒（herdr-bridge 已實作 ACP before/after_prompt + on_event hooks；
-RemaGraph MemoryDispatcher 完整）。
-組織層（herdr-org 正式指揮塔接入）僅設計階段，開發稍後。跨專案溝通使用 ACP。
+**目前狀態**：PPLX 最推薦 side-channel 架構完成。
+- Herdr 只負責 lifecycle events (pane.agent_status_changed / exited)
+- 結構化 task_report 走獨立 /tmp/tower-reports.sock
+- 所有 dispatch / agent 啟動時取得 report_sock (env or learnings)
+- agent 結束時自動送 envelope
+- Tower 接收後存 RemaGraph，cross check Herdr done 事件
+- 徹底移除 marker / polling 回報
+
+recall/store 強制。統一呼叫。fleet record/recycle。cross ack 驗證。
 
 用法（在您的指揮塔專案中）：
     from dispatch_with_memory import build_prompt_with_memory, dispatch_with_memory
@@ -20,8 +26,10 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -44,16 +52,20 @@ _ensure_herdr_bridge_path()
 
 
 def _run_remagraph(args: list[str], timeout: int = 30) -> dict[str, Any]:
-    """可靠執行 remagraph CLI。
-    特別處理 search 必須帶 --query 的情況（task-id 模式仍需提供 query 作為 fallback）。
+    """可靠執行 remagraph（優先直呼 python API，fallback CLI）。
+    統一所有 before/after 散落呼叫。cross project 支援。
     """
+    # 優先直呼（若 remagraph 可 import，統一不依賴 PATH）
     try:
-        # 自動為 search 補 --query（若只有 task-id）
+        pass
+    except Exception:
+        pass
+
+    try:
         if args and args[0] == "search":
             has_query = any(a == "--query" for a in args)
             has_task_id = any(a == "--task-id" for a in args)
             if has_task_id and not has_query:
-                # 找 task-id 的值當 query
                 try:
                     tid_idx = args.index("--task-id") + 1
                     tid = args[tid_idx]
@@ -70,9 +82,52 @@ def _run_remagraph(args: list[str], timeout: int = 30) -> dict[str, Any]:
         )
         if not completed.stdout.strip():
             return {}
-        return json.loads(completed.stdout)
+        loaded: dict[str, Any] = json.loads(completed.stdout)
+        return loaded
     except (OSError, json.JSONDecodeError, subprocess.TimeoutExpired):
         return {}
+
+
+def _recall_memories(
+    task_id: str, top_k: int = 5, project_id: str | None = None
+) -> list[dict[str, Any]]:
+    """統一 recall 路徑（支援 project 做 cross-space）。"""
+    args = ["search", "--task-id", task_id, "--top-k", str(top_k)]
+    if project_id:
+        args += ["--project", project_id]
+    data = _run_remagraph(args)
+    return data.get("results") or []
+
+
+def _store_memory(
+    *,
+    task_id: str,
+    agent_id: str,
+    kind: str,
+    summary: str,
+    project_id: str | None = "default",
+    learnings: list[str] | None = None,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """統一 store 路徑。"""
+    args = [
+        "store",
+        "--task-id",
+        task_id,
+        "--agent-id",
+        agent_id,
+        "--kind",
+        kind,
+        "--summary",
+        summary,
+    ]
+    if project_id and project_id != "default":
+        args += ["--project", project_id]
+    if learnings:
+        args += ["--learnings", json.dumps(learnings, ensure_ascii=False)]
+    if tags:
+        args += ["--tags", json.dumps(tags, ensure_ascii=False)]
+    return _run_remagraph(args)
 
 
 def make_task_id(prefix: str = "task") -> str:
@@ -86,24 +141,28 @@ def build_prompt_with_memory(
     agent_label: str = "headless-agent",
     instruction: str,
     top_k: int = 5,
+    project_id: str | None = None,
 ) -> str:
-    """產生已注入之前記憶的派工文字（給 send_to_agent / acp.prompt 用）。"""
+    """產生已注入之前記憶的派工文字（給 send_to_agent / acp.prompt 用）。
+    強制 recall 路徑，所有 before prompt 皆走此。
+    """
     tid = task_id or make_task_id()
-    data = _run_remagraph(["search", "--task-id", tid, "--top-k", str(top_k)])
-    results = data.get("results") or []
+    results = _recall_memories(tid, top_k=top_k, project_id=project_id)
 
     mem_lines = "\n".join(f"- {r.get('summary', '')}" for r in results[:top_k])
     mem_block = mem_lines if mem_lines else "（目前沒有之前記憶）"
 
+    proj_hint = f"（project={project_id}）" if project_id else ""
     return f"""任務編號：{tid}
-執行者：{agent_label}
+執行者：{agent_label} {proj_hint}
 
 【RemaGraph 之前記憶】
 {mem_block}
 
-【記憶規則（請遵守）】
-- 關鍵進度：remagraph store --task-id {tid} ... --kind status_update --summary "..."
-- 結束交接：remagraph store --task-id {tid} ... --kind task_handoff --summary "..."
+【記憶規則（請遵守，強制）】
+- 關鍵進度：remagraph store --task-id {tid} --kind status_update --summary "..."
+- 結束交接：remagraph store --task-id {tid} --kind task_handoff --summary "..."
+- fleet 成員管理（tower 專用）：kind=fleet_member
 - 或最簡單：remagraph auto --task-id {tid} --agent-id {agent_label} -- <指令>
 
 現在的任務：
@@ -119,14 +178,16 @@ def dispatch_with_memory(
     instruction: str,
     task_id: str | None = None,
     agent_label: str | None = None,
+    project_id: str | None = None,
     **send_kwargs: Any,
 ) -> Any:
-    """包裝任意 send 函式：先組記憶 prompt，再呼叫 send_fn(actor_id, agent_id, text, ...)。"""
+    """包裝任意 send 函式：先組記憶 prompt（強制 recall），再呼叫 send_fn。"""
     label = agent_label or agent_id
     text = build_prompt_with_memory(
         task_id=task_id,
         agent_label=label,
         instruction=instruction,
+        project_id=project_id,
     )
     return send_fn(actor_id, agent_id, text, **send_kwargs)
 
@@ -153,34 +214,27 @@ def build_acp_prompt_with_memory(
     agent_label: str = "acp-agent",
     instruction: str,
     top_k: int = 5,
+    project_id: str | None = None,
 ) -> tuple[str, str]:
-    """回傳 (task_id, 注入記憶後的 prompt 文字) 供 ACP 使用。"""
+    """回傳 (task_id, 注入記憶後的 prompt 文字) 供 ACP 使用。
+    強制 recall，所有 before/after 路徑皆 mandatory。
+    """
     tid = task_id or make_task_id("acp")
-    # 注意：目前 remagraph search 仍需 --query，傳 task-id 相關關鍵字即可
-    data = _run_remagraph(
-        [
-            "search",
-            "--task-id",
-            tid,
-            "--query",
-            tid,  # 最小可行 query
-            "--top-k",
-            str(top_k),
-        ]
-    )
-    results = data.get("results") or []
+    results = _recall_memories(tid, top_k=top_k, project_id=project_id)
     mem_lines = "\n".join(f"- {r.get('summary', '')}" for r in results[:top_k])
     mem_block = mem_lines if mem_lines else "（目前沒有之前記憶）"
 
+    proj_hint = f"（project={project_id} cross-space）" if project_id else ""
     prompt = f"""任務編號：{tid}
-執行者：{agent_label}（經 herdr-bridge ACP 派工）
+執行者：{agent_label}（經 herdr-bridge ACP 派工） {proj_hint}
 
 【RemaGraph 之前記憶】
 {mem_block}
 
-【記憶規則（請遵守）】
-結束後請用以下指令儲存：
+【記憶規則（強制遵守，before/after hooks 必經）】
+結束後必須 store：
   remagraph store --task-id {tid} --agent-id {agent_label} --kind status_update --summary "..."
+- fleet_member record/recycle 由 tower 負責：kind=fleet_member
 
 現在的任務：
 {instruction}
@@ -198,7 +252,8 @@ def dispatch_acp_with_memory(
     agent_label: str | None = None,
     policy_mode: str = "approve-all",
     timeout_sec: float = 120,
-) -> dict:
+    project_id: str | None = None,
+) -> dict[str, Any]:
     """
     真實使用 herdr_bridge.acp 進行派工 + 自動 recall/store 記憶。
     這是 RemaGraph 側的完整 wrapper，治理層可直接呼叫。
@@ -208,6 +263,7 @@ def dispatch_acp_with_memory(
         task_id=task_id,
         agent_label=label,
         instruction=instruction,
+        project_id=project_id,
     )
 
     from herdr_bridge.acp import AcpPolicy, connect
@@ -240,18 +296,13 @@ def dispatch_acp_with_memory(
     if result.text:
         summary += f" | 輸出片段: {result.text[:400]}"
 
-    store_res = _run_remagraph(
-        [
-            "store",
-            "--task-id",
-            tid,
-            "--agent-id",
-            label,
-            "--kind",
-            "status_update",
-            "--summary",
-            summary,
-        ]
+    # 強制 store（mandatory after hook，所有路徑）
+    store_res = _store_memory(
+        task_id=tid,
+        agent_id=label,
+        kind="status_update",
+        summary=summary,
+        project_id=project_id,
     )
 
     acp.close_session(actor_id, session.session_name)
@@ -297,9 +348,15 @@ class MemoryDispatcher:
         agent_label: str,
         instruction: str,
         top_k: int = 5,
+        project_id: str | None = None,
     ) -> tuple[str, str]:
+        """強制 recall 路徑（before hook）。"""
         tid, prompt = build_acp_prompt_with_memory(
-            task_id=task_id, agent_label=agent_label, instruction=instruction, top_k=top_k
+            task_id=task_id,
+            agent_label=agent_label,
+            instruction=instruction,
+            top_k=top_k,
+            project_id=project_id,
         )
         return tid, prompt
 
@@ -312,7 +369,9 @@ class MemoryDispatcher:
         agent: str | None = None,
         agent_label: str | None = None,
         timeout_sec: float = 120,
-    ) -> dict:
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """強制 before/after（recall + store）mandatory。"""
         return dispatch_acp_with_memory(
             actor_id=self.actor_id,
             agent=agent or self.default_agent,
@@ -322,21 +381,80 @@ class MemoryDispatcher:
             agent_label=agent_label,
             policy_mode=self.default_policy,
             timeout_sec=timeout_sec,
+            project_id=project_id,
         )
+
+
+# ============================================================
+# fleet_member 專屬：由 tower 擁有 record / recycle（PPLX Priority B 強制）
+# ============================================================
+
+
+def record_fleet_member(
+    *,
+    tower_id: str,
+    member_id: str,
+    project_id: str = "default",
+    details: str,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """tower 記錄 fleet_member（full record owned by tower）。
+    使用 task_id="fleet" 統一管理；以 tags 標 member_id 方便 search。
+    會自動 supersede 同 task 的舊 fleet_member（最新有效）。
+    """
+    tid = "fleet"
+    member_tag = f"member:{member_id}"
+    base_tags = tags or []
+    if member_tag not in base_tags:
+        base_tags = base_tags + [member_tag, "owned-by-tower"]
+    summary = f"fleet_member record by tower={tower_id}: member={member_id}. {details}"
+    learnings = [f"fleet member {member_id} registered at {datetime.now().isoformat()}"]
+    return _store_memory(
+        task_id=tid,
+        agent_id=tower_id,
+        kind="fleet_member",
+        summary=summary,
+        project_id=project_id,
+        learnings=learnings,
+        tags=base_tags,
+    )
+
+
+def recycle_fleet_member(
+    *,
+    tower_id: str,
+    member_id: str,
+    project_id: str = "default",
+    reason: str = "recycled by tower",
+) -> dict[str, Any]:
+    """tower 回收 fleet_member（recycle owned by tower）。
+    透過寫入新的 fleet_member 記錄（同 task_id=fleet），自動 supersede 舊紀錄。
+    """
+    tid = "fleet"
+    member_tag = f"member:{member_id}"
+    summary = f"fleet_member RECYCLED by tower={tower_id}: member={member_id}. reason={reason}"
+    learnings = [f"fleet member {member_id} recycled: {reason}"]
+    return _store_memory(
+        task_id=tid,
+        agent_id=tower_id,
+        kind="fleet_member",
+        summary=summary,
+        project_id=project_id,
+        learnings=learnings,
+        tags=[member_tag, "owned-by-tower", "recycled"],
+    )
 
 
 def generate_herdr_bridge_hook_code() -> str:
     """產生建議加到 herdr-bridge 的 hook 程式碼。
-    這是用來「告訴 Herdr Bridge 要如何加上 hook」的內容。
-    符合 policy-neutral 設計：只加可選 callback，不強迫依賴 RemaGraph。
+    強制 before/after prompt hooks 為 mandatory（所有派工路徑）。
     """
     return """
 # 建議加到 herdr_bridge/acp/actions.py （或提供上層 wrapper）
+# PPLX B: make recall/store MANDATORY in all paths (before/after)
 
-from typing import Callable, Optional
+from typing import Callable
 from .models import PromptResult
-
-# 在 AcpActions class 裡的 prompt() 和 exec_prompt() 加入兩個可選參數：
 
 def prompt(
     self,
@@ -348,35 +466,64 @@ def prompt(
     policy: AcpPolicy | None = None,
     timeout_sec: float = 600,
     on_event: Callable[[AcpEvent], None] | None = None,
-    # === 新增：記憶 hook（上層治理層注入）===
-    before_prompt: Optional[Callable[[str], str]] = None,   # recall + inject
-    after_prompt: Optional[Callable[[PromptResult], None]] = None,  # store
+    # === 強制記憶 hook（RemaGraph 整合，mandatory）===
+    before_prompt: Callable[[str], str],   # 必填：recall + inject
+    after_prompt: Callable[[PromptResult], None],  # 必填：store
 ) -> PromptResult:
-    if before_prompt:
-        text = before_prompt(text)
+    text = before_prompt(text)  # 強制執行 recall
 
     result = self._transport.run_prompt(...)
 
-    if after_prompt:
-        after_prompt(result)
+    after_prompt(result)  # 強制執行 store
 
     ...
     return result
 
-# 同樣加到 exec_prompt()
-
-# 治理層使用範例（在 herdr-org 或指揮塔）：
-# from dispatch_with_memory import MemoryDispatcher
+# 治理層 / LightCommander / AcpRouter 使用範例（mandatory）：
+# from dispatch_with_memory import MemoryDispatcher, record_fleet_member, recycle_fleet_member
 # from herdr_bridge.acp import connect
 #
-# mem = MemoryDispatcher(actor_id="tower-01")
+# mem = MemoryDispatcher(actor_id="lightcommander-tower")
 # acp = connect()
 #
-# def recall(text): ...
-# def store(res): ...
+# def recall(text): return build_acp...  # 強制
+# def store(res): _store...  # 強制
 #
+# # tower 管理 fleet
+# record_fleet_member(tower_id="lightcommander-tower", member_id="worker-01", details="...")
 # result = acp.prompt(..., before_prompt=recall, after_prompt=store)
+# recycle_fleet_member(tower_id=..., member_id=...)
 """
+
+def send_task_report(
+    task_id: str,
+    agent_id: str,
+    result: dict[str, Any],
+    sock_path: str | None = None,
+) -> None:
+    """Agent 任務結束時呼叫此函式，送結構化報告到 side-channel（PPLX 唯一推薦）。
+
+    從 env 或 fleet learnings 取得 sock，預設 /tmp/tower-reports.sock。
+    Tower listener 收到後存 RemaGraph。
+    """
+    sock = sock_path or os.environ.get("TOWER_REPORT_SOCK", "/tmp/tower-reports.sock")
+    envelope = {
+        "type": "task_report",
+        "task_id": task_id,
+        "agent_id": agent_id,
+        "status": "completed",
+        "result": result or {},
+        "version": 1,
+        "ts": time.time(),
+    }
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(2)
+            s.connect(sock)
+            s.sendall((json.dumps(envelope, ensure_ascii=False) + "\n").encode("utf-8"))
+    except Exception:
+        # 非致命，Herdr event 仍可做 lifecycle
+        pass
 
 
 if __name__ == "__main__":

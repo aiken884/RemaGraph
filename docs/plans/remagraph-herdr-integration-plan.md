@@ -111,6 +111,7 @@ remagraph auto --task-id T --agent-id A -- <cmd>
   2. 更細的技術接線方式：herdr-org dispatch 如何使用 MemoryDispatcher + herdr-bridge hooks（before_prompt/after_prompt）、範例、task_id 策略、workdir 隔離等。
 - RemaGraph 側 MemoryDispatcher 已完整，準備好等組織層開發時對接。
 - 跨專案溝通全程使用 ACP 完成。
+- Option B (RemaGraph 側測試)：驗證 cross project 記憶。使用 bridge governance memory prepare_dispatch_text + store_memory 成功，RemaGraph 側 (project=herdr) 可 search 到。schema 相容測試通過 (bridge 0.2.0 schema3 與 RemaGraph 一致)。task_id 共享可靠。
 
 ### 8. 直接 ACP 協調記錄
 - 已多次直接使用 herdr_bridge.acp 與 agent 對話（全程跨專案溝通）

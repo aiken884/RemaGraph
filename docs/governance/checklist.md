@@ -150,3 +150,4 @@
 - 2026-07-21：v1 收尾 — mutmut 降版 2.5.1（Python 3.12 + src-layout 相容，避開 v3 bug）、Dependabot 建立、SPDX 標頭補完、P0-4 全勾（指向 v1-adversarial-dispatch-summary）。仍開著的 `[ ]`：廢分支清理、branch protection（需人類 GitHub 設定）。
 - 2026-07-22：ship 前準備 — branch protection 設定完成、廢分支清理完成；全部 P0 項 `[x]`。
 - 2026-07-22：v2 完成 — Phase 1+2 全項實作（A3/A1/A2/D1/O5/O1/O3/O2 + 治理 CONTRIBUTING/PR/PyPI/ADR/Dependabot）；mypy strict 全過；ruff 全綠；216 tests passed。
+- 2026-07-22（後續）：發行前準備 — 更新 release-prep、README、CHANGELOG 以反映 Herdr Bridge 真實運作現況；暫不 tag 發布；開始進行 migration 驗證與營運準備。

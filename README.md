@@ -16,9 +16,9 @@
 | **貢獻指南** | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
 | **變更日誌** | [`CHANGELOG.md`](./CHANGELOG.md) |
 
-## 安裝（內部 Alpha 階段）
+## 安裝（目前主要用於 Herdr Bridge 真實運作）
 
-**目前僅供內部使用，尚未對外發布 PyPI。**
+**目前主要用於 Herdr Bridge 真實運作，尚未對外公開發布 PyPI。**
 
 推薦安裝方式（一行指令）：
 
@@ -36,9 +36,9 @@ uv pip install -e .
 
 依賴：Python ≥3.11、model2vec、mcp (FastMCP)、pydantic。
 
-## 快速開始（非技術使用者，5 分鐘上手）— 內部測試版
+## 快速開始（非技術使用者，5 分鐘上手）
 
-1. 安裝（見上方「內部 Alpha 階段」安裝方式）
+1. 安裝（見上方「目前主要用於 Herdr Bridge 真實運作」安裝方式）
 2. 初始化：
    ```bash
    remagraph init --project myproject
@@ -62,9 +62,9 @@ remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
 
 不需要寫任何程式碼。完整白話說明見 [`docs/task-memory-convention.md`](./docs/task-memory-convention.md)。
 
-內部測試者請參考 [`docs/internal/alpha-test-playbook.md`](./docs/internal/alpha-test-playbook.md)（含測試場景 + 回饋模板）。
+新使用者可參考 [`docs/internal/alpha-test-playbook.md`](./docs/internal/alpha-test-playbook.md) 作為上手指南（含場景與回饋模板）。
 
-**注意**：目前為內部 Alpha 測試階段，功能可能調整，建議用於 herdr Bridge 內部測試。
+**注意**：目前已在 Herdr Bridge 真實運作中使用。尚未對外公開發布，聚焦發行前準備。
 
 ## MCP 快速開始
 
@@ -162,17 +162,18 @@ agent 寫入記憶，通過五條仲裁規則後寫入 SQLite + FTS5 index。
 |------|------|------|
 | `task_id` | `str` | 任務識別碼（格式：英數字 + `-_`，最多 64 字元） |
 | `agent_id` | `str` | agent 識別碼（同 task_id 格式限制） |
-| `kind` | `"task_handoff" \| "status_update" \| "discovered_constraint"` | 記憶類型 |
+| `kind` | `"task_handoff" \| "status_update" \| "discovered_constraint" \| "fleet_member"` | 記憶類型（fleet_member 由 tower record/recycle） |
 | `summary` | `str` | 一句話摘要（供 FTS5 全文檢索） |
 | `learnings` | `list[str]` | 學到的要點 |
 | `handoff_note` | `str` | 交接備註（`task_handoff` 時必填） |
 | `tags` | `list[str]` | 分類標籤（選填） |
 | `invalidates` | `list[str]` | 要 invalidate 的 memory id（`discovered_constraint` 時用） |
 
-三種 `kind` 的行為：
+四種 `kind` 的行為（PPLX Priority B）：
 - **`task_handoff`**：任務交接記錄，附 `handoff_note`
 - **`status_update`**：狀態更新，同 `task_id` 自動 supersede 舊記錄
 - **`discovered_constraint`**：發現的限制，可 `invalidates` 既有錯誤記憶
+- **`fleet_member`**：由 tower（LightCommander/AcpRouter）擁有，record/recycle 艦隊成員（task_id=fleet 自動 supersede）
 
 ### `remagraph_search` — 查詢記憶
 

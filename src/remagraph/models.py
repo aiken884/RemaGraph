@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 # Literals
 # ---------------------------------------------------------------------------
 
-MemoryKind = Literal["task_handoff", "status_update", "discovered_constraint"]
+MemoryKind = Literal["task_handoff", "status_update", "discovered_constraint", "fleet_member"]
 MemoryStatus = Literal["active", "superseded", "invalidated"]
 
 # ---------------------------------------------------------------------------

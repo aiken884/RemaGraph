@@ -124,7 +124,8 @@ def test_init_schema_creates_meta_table(tmp_path):
     conn = db_mod.connect(state_dir=tmp_path / "state")
     row = conn.execute("SELECT value FROM _meta WHERE key='schema_version'").fetchone()
     assert row is not None
-    assert row[0] == "3"
+    from remagraph.db import SCHEMA_VERSION
+    assert row[0] == str(SCHEMA_VERSION)
     conn.close()
 
 
@@ -218,7 +219,8 @@ def test_run_migrations_noop_for_v1(tmp_path):
     # _run_migrations 應正常完成，不拋錯
     db_mod._run_migrations(conn)
     row = conn.execute("SELECT value FROM _meta WHERE key='schema_version'").fetchone()
-    assert row[0] == "3"
+    from remagraph.db import SCHEMA_VERSION
+    assert row[0] == str(SCHEMA_VERSION)
     conn.close()
 
 

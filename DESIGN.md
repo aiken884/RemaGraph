@@ -226,7 +226,7 @@ agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
 -- 主表
 CREATE TABLE IF NOT EXISTS memories (
     id         TEXT PRIMARY KEY,
-    kind       TEXT NOT NULL CHECK (kind IN ('task_handoff', 'status_update', 'discovered_constraint')),
+    kind       TEXT NOT NULL CHECK (kind IN ('task_handoff', 'status_update', 'discovered_constraint', 'fleet_member')),
     task_id    TEXT NOT NULL,
     agent_id   TEXT NOT NULL,
     timestamp  TEXT NOT NULL,                -- MCP 回傳用（精確到秒），與 created_at 語意不同

@@ -98,6 +98,7 @@ remagraph auto --task-id "$TASK_ID" --agent-id "$AGENT_ID" -- <真正指令>
 | 初始化 | `remagraph init --project 名稱` |
 | 一鍵自動 | `remagraph auto --task-id T --agent-id A -- 指令` |
 | 手動寫入 | `remagraph store --task-id T --agent-id A --kind status_update --summary "..."` |
+| fleet 管理（tower） | `remagraph store --task-id fleet --agent-id tower --kind fleet_member --summary "..." --tags '["member:xx"]'` |
 | 查某個任務 | `remagraph search --task-id T` |
 | 全文搜尋 | `remagraph search --query "關鍵字"` |
 | 看最新現況 | `remagraph status` |
@@ -123,7 +124,8 @@ remagraph auto --task-id "$TASK_ID" --agent-id "$AGENT_ID" -- <真正指令>
 1. **開始**：`remagraph search --task-id ...`（或靠 auto 自動做）  
 2. **關鍵進度**：`status_update`  
 3. **結束 / 交接**：`task_handoff`  
-4. **發現限制**：`discovered_constraint`
+4. **發現限制**：`discovered_constraint`  
+5. **艦隊成員（僅 tower）**：`fleet_member` record/recycle（PPLX B 強制整合）
 
 ---
 

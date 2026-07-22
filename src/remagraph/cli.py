@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from remagraph import db as _db
+from remagraph.maintenance import MaintenancePolicy, run_maintenance, safety_validate_project
 from remagraph.models import SearchRequest, StatusRequest, StoreRequest
 from remagraph.search import get_status, search_memories
 from remagraph.store import process_store
@@ -366,7 +367,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_store.add_argument(
         "--kind",
         required=True,
-        choices=["task_handoff", "status_update", "discovered_constraint"],
+        choices=["task_handoff", "status_update", "discovered_constraint", "fleet_member"],
     )
     p_store.add_argument("--summary", required=True)
     p_store.add_argument("--learnings", help='JSON 陣列，例如 \'["a","b"]\'')
@@ -380,7 +381,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--top-k", type=int, default=20)
     p_search.add_argument(
         "--kind",
-        choices=["task_handoff", "status_update", "discovered_constraint"],
+        choices=["task_handoff", "status_update", "discovered_constraint", "fleet_member"],
     )
     p_search.add_argument("--status", choices=["active", "superseded", "invalidated"])
     p_search.add_argument("--tags", help="JSON 陣列")
@@ -418,7 +419,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_auto.add_argument("--summary", default="", help="自訂結尾摘要（可省略，會自動產生）")
     p_auto.add_argument(
         "--kind",
-        choices=["task_handoff", "status_update", "discovered_constraint"],
+        choices=["task_handoff", "status_update", "discovered_constraint", "fleet_member"],
         default=None,
     )
     p_auto.add_argument("--handoff-note", default="")
@@ -436,6 +437,24 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=argparse.REMAINDER,
         help="要執行的指令（建議前面加 -- ）",
     )
+
+    # maintain
+    p_maintain = sub.add_parser(
+        "maintain", help="執行 DB 自動維護（WAL/FTS/prune/vacuum/integrity）"
+    )
+    p_maintain.add_argument("--project", default=None)
+    p_maintain.add_argument("--force", action="store_true", help="強制所有維護操作")
+    p_maintain.add_argument("--dry-run", action="store_true", help="只顯示會做什麼，不實際執行")
+
+    # migrate-project
+    p_migrate = sub.add_parser(
+        "migrate-project",
+        help="將某 project 記憶從來源 DB 遷移到目標 per-project DB，並標記 invalidated",
+    )
+    p_migrate.add_argument("--from", dest="from_project", required=True, help="來源 project")
+    p_migrate.add_argument("--to", dest="to_project", required=True, help="目標 project")
+    p_migrate.add_argument("--dry-run", action="store_true")
+    p_migrate.add_argument("--force", action="store_true", help="忽略部分安全檢查")
 
     return parser
 
@@ -480,6 +499,129 @@ def main(argv: list[str] | None = None) -> None:
         if args.cmd and args.cmd[0] == "--":
             args.cmd = args.cmd[1:]
         cmd_auto(args)
+    elif args.command == "maintain":
+        cmd_maintain(args)
+    elif args.command == "migrate-project":
+        cmd_migrate_project(args)
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: maintain
+# ---------------------------------------------------------------------------
+
+
+def cmd_maintain(args: argparse.Namespace) -> None:
+    project = args.project or os.environ.get("REMAGRAPH_PROJECT") or "default"
+    print(f"=== RemaGraph maintain: project={project} ===")
+
+    # 強制安全閥門 + 設定 env（確保用正確 DB）
+    try:
+        state_dir = safety_validate_project(project)
+        os.environ["REMAGRAPH_STATE_DIR"] = str(state_dir)
+        os.environ["REMAGRAPH_PROJECT"] = project
+    except Exception as e:
+        print(f"ERROR: 安全閥門阻擋 - {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.dry_run:
+        print("[dry-run] 將執行：WAL/FTS/prune/vacuum/analyze")
+        return
+
+    policy = MaintenancePolicy()
+    try:
+        stats = run_maintenance(policy, project, force=args.force)
+        print("維護完成：")
+        _print_json(stats)
+    except Exception as e:
+        print(f"ERROR: 維護失敗 - {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: migrate-project
+# ---------------------------------------------------------------------------
+
+
+def cmd_migrate_project(args: argparse.Namespace) -> None:
+    from_proj = args.from_project
+    to_proj = args.to_project
+    print(f"=== RemaGraph migrate-project: {from_proj} → {to_proj} ===")
+
+    if from_proj == to_proj:
+        print("ERROR: from 與 to 不能相同", file=sys.stderr)
+        sys.exit(1)
+
+    # 驗證目標 project 的 state_dir
+    try:
+        to_state = safety_validate_project(to_proj, require_env_match=False)
+        os.environ["REMAGRAPH_STATE_DIR"] = str(to_state)
+        os.environ["REMAGRAPH_PROJECT"] = to_proj
+    except Exception as e:
+        print(f"ERROR: 目標 project 驗證失敗 - {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.dry_run:
+        print(f"[dry-run] 從 {from_proj} 遷移到 {to_proj} (target: {to_state})")
+        return
+
+    # 實際遷移邏輯（簡化版，使用 sqlite 直接操作）
+    default_db = Path.home() / ".local/state/remagraph/remagraph.db"
+    target_db = to_state / "remagraph.db"
+
+    if not default_db.exists():
+        print("ERROR: default DB 不存在", file=sys.stderr)
+        sys.exit(1)
+
+    conn_src = sqlite3.connect(str(default_db))
+    conn_src.row_factory = sqlite3.Row
+    conn_tgt = sqlite3.connect(str(target_db))
+    conn_tgt.row_factory = sqlite3.Row
+
+    # 找屬於 to_proj 的記錄（用 task_id / tags / agent_id 啟發式）
+    rows = conn_src.execute(
+        """
+        SELECT * FROM memories
+        WHERE (task_id LIKE ? OR tags LIKE ? OR agent_id LIKE ? OR summary LIKE ?)
+          AND status != 'invalidated'
+        """,
+        (f"%{to_proj}%", f"%{to_proj}%", f"%{to_proj}%", f"%{to_proj}%"),
+    ).fetchall()
+
+    print(f"找到 {len(rows)} 筆待遷移")
+
+    migrated = 0
+    for row in rows:
+        try:
+            # 複製到目標（強制 project_id）
+            cols = [k for k in row.keys() if k != "project_id"]
+            vals = [row[k] for k in cols]
+            placeholders = ",".join("?" for _ in cols)
+            cols_str = ','.join(cols)
+            sql = (
+                f"INSERT OR IGNORE INTO memories "
+                f"(project_id, {cols_str}) VALUES (?, {placeholders})"
+            )
+            conn_tgt.execute(sql, [to_proj] + vals)
+
+            # 在來源 invalidat e
+            learn = json.loads(row["learnings"] or "[]")
+            learn.append(f"migrated-to:{to_proj} at {datetime.now(timezone.utc).isoformat()}")
+            conn_src.execute(
+                "UPDATE memories SET status='invalidated', learnings=? WHERE id=?",
+                (json.dumps(learn, ensure_ascii=False), row["id"]),
+            )
+            migrated += 1
+        except Exception as e:
+            print(f"  skip {row['id']}: {e}")
+
+    conn_tgt.commit()
+    conn_src.commit()
+    conn_tgt.close()
+    conn_src.close()
+
+    print(f"遷移完成：{migrated} 筆")
+    if not args.force:
+        print("建議：執行 remagraph maintain --project {to_proj} --force 清理目標 DB")
 
 
 if __name__ == "__main__":
