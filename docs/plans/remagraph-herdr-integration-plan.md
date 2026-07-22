@@ -1,9 +1,10 @@
 # RemaGraph × herdr Bridge 整合實作計劃
 ## 自動化任務記憶 for Headless Agents
 
-**版本**：v0.3（已依 PPLX 意見實作極簡版核心）  
+**版本**：v0.3（內部 Alpha 測試版）  
 **日期**：2026-07-22  
 **目標**：讓指揮塔派工給 Headless Agents 時，能自動讀取與儲存 RemaGraph 記憶，同時支援兩類使用者。重點：安裝、設定、使用過程要極簡，適合非重度技術或開發人員使用者。  
+**狀態**：目前僅供內部使用，Alpha 測試階段，尚未對外發布。  
 **單一真相來源 (SOT)**：本文件 + `docs/task-memory-convention.md` + RemaGraph CLI
 
 ### 實作狀態（2026-07-22）

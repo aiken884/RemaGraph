@@ -16,27 +16,29 @@
 | **貢獻指南** | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
 | **變更日誌** | [`CHANGELOG.md`](./CHANGELOG.md) |
 
-## 安裝
+## 安裝（內部 Alpha 階段）
 
-**推薦（一行）：**
+**目前僅供內部使用，尚未對外發布 PyPI。**
+
+推薦安裝方式（一行指令）：
 
 ```bash
 uv tool install git+https://github.com/aiken884/RemaGraph.git
 ```
 
-或從原始碼：
+或從原始碼開發安裝：
 
 ```bash
 git clone https://github.com/aiken884/RemaGraph.git
 cd RemaGraph
-pip install -e .
+uv pip install -e .
 ```
 
 依賴：Python ≥3.11、model2vec、mcp (FastMCP)、pydantic。
 
-## 快速開始（非技術使用者，5 分鐘上手）
+## 快速開始（非技術使用者，5 分鐘上手）— 內部測試版
 
-1. 安裝（見上方一行指令）
+1. 安裝（見上方「內部 Alpha 階段」安裝方式）
 2. 初始化：
    ```bash
    remagraph init --project myproject
@@ -54,6 +56,8 @@ pip install -e .
    ```
 
 不需要寫任何程式碼。完整白話說明見 [`docs/task-memory-convention.md`](./docs/task-memory-convention.md)。
+
+**注意**：目前為內部 Alpha 測試階段，功能可能調整，建議用於 herdr Bridge 內部測試。
 
 ## MCP 快速開始
 

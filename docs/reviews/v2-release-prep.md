@@ -1,8 +1,10 @@
-# RemaGraph v0.2.0 發行準備
+# RemaGraph v0.2.0-alpha 內部測試準備
 
 **日期**：2026-07-22  
-**版本**：`0.2.0`  
-**狀態**：發行前準備完成；**打 tag / PyPI 需 HITL 確認**
+**版本**：`0.2.0-alpha`  
+**狀態**：內部 Alpha 測試階段；**僅供內部使用，不對外發布 PyPI**
+
+> 目前專案仍在內部開發階段，尚未完成真實使用者情境與完整內部測試。因此暫不對外發布，僅供群內 herdr Bridge 與相關專案進行 Alpha 測試。
 
 ---
 
@@ -45,26 +47,21 @@ v0.2.0 在 v1 MCP 三工具之上，補上：
 
 ---
 
-## 3. 建議發行指令（確認後再跑）
+## 3. 內部測試安裝方式（目前推薦）
 
 ```bash
-# 1. 確認 main 乾淨且已 push
-git status
-git log -1 --oneline
+# 從 git 安裝（推薦內部使用）
+uv tool install git+https://github.com/aiken884/RemaGraph.git
 
-# 2. 打 tag（觸發 .github/workflows/publish.yml）
-git tag -a v0.2.0 -m "RemaGraph v0.2.0 — CLI init/auto + v2 hardening"
-git push origin v0.2.0
-
-# 3. 觀察 Actions：Publish to PyPI + GitHub Release
-gh run list --workflow=publish.yml --limit 3
+# 或從本機 clone 安裝（開發測試）
+git clone https://github.com/aiken884/RemaGraph.git
+cd RemaGraph
+uv pip install -e .
 ```
 
-若 CI 仍因 Actions 額度暫停，可先只做 GitHub Release（不含 PyPI）：
+使用範例請見 `docs/task-memory-convention.md` 與 README「快速開始（非技術使用者）」章節。
 
-```bash
-gh release create v0.2.0 --title "v0.2.0" --notes-file CHANGELOG.md
-```
+**注意**：暫不執行 `git tag v0.2.0` 與 PyPI 發布流程。待內部測試完成、真實使用者情境驗證後再討論對外發布時機。
 
 ---
 
