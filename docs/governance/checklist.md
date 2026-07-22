@@ -3,7 +3,7 @@
 | 項目 | 內容 |
 |------|------|
 | **來源** | Vault《通用專案治理框架與檢查清單》（P0／P1／P2） |
-| **專案適配** | RemaGraph v1 **已交付**（一人 side project + 艦隊／指揮塔）；套件 `0.1.0` |
+| **專案適配** | RemaGraph v2 工具層+治理層已完成（herdr-bridge ACP hooks + RemaGraph MemoryDispatcher）；組織層（herdr-org）僅設計階段，開發稍後；內部 Alpha |
 | **對應計畫** | [`docs/plans/implementation-plan-v1.md`](../plans/implementation-plan-v1.md) §11 |
 | **收斂狀態** | [`docs/reviews/v1-closeout-status.md`](../reviews/v1-closeout-status.md) |
 | **標記** | `[x]` 已完成 · `[~]` 進行中／部分 · `[ ]` 未做 · `[-]` 刻意延後（附理由） |

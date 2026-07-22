@@ -22,6 +22,7 @@ def audit_file(tmp_path):
 @pytest.fixture
 def stub_request():
     return StoreRequest(
+        project_id="testproj",
         task_id="task-audit-001",
         agent_id="test-agent",
         kind="task_handoff",
@@ -219,6 +220,7 @@ def test_append_audit_existing_file(audit_file, stub_request, monkeypatch):
 
 def test_append_audit_failure_silent(stub_request, monkeypatch):
     """寫入失敗（OSError）不拋例外。"""
+
     # 讓 open 拋出 PermissionError，模擬寫入失敗
     def _fail(*args, **kwargs):
         raise PermissionError("permission denied")

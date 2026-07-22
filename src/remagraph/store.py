@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from datetime import datetime, timezone
 
 import numpy as np
@@ -57,8 +58,7 @@ def generate_memory_id(
     prefix = f"mem-{date_str}-%"
 
     row = conn.execute(
-        "SELECT MAX(CAST(SUBSTR(id, 14) AS INTEGER)) FROM memories "
-        "WHERE id LIKE ?",
+        "SELECT MAX(CAST(SUBSTR(id, 14) AS INTEGER)) FROM memories WHERE id LIKE ?",
         (prefix,),
     ).fetchone()
 
@@ -93,13 +93,24 @@ def insert_memory(
         emb_bytes = embedding.astype(np.float32).tobytes()
 
     conn.execute(
-        "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
+        "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, embedding, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            memory.id, memory.kind, memory.task_id, memory.agent_id,
-            ts, memory.summary, learnings_json, memory.handoff_note, tags_json,
-            memory.status, emb_bytes, ca, ua,
+            memory.id,
+            memory.project_id,
+            memory.kind,
+            memory.task_id,
+            memory.agent_id,
+            ts,
+            memory.summary,
+            learnings_json,
+            memory.handoff_note,
+            tags_json,
+            memory.status,
+            emb_bytes,
+            ca,
+            ua,
         ),
     )
     return memory.id
@@ -115,9 +126,7 @@ def get_memory_by_id(
     memory_id: str,
 ) -> Memory | None:
     """依 id 查詢單筆記憶。回傳 Memory 物件，若不存在回傳 None。"""
-    row = conn.execute(
-        "SELECT * FROM memories WHERE id=?", (memory_id,)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
     if row is None:
         return None
     return _row_to_memory(row)
@@ -173,6 +182,7 @@ def _row_to_memory(row: sqlite3.Row) -> Memory:
     """將 sqlite3.Row 轉換為 Memory Pydantic 物件。"""
     return Memory(
         id=row["id"],
+        project_id=row["project_id"],
         task_id=row["task_id"],
         agent_id=row["agent_id"],
         timestamp=datetime.fromisoformat(row["timestamp"]),
@@ -216,7 +226,7 @@ def process_store(
         )
 
     # 規則 #4: model2vec 去重
-    dedup_result = check_duplicate(request.summary, request.kind, conn)
+    dedup_result = check_duplicate(request.summary, request.kind, conn, request.project_id)
     if not dedup_result.passed:
         return StoreResponse(
             status="rejected",
@@ -230,15 +240,25 @@ def process_store(
     conn.execute("BEGIN")
 
     try:
+        # guardrail: 跨 project 碰撞偵測
+        if request.project_id and request.project_id != "default":
+            other = conn.execute(
+                "SELECT project_id FROM memories WHERE task_id=? AND project_id != ? LIMIT 1",
+                (request.task_id, request.project_id),
+            ).fetchone()
+            if other:
+                print(f"WARNING: task '{request.task_id}' in other project", file=sys.stderr)
+
         # supersede（僅 status_update）
         superseded_ids: list[str] = []
         if request.kind == "status_update":
-            result = supersede_status_updates(request.task_id, conn)
+            result = supersede_status_updates(request.project_id, request.task_id, conn)
             if result.superseded_count > 0:
                 rows = conn.execute(
-                    "SELECT id FROM memories WHERE task_id=? AND kind='status_update' "
-                    "AND status='superseded' ORDER BY created_at DESC LIMIT ?",
-                    (request.task_id, result.superseded_count),
+                    "SELECT id FROM memories WHERE project_id=? AND task_id=? "
+                    "AND kind='status_update' AND status='superseded' "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (request.project_id, request.task_id, result.superseded_count),
                 ).fetchall()
                 superseded_ids = [r["id"] for r in rows]
 
@@ -269,6 +289,7 @@ def process_store(
         # 建立 Memory 物件
         memory = Memory(
             id=mem_id,
+            project_id=request.project_id,
             task_id=request.task_id,
             agent_id=request.agent_id,
             timestamp=now,

@@ -3,6 +3,7 @@
 > **用途**：複製下方「Goal 目標句」與「Plan 本體」啟動 Grok Goal（或等價 `/goal`），讓 agent **以指揮塔模式**協調完成 v1 開發。  
 > **SOT**：[`implementation-plan-v1.md`](./implementation-plan-v1.md)、[`DESIGN.md`](../../DESIGN.md)、[`docs/design/`](../design/)、[`docs/governance/checklist.md`](../governance/checklist.md)  
 > **指揮塔章程**：`~/Projects/herdr-org/docs/command-tower-charter.md`  
+> **herdr 整合現況**：工具層+治理層已完成；組織層設計階段，開發稍後。跨專案使用 ACP。
 > **現況**（2026-07-21 收斂）：**v1 Goal 已完成**；證據見 [`docs/reviews/v1-closeout-status.md`](../reviews/v1-closeout-status.md)。下文 Goal／Plan 本體保留為歷史可重跑紀錄；task checklist 已勾選。
 
 ---

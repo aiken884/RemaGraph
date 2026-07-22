@@ -66,6 +66,8 @@ remagraph search --task-id fix-login-001
 
 ### B. 已經在用 herdr Bridge（指揮塔派工）
 
+**目前狀態**：工具層（herdr-bridge）與治理層已完成；組織層（herdr-org）僅設計階段，開發稍後。RemaGraph 側 MemoryDispatcher 已就緒，herdr-bridge 側 ACP hooks 已實作。
+
 指揮塔派工時，把「已注入記憶」的文字送給 agent 即可。
 
 最簡單做法：複製 `examples/herdr-bridge/dispatch_with_memory.py` 的 `build_prompt_with_memory()`，在 `send_to_agent` 前呼叫。

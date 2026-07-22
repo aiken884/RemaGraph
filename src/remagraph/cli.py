@@ -53,7 +53,7 @@ def _parse_json_list(raw: str | None) -> list[str] | None:
         return parsed
     except (json.JSONDecodeError, ValueError):
         print(
-            "error: --tags/--learnings 必須是 JSON 陣列，例如 '[\"a\",\"b\"]'",
+            'error: --tags/--learnings 必須是 JSON 陣列，例如 \'["a","b"]\'',
             file=sys.stderr,
         )
         sys.exit(1)
@@ -79,7 +79,15 @@ def _pad_summary(text: str, min_len: int = 30) -> str:
 
 
 def cmd_store(args: argparse.Namespace) -> None:
+    project = args.project or os.environ.get("REMAGRAPH_PROJECT") or "default"
+    if project and project != "default" and project not in (args.task_id or "").lower():
+        print(
+            f"WARNING: task_id '{args.task_id}' 未含 project '{project}' 前綴，"
+            f"建議用 {project}-xxx",
+            file=sys.stderr,
+        )
     request = StoreRequest(
+        project_id=project,
         task_id=args.task_id,
         agent_id=args.agent_id,
         kind=args.kind,
@@ -110,9 +118,14 @@ def cmd_store(args: argparse.Namespace) -> None:
 
 
 def cmd_search(args: argparse.Namespace) -> None:
-    if not args.query and not args.task_id and not args.agent_id:
+    project = args.project or os.environ.get("REMAGRAPH_PROJECT")
+    if args.all_projects:
+        project = None
+    elif not project:
+        project = "default"
+    if not args.query and not args.task_id and not args.agent_id and not args.all_projects:
         print(
-            "error: 請提供 --query，或至少提供 --task-id / --agent-id",
+            "error: 請提供 --query，或至少提供 --task-id / --agent-id，或使用 --all-projects",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -122,6 +135,7 @@ def cmd_search(args: argparse.Namespace) -> None:
         kind=args.kind,
         status=args.status,
         tags=_parse_json_list(args.tags),
+        project_id=project,
         agent_id=args.agent_id,
         task_id=args.task_id,
     )
@@ -135,7 +149,12 @@ def cmd_search(args: argparse.Namespace) -> None:
 
 
 def cmd_status(args: argparse.Namespace) -> None:
-    request = StatusRequest(limit=args.limit)
+    project = args.project or os.environ.get("REMAGRAPH_PROJECT")
+    if args.all_projects:
+        project = None
+    elif not project:
+        project = "default"
+    request = StatusRequest(limit=args.limit, project_id=project)
     response = get_status(_get_conn(), request)
     _print_json({"latest": response.latest})
 
@@ -148,7 +167,6 @@ def cmd_status(args: argparse.Namespace) -> None:
 def cmd_init(args: argparse.Namespace) -> None:
     """極簡初始化 - 為非技術使用者設計，一行指令即可。"""
     project = args.project or "default"
-    # 僅允許安全字元，避免路徑注入
     safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in project)
     if not safe:
         safe = "default"
@@ -156,33 +174,50 @@ def cmd_init(args: argparse.Namespace) -> None:
     state_dir.mkdir(parents=True, exist_ok=True)
     state_dir.chmod(0o700)
 
-    # 寫入簡單的 env 提示檔，方便 source
     env_file = state_dir / "env.sh"
     env_file.write_text(
-        f"# 由 remagraph init 產生 — source 此檔即可設定\n"
-        f'export REMAGRAPH_STATE_DIR="{state_dir}"\n',
+        f'export REMAGRAPH_STATE_DIR="{state_dir}"\nexport REMAGRAPH_PROJECT="{project}"\n',
         encoding="utf-8",
     )
     env_file.chmod(0o600)
 
+    meta_file = state_dir / "project.json"
+    meta_file.write_text(
+        f'{{"project_id": "{project}", "state_dir": "{state_dir}", '
+        f'"created": "{__import__("datetime").datetime.now().isoformat()}"}}',
+        encoding="utf-8",
+    )
+    meta_file.chmod(0o600)
+
     print("✅ RemaGraph 初始化完成！")
+    print(f"專案：{project}")
     print(f"記憶資料夾：{state_dir}")
     print("")
-    print("【最簡單：三步驟】")
+    print("【最簡單三步驟（非技術使用者）】")
     print(f"  1. source {env_file}")
     print("  2. 下載包裝腳本（若尚未下載）：")
-    print("     curl -O https://raw.githubusercontent.com/aiken884/RemaGraph/main/examples/simple/remagraph-task.sh")
+    print("     curl -O .../remagraph-task.sh")
     print("     chmod +x remagraph-task.sh")
     print("  3. 執行任務：")
-    print('     TASK_ID=task-001 AGENT_ID=my-ai ./remagraph-task.sh echo "hello"')
+    print(f"     REMAGRAPH_PROJECT={project} TASK_ID=... ./remagraph-task.sh ...")
     print("")
-    print("或用內建一鍵指令（不需下載腳本）：")
-    print('  remagraph auto --task-id task-001 --agent-id my-ai -- echo "hello"')
+    print("或用內建一鍵指令（推薦）：")
+    print(f"  remagraph auto --project {project} --task-id ... ")
     print("")
-    print("注意：task_id / agent_id 只能用英文、數字、底線、連字號（例如 fix-login-001）")
+    print("【herdr Bridge 使用者額外提示】")
+    print("  在指揮塔派工時，建議這樣用：")
+    print(f"  REMAGRAPH_PROJECT={project} TASK_ID=... remagraph auto --project {project} ...")
+    print("  或派工前先查記憶：")
+    print(f"  remagraph auto --project {project} --recall-only ...")
+    print("  或在送給 agent 的 prompt 裡面直接寫上 task_id，讓 agent 自己呼叫。")
+    print("")
+    print("注意：project/task_id/agent_id 限英文數字底線連字號")
     print("")
     print("之後可直接：")
     print(f"  export REMAGRAPH_STATE_DIR={state_dir}")
+    print(f"  export REMAGRAPH_PROJECT={project}")
+    print("")
+    print("內部測試者請參考：docs/internal/alpha-test-playbook.md")
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +226,9 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 
 def cmd_auto(args: argparse.Namespace) -> None:
-    """一鍵：先 recall，可選執行外部指令，最後自動 store。"""
+    project = args.project or os.environ.get("REMAGRAPH_PROJECT") or "default"
+    if args.all_projects:
+        project = None
     task_id = args.task_id
     agent_id = args.agent_id
     top_k = args.top_k
@@ -203,10 +240,10 @@ def cmd_auto(args: argparse.Namespace) -> None:
             print(msg, file=sys.stderr)
 
     _log("=== RemaGraph auto 開始 ===")
-    _log(f"任務：{task_id} / 執行者：{agent_id}")
+    _log(f"專案：{project} 任務：{task_id} / 執行者：{agent_id}")
 
     # 1. recall
-    request = SearchRequest(query="", top_k=top_k, task_id=task_id)
+    request = SearchRequest(query="", top_k=top_k, project_id=project, task_id=task_id)
     try:
         response = search_memories(_get_conn(), request)
         memories = response.results
@@ -221,6 +258,12 @@ def cmd_auto(args: argparse.Namespace) -> None:
                 _log(f"  - {m.get('summary', '')[:80]}")
         else:
             _log(">>> 目前沒有之前記憶")
+
+    if getattr(args, "recall_only", False):
+        _log(">>> recall-only 模式：不執行、不儲存")
+        _print_json({"recalled": len(memories), "memories": memories})
+        _log("=== RemaGraph auto 結束 ===")
+        return
 
     # 2. 執行外部指令（可選）
     exit_code = 0
@@ -243,9 +286,7 @@ def cmd_auto(args: argparse.Namespace) -> None:
     if args.summary:
         summary = args.summary
     elif cmd:
-        summary = (
-            f"auto 完成指令「{' '.join(cmd)}」，退出碼={exit_code}，時間={ts}"
-        )
+        summary = f"auto 完成指令「{' '.join(cmd)}」，退出碼={exit_code}，時間={ts}"
     else:
         summary = f"auto 完成（僅記錄），時間={ts}，task={task_id}"
     summary = _pad_summary(summary)
@@ -257,8 +298,14 @@ def cmd_auto(args: argparse.Namespace) -> None:
             handoff_note or f"auto handoff for task {task_id}",
             min_len=20,
         )
+    if project and project != "default" and project not in (task_id or "").lower():
+        print(
+            f"WARNING: task_id '{task_id}' 未含 project '{project}' 前綴，建議用 {project}-xxx",
+            file=sys.stderr,
+        )
     try:
         store_req = StoreRequest(
+            project_id=project,
             task_id=task_id,
             agent_id=agent_id,
             kind=kind,  # type: ignore[arg-type]
@@ -304,10 +351,16 @@ def build_parser() -> argparse.ArgumentParser:
         prog="remagraph",
         description="RemaGraph — AI agent 記憶工具（極簡 CLI）",
     )
+    parser.add_argument(
+        "--allow-default-state-dir",
+        action="store_true",
+        help="允許預設共享 state dir（不推薦）",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     # store
     p_store = sub.add_parser("store", help="寫入記憶")
+    p_store.add_argument("--project", default=None)
     p_store.add_argument("--task-id", required=True)
     p_store.add_argument("--agent-id", required=True)
     p_store.add_argument(
@@ -331,12 +384,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_search.add_argument("--status", choices=["active", "superseded", "invalidated"])
     p_search.add_argument("--tags", help="JSON 陣列")
+    p_search.add_argument("--project")
     p_search.add_argument("--agent-id")
     p_search.add_argument("--task-id")
+    p_search.add_argument(
+        "--all-projects", action="store_true", help="跨所有 project 查詢（需同意）"
+    )
 
     # status
     p_status = sub.add_parser("status", help="查詢最新現況")
+    p_status.add_argument("--project", default=None)
     p_status.add_argument("--limit", type=int, default=20)
+    p_status.add_argument(
+        "--all-projects", action="store_true", help="跨所有 project 查詢（需同意）"
+    )
 
     # init
     p_init = sub.add_parser("init", help="初始化 RemaGraph（一行搞定，適合新手）")
@@ -347,6 +408,7 @@ def build_parser() -> argparse.ArgumentParser:
         "auto",
         help="一鍵：讀取記憶 → 執行指令 → 自動儲存（最推薦）",
     )
+    p_auto.add_argument("--project", default=None)
     p_auto.add_argument("--task-id", default=None, help="任務編號（省略則自動產生）")
     p_auto.add_argument(
         "--agent-id",
@@ -364,6 +426,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_auto.add_argument("--top-k", type=int, default=5)
     p_auto.add_argument("--quiet", action="store_true", help="少印訊息，只輸出 JSON")
     p_auto.add_argument(
+        "--recall-only",
+        action="store_true",
+        help="只讀取之前記憶，不執行指令也不自動儲存（適合指揮塔派工前先查）",
+    )
+    p_auto.add_argument("--all-projects", action="store_true", help="recall 時跨 project（不推薦）")
+    p_auto.add_argument(
         "cmd",
         nargs=argparse.REMAINDER,
         help="要執行的指令（建議前面加 -- ）",
@@ -376,6 +444,22 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.command != "init":
+        if _db.is_using_default_state_dir() and not getattr(args, "allow_default_state_dir", False):
+            proj = getattr(args, "project", None) or os.environ.get("REMAGRAPH_PROJECT", "default")
+            if proj == "default":
+                print(
+                    "WARNING: 預設共享 state dir + default project，建議 init --project",
+                    file=sys.stderr,
+                )
+        try:
+            proj = getattr(args, "project", None) or os.environ.get("REMAGRAPH_PROJECT")
+            if proj:
+                _db.validate_project_metadata(proj)
+        except Exception as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+
     if args.command == "store":
         cmd_store(args)
     elif args.command == "search":
@@ -385,14 +469,14 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "init":
         cmd_init(args)
     elif args.command == "auto":
-        # 預設值：環境變數 → 自動產生
+        if not args.project:
+            args.project = os.environ.get("REMAGRAPH_PROJECT")
         if not args.task_id:
             args.task_id = os.environ.get("TASK_ID") or (
                 f"task-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
             )
         if not args.agent_id:
             args.agent_id = os.environ.get("AGENT_ID") or "default-agent"
-        # REMAINDER 可能帶前導 '--'
         if args.cmd and args.cmd[0] == "--":
             args.cmd = args.cmd[1:]
         cmd_auto(args)

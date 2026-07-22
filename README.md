@@ -46,16 +46,23 @@ uv pip install -e .
    ```
 3. 一鍵跑任務（自動讀記憶 + 執行 + 寫記憶）：
    ```bash
-   remagraph auto --task-id fix-login-001 --agent-id my-ai -- echo "這裡換成你的真正指令"
-   ```
-   或用包裝腳本：
-   ```bash
-   curl -O https://raw.githubusercontent.com/aiken884/RemaGraph/main/examples/simple/remagraph-task.sh
-   chmod +x remagraph-task.sh
-   TASK_ID=fix-login-001 AGENT_ID=my-ai ./remagraph-task.sh python my_agent.py
-   ```
+    remagraph auto --task-id fix-login-001 --agent-id my-ai -- echo "這裡換成你的真正指令"
+    ```
+    或用包裝腳本：
+    ```bash
+    curl -O https://raw.githubusercontent.com/aiken884/RemaGraph/main/examples/simple/remagraph-task.sh
+    chmod +x remagraph-task.sh
+    TASK_ID=fix-login-001 AGENT_ID=my-ai ./remagraph-task.sh python my_agent.py
+    ```
+
+**指揮塔想先只查記憶（不執行不寫入）**：
+```bash
+remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
+```
 
 不需要寫任何程式碼。完整白話說明見 [`docs/task-memory-convention.md`](./docs/task-memory-convention.md)。
+
+內部測試者請參考 [`docs/internal/alpha-test-playbook.md`](./docs/internal/alpha-test-playbook.md)（含測試場景 + 回饋模板）。
 
 **注意**：目前為內部 Alpha 測試階段，功能可能調整，建議用於 herdr Bridge 內部測試。
 
@@ -122,9 +129,11 @@ remagraph status --limit 10
 
 ## 與 herdr Bridge 整合（指揮塔派工自動帶記憶）
 
-如果你已經用 herdr Bridge 當指揮塔派工給 headless agent：
+**目前狀態**：工具層（herdr-bridge hooks）+ 治理層已完成；組織層（herdr-org 指揮塔正式接入）僅設計階段，開發稍後。RemaGraph MemoryDispatcher 已就緒，準備 herdr-org 對接。跨專案溝通全程使用 ACP。
 
-1. 在你的指揮塔程式中，使用我們提供的極簡幫手：
+如果您已經用 herdr Bridge 當指揮塔派工給 headless agent：
+
+1. 在您的指揮塔程式中，使用我們提供的極簡幫手：
    ```bash
    # 下載
    curl -O https://raw.githubusercontent.com/aiken884/RemaGraph/main/examples/herdr-bridge/simple-memory-helper.sh
@@ -133,11 +142,13 @@ remagraph status --limit 10
 
 2. 在派工前呼叫它來取得記憶上下文，然後塞進送給 agent 的文字裡。
 
-或者最簡單：讓 agent 啟動時使用上面的 `remagraph-task.sh` 包裝你的 agent 指令。
+或者最簡單：讓 agent 啟動時使用上面的 `remagraph-task.sh` 包裝您的 agent 指令。
 
 這樣指揮塔只要傳 task_id 給 agent，agent 就會自動記錄。
 
 （詳細範例見 examples/herdr-bridge/ ）
+
+**注意**：完整 herdr-org workload 驗證需待組織層開發時進行。目前僅設計藍圖階段。
 
 ## MCP 工具
 

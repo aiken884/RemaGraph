@@ -32,6 +32,7 @@ def conn():
     c.executescript("""
         CREATE TABLE IF NOT EXISTS memories (
             id          TEXT PRIMARY KEY,
+            project_id  TEXT NOT NULL DEFAULT 'default',
             kind        TEXT NOT NULL CHECK (
                 kind IN ('task_handoff', 'status_update', 'discovered_constraint')
             ),
@@ -56,12 +57,12 @@ def conn():
 def _valid_sample_request(**overrides) -> StoreRequest:
     """建立合法的 StoreRequest 供測試複用。"""
     defaults = {
+        "project_id": "testproj",
         "task_id": "task-2026-07-21-003",
         "agent_id": "oc-dspro",
         "kind": "task_handoff",
         "summary": (
-            "嘗試修復 subagent 委派 + deny-all 時的 acpx 連線錯誤，"
-            "這是一個需要深入調查的複雜問題"
+            "嘗試修復 subagent 委派 + deny-all 時的 acpx 連線錯誤，這是一個需要深入調查的複雜問題"
         ),
         "learnings": ["錯誤發生在 opencode task tool 生成 child session 之後"],
         "handoff_note": "接手者請注意：此錯誤與 G1 不同，G1 是 child session 未被註冊",
@@ -310,21 +311,21 @@ def test_run_arbitration_cheap_rule3_skipped_for_status_update():
 def test_supersede_status_updates(conn):
     """A7: 將同 task_id 的 active status_update 標記為 superseded。"""
     conn.execute(
-        "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
+        "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, created_at, updated_at) VALUES "
-        "('mem-001', 'status_update', 'task-a', 'test', '2026-07-21T00:00:00Z', "
+        "('mem-001', 'testproj', 'status_update', 'task-a', 'test', '2026-07-21T00:00:00Z', "
         "'summary must be at least thirty characters long for the test to be valid', "
         "'[\"learn\"]', '', '[]', 'active', '2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z')"
     )
     conn.execute(
-        "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
+        "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, created_at, updated_at) VALUES "
-        "('mem-002', 'status_update', 'task-a', 'test', '2026-07-21T01:00:00Z', "
+        "('mem-002', 'testproj', 'status_update', 'task-a', 'test', '2026-07-21T01:00:00Z', "
         "'another summary that must be at least thirty characters long for the test', "
         "'[\"learn\"]', '', '[]', 'active', '2026-07-21T01:00:00Z', '2026-07-21T01:00:00Z')"
     )
 
-    result = supersede_status_updates("task-a", conn)
+    result = supersede_status_updates("testproj", "task-a", conn)
 
     assert isinstance(result, SupersedeResult)
     assert result.superseded_count == 2
@@ -338,21 +339,21 @@ def test_supersede_status_updates(conn):
 def test_supersede_does_not_affect_other_task_ids(conn):
     """A7: supersede 不影響不同 task_id。"""
     conn.execute(
-        "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
+        "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, created_at, updated_at) VALUES "
-        "('mem-001', 'status_update', 'task-a', 'test', '2026-07-21T00:00:00Z', "
+        "('mem-001', 'testproj', 'status_update', 'task-a', 'test', '2026-07-21T00:00:00Z', "
         "'summary must be at least thirty characters long for testing purpose here', "
         "'[\"learn\"]', '', '[]', 'active', '2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z')"
     )
     conn.execute(
-        "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
+        "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, created_at, updated_at) VALUES "
-        "('mem-002', 'status_update', 'task-b', 'test', '2026-07-21T00:00:00Z', "
+        "('mem-002', 'testproj', 'status_update', 'task-b', 'test', '2026-07-21T00:00:00Z', "
         "'another summary that must be at least thirty characters long for the test', "
         "'[\"learn\"]', '', '[]', 'active', '2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z')"
     )
 
-    result = supersede_status_updates("task-a", conn)
+    result = supersede_status_updates("testproj", "task-a", conn)
     assert result.superseded_count == 1
 
     row = conn.execute("SELECT status FROM memories WHERE id='mem-002'").fetchone()
@@ -362,23 +363,24 @@ def test_supersede_does_not_affect_other_task_ids(conn):
 def test_supersede_does_not_affect_task_handoff(conn):
     """A7: supersede 不影響 task_handoff。"""
     conn.execute(
-        "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
+        "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, created_at, updated_at) VALUES "
-        "('mem-001', 'task_handoff', 'task-c', 'test', '2026-07-21T00:00:00Z', "
+        "('mem-001', 'testproj', 'task_handoff', 'task-c', 'test', '2026-07-21T00:00:00Z', "
         "'summary must be at least thirty characters long for testing purpose here', "
         "'[\"learn\"]', 'handoff note here for test', '[]', 'active', "
         "'2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z')"
     )
 
-    result = supersede_status_updates("task-c", conn)
+    result = supersede_status_updates("testproj", "task-c", conn)
     assert result.superseded_count == 0
     row = conn.execute("SELECT status FROM memories WHERE id='mem-001'").fetchone()
+    assert row is not None
     assert row["status"] == "active"
 
 
 def test_supersede_no_matching_records(conn):
     """A7: 無符合條件的記錄回傳 0。"""
-    result = supersede_status_updates("nonexistent-task", conn)
+    result = supersede_status_updates("default", "nonexistent-task", conn)
     assert result.superseded_count == 0
 
 
@@ -388,16 +390,16 @@ def test_supersede_no_matching_records(conn):
 def test_invalidate_constraints_basic(conn):
     """A8: 基礎 invalidate 流程。"""
     conn.execute(
-        "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
+        "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, created_at, updated_at) VALUES "
-        "('mem-001', 'discovered_constraint', 'task-d', 'test', '2026-07-21T00:00:00Z', "
+        "('mem-001', 'testproj', 'discovered_constraint', 'task-d', 'test', '2026-07-21T00:00:00Z', "
         "'summary must be at least thirty characters long for testing purpose here', "
         "'[\"learn\"]', '', '[]', 'active', '2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z')"
     )
     conn.execute(
-        "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
+        "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, created_at, updated_at) VALUES "
-        "('mem-002', 'discovered_constraint', 'task-d', 'test', '2026-07-21T00:00:00Z', "
+        "('mem-002', 'testproj', 'discovered_constraint', 'task-d', 'test', '2026-07-21T00:00:00Z', "
         "'another summary that must be at least thirty characters long for the test', "
         "'[\"learn\"]', '', '[]', 'active', '2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z')"
     )
@@ -407,9 +409,7 @@ def test_invalidate_constraints_basic(conn):
     assert isinstance(result, InvalidateResult)
     assert result.invalidated_count == 2
 
-    rows = conn.execute(
-        "SELECT status FROM memories WHERE id IN ('mem-001', 'mem-002')"
-    ).fetchall()
+    rows = conn.execute("SELECT status FROM memories WHERE id IN ('mem-001', 'mem-002')").fetchall()
     assert all(r["status"] == "invalidated" for r in rows)
 
 
@@ -424,9 +424,9 @@ def test_invalidate_constraints_not_found(conn):
 def test_invalidate_constraints_kind_mismatch(conn):
     """A8: 試圖 invalidate 非 discovered_constraint。"""
     conn.execute(
-        "INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, "
+        "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, created_at, updated_at) VALUES "
-        "('mem-001', 'task_handoff', 'task-e', 'test', '2026-07-21T00:00:00Z', "
+        "('mem-001', 'testproj', 'task_handoff', 'task-e', 'test', '2026-07-21T00:00:00Z', "
         "'summary must be at least thirty characters long for testing purpose here', "
         "'[\"learn\"]', 'handoff note here for the test purpose', '[]', 'active', "
         "'2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z')"
@@ -443,4 +443,3 @@ def test_invalidate_constraints_empty_list(conn):
     result = invalidate_constraints([], conn)
     assert isinstance(result, InvalidateResult)
     assert result.invalidated_count == 0
-
