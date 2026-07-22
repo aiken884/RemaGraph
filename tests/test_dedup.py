@@ -85,7 +85,7 @@ def test_encode_summary_returns_little_endian():
 # D4, D5, D6: check_duplicate（mock DB + mock model2vec）
 # ---------------------------------------------------------------------------
 
-MEMORY_TABLE_SQL = "CREATE TABLE memories (id TEXT, project_id TEXT DEFAULT 'default', kind TEXT, status TEXT, embedding BLOB, created_at TEXT)"
+MEMORY_TABLE_SQL = "CREATE TABLE memories (id TEXT, project_id TEXT DEFAULT 'default', kind TEXT, status TEXT, embedding BLOB, created_at TEXT)"  # noqa: E501
 
 
 def _make_conn():
@@ -117,7 +117,7 @@ def test_check_duplicate_no_matching_kind():
     conn = _make_conn()
     existing_emb = np.ones(EMBEDDING_DIM, dtype=np.float32).tobytes()
     conn.execute(
-        "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",
+        "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",  # noqa: E501
         ("mem-001", "testproj", "status_update", "active", existing_emb, "2026-01-01T00:00:00"),
     )
 
@@ -137,7 +137,7 @@ def test_check_duplicate_similar_content():
     conn = _make_conn()
     existing_emb = np.ones(EMBEDDING_DIM, dtype=np.float32).tobytes()
     conn.execute(
-        "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",
+        "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",  # noqa: E501
         ("mem-001", "testproj", "task_handoff", "active", existing_emb, "2026-01-01T00:00:00"),
     )
 
@@ -163,7 +163,7 @@ def test_check_duplicate_dissimilar_content():
     conn = _make_conn()
     existing_emb = np.array([1.0] * EMBEDDING_DIM, dtype=np.float32).tobytes()
     conn.execute(
-        "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",
+        "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",  # noqa: E501
         ("mem-001", "testproj", "task_handoff", "active", existing_emb, "2026-01-01T00:00:00"),
     )
 
@@ -185,7 +185,7 @@ def test_check_duplicate_skip_inactive():
     conn = _make_conn()
     existing_emb = np.ones(EMBEDDING_DIM, dtype=np.float32).tobytes()
     conn.execute(
-        "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",
+        "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",  # noqa: E501
         ("mem-001", "testproj", "task_handoff", "superseded", existing_emb, "2026-01-01T00:00:00"),
     )
 
@@ -204,7 +204,7 @@ def test_check_duplicate_no_embedding_skip():
     """D4: 無 embedding 的記錄跳過。"""
     conn = _make_conn()
     conn.execute(
-        "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",
+        "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",  # noqa: E501
         ("mem-001", "testproj", "task_handoff", "active", None, "2026-01-01T00:00:00"),
     )
 
@@ -253,7 +253,7 @@ def test_dedup_respects_max_candidates():
     for i in range(2005):
         emb = np.random.randn(EMBEDDING_DIM).astype(np.float32).tobytes()
         conn.execute(
-            "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",  # noqa: E501
             (f"mem-{i:04d}", "default", "task_handoff", "active", emb, f"2026-07-21T{i:04d}"),
         )
 
@@ -295,7 +295,7 @@ def test_real_model_check_duplicate():
 
         blob1 = encode_summary("嘗試修復 subagent 委派時的 acpx 連線錯誤")
         conn.execute(
-            "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO memories (id, project_id, kind, status, embedding, created_at) VALUES (?,?,?,?,?,?)",  # noqa: E501
             ("mem-001", "testproj", "task_handoff", "active", blob1, "2026-01-01T00:00:00"),
         )
 

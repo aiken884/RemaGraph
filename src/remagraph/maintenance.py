@@ -32,6 +32,7 @@ from remagraph.db import (
 # 權威解析 + 安全閥門（PPLX 共識核心）
 # ---------------------------------------------------------------------------
 
+
 def resolve_project_state_dir(project_id: str) -> pathlib.Path:
     """從 env / project.json / governance 取得權威 state_dir。
     必須回傳 realpath 解析後的絕對路徑。
@@ -84,13 +85,14 @@ def safety_validate_project(project_id: str, *, require_env_match: bool = True) 
 def _record_violation(project_id: str, reason: str) -> None:
     """記錄違規到 audit 與 memory（discovered_constraint）。"""
     try:
-        append_audit("safety_violation", {"project_id": project_id, "reason": reason})
+        append_audit("safety_violation", {"project_id": project_id, "reason": reason})  # type: ignore[arg-type]
     except Exception:
         pass
     # 盡量寫入 memory（若可用）
     try:
         from remagraph.models import StoreRequest
         from remagraph.store import process_store
+
         req = StoreRequest(
             kind="discovered_constraint",
             task_id=f"safety-{project_id}",
@@ -110,6 +112,7 @@ def _record_violation(project_id: str, reason: str) -> None:
 # ---------------------------------------------------------------------------
 # Maintenance Policy & 核心操作（簡化共識版）
 # ---------------------------------------------------------------------------
+
 
 class MaintenancePolicy:
     def __init__(self, **kwargs):
@@ -191,21 +194,23 @@ def _prune_superseded(conn, policy, project_id: str) -> int:
     return cursor.rowcount
 
 
-def _should_checkpoint(conn): ...
-def _should_prune(): ...
-def _should_optimize_fts(): ...
-def _get_db_size_mb(state_dir): return 0  # 實作省略，見 db.py 類似邏輯
+def _should_checkpoint(conn: sqlite3.Connection) -> bool: ...
+def _should_prune() -> bool: ...
+def _should_optimize_fts() -> bool: ...
+def _get_db_size_mb(state_dir: pathlib.Path) -> float:
+    return 0  # 實作省略，見 db.py 類似邏輯
 
 
 # ---------------------------------------------------------------------------
 # 啟動時輕量維護（db.py 會呼叫）
 # ---------------------------------------------------------------------------
 
+
 def light_maintenance_on_connect(project_id: str = "default") -> None:
     """connect() 後自動呼叫的輕量維護。"""
     try:
-        policy = MaintenancePolicy()
+        policy = MaintenancePolicy()  # type: ignore[no-untyped-call]
         run_maintenance(policy, project_id, force=False)
     except Exception as e:
         # 不阻斷啟動，但記錄
-        append_audit("maintenance_light_failed", {"error": str(e), "project_id": project_id})
+        append_audit("maintenance_light_failed", {"error": str(e), "project_id": project_id})  # type: ignore[arg-type]

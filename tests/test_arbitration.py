@@ -392,15 +392,15 @@ def test_invalidate_constraints_basic(conn):
     conn.execute(
         "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, created_at, updated_at) VALUES "
-        "('mem-001', 'testproj', 'discovered_constraint', 'task-d', 'test', '2026-07-21T00:00:00Z', "
-        "'summary must be at least thirty characters long for testing purpose here', "
+        "('mem-001', 'testproj', 'discovered_constraint', 'task-d', 'test', "
+        "'2026-07-21T00:00:00Z', 'summary must be at least thirty chars here', "
         "'[\"learn\"]', '', '[]', 'active', '2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z')"
     )
     conn.execute(
         "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, created_at, updated_at) VALUES "
-        "('mem-002', 'testproj', 'discovered_constraint', 'task-d', 'test', '2026-07-21T00:00:00Z', "
-        "'another summary that must be at least thirty characters long for the test', "
+        "('mem-002', 'testproj', 'discovered_constraint', 'task-d', 'test', "
+        "'2026-07-21T00:00:00Z', 'another summary at least thirty chars for test', "
         "'[\"learn\"]', '', '[]', 'active', '2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z')"
     )
 

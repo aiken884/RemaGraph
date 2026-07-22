@@ -64,7 +64,9 @@ def test_migrate_from_v1_to_current_preserves_data(tmp_path, monkeypatch):
         CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE memories (
             id TEXT PRIMARY KEY,
-            kind TEXT NOT NULL CHECK (kind IN ('task_handoff', 'status_update', 'discovered_constraint')),
+            kind TEXT NOT NULL CHECK (
+                kind IN ('task_handoff', 'status_update', 'discovered_constraint')
+            ),
             task_id TEXT NOT NULL,
             agent_id TEXT NOT NULL,
             timestamp TEXT NOT NULL,
@@ -72,14 +74,22 @@ def test_migrate_from_v1_to_current_preserves_data(tmp_path, monkeypatch):
             learnings TEXT NOT NULL DEFAULT '[]',
             handoff_note TEXT NOT NULL DEFAULT '',
             tags TEXT NOT NULL DEFAULT '[]',
-            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded', 'invalidated')),
+            status TEXT NOT NULL DEFAULT 'active' CHECK (
+                status IN ('active', 'superseded', 'invalidated')
+            ),
             embedding BLOB,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
         INSERT INTO _meta (key, value) VALUES ('schema_version', '1');
-        INSERT INTO memories (id, kind, task_id, agent_id, timestamp, summary, learnings, status, created_at, updated_at)
-        VALUES ('mem-test-001', 'task_handoff', 'task-001', 'agent-a', '2026-07-22T00:00:00Z', '測試記憶摘要', '[]', 'active', '2026-07-22T00:00:00Z', '2026-07-22T00:00:00Z');
+        INSERT INTO memories (
+            id, kind, task_id, agent_id, timestamp,
+            summary, learnings, status, created_at, updated_at
+        ) VALUES (
+            'mem-test-001', 'task_handoff', 'task-001', 'agent-a',
+            '2026-07-22T00:00:00Z', '測試記憶摘要', '[]', 'active',
+            '2026-07-22T00:00:00Z', '2026-07-22T00:00:00Z'
+        );
     """)
     conn.commit()
     conn.close()

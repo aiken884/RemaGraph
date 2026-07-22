@@ -310,7 +310,7 @@ def test_insert_memory_rollback_on_failure(conn, now):
         conn.execute(
             "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
             "learnings, handoff_note, tags, status, embedding, created_at, updated_at) "
-            "VALUES ('mem-valid-001', 'default', 'task_handoff', 'task-x', 'test', '2026-01-01T00:00:00Z', "
+            "VALUES ('mem-valid-001', 'default', 'task_handoff', 'task-x', 'test', '2026-01-01T00:00:00Z', "  # noqa: E501
             "'duplicate id should cause a constraint violation and rollback the transaction', "
             "'[]', '', '[]', 'active', NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
         )
