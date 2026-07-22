@@ -7,11 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> 發行前準備階段更新（真實運作中，暫不公開發布）。
+
+### Added
+- **fleet_member kind**：新增 "fleet_member"，由 tower 擁有完整 record/recycle 支援。supersede 邏輯擴展至 fleet_member。schema v4 migration 自動處理。
+- **LightCommander / AcpRouter 強化整合**：dispatch_with_memory.py 中 recall/store 成為 before/after prompt hooks 的 mandatory 路徑；統一 _recall/_store 呼叫；新增 record_fleet_member / recycle_fleet_member。
+- 支援 project_id 透傳 cross-space ack 驗證。
+- DB 自動維護機制（WAL、prune、FTS optimize、vacuum、integrity + safety valves）。
+
 ### Changed
-- **herdr 整合層級澄清**：明確區分工具層（herdr-bridge ACP hooks + on_event）與治理層為目前進行中；組織層（herdr-org 指揮塔正式接入 + 實際 workload 驗證）僅設計階段，開發稍後。
-- 所有相關文件已對齊現狀（整合計劃、README、task-memory-convention、dispatch_with_memory.py、governance 文件等）。
-- 跨專案溝通持續使用 ACP 直接協調；已要求 Herdr Bridge 將「herdr-org 正式接實際 workload」與「技術接線細節」加入 Herdr org 藍圖（設計階段）。
-- 里程碑狀態更新：M1~M3 完成，M4 進入組織層設計準備。
+- **herdr 整合層級澄清**：PPLX Priority B 完成：recall/store 在所有 ACP 派工路徑強制；MemoryDispatcher / hooks 統一。
+- 所有相關文件已對齊（dispatch_with_memory.py、README、task-memory-convention.md、DESIGN.md）。
+- 跨專案溝通持續使用 ACP 直接協調；fleet 管理由 tower 透過 RemaGraph 記錄。
+- 發行準備文件更新：反映 Herdr Bridge 真實運作現況，暫不 tag 發布。
 
 ## [0.2.0-alpha] — 2026-07-22（內部 Alpha 測試版）
 

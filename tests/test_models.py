@@ -203,8 +203,8 @@ def test_search_response_with_results():
 # M5: MemoryKind / MemoryStatus literals 限制
 # ---------------------------------------------------------------------------
 def test_memory_kind_literals():
-    """M5: MemoryKind 限制三值。"""
-    valid = ["task_handoff", "status_update", "discovered_constraint"]
+    """M5: MemoryKind 限制四值（含 fleet_member for tower）。"""
+    valid = ["task_handoff", "status_update", "discovered_constraint", "fleet_member"]
     for k in valid:
         req = StoreRequest(
             project_id="testproj",

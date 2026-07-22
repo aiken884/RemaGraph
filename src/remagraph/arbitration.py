@@ -184,16 +184,26 @@ def run_arbitration_rules_cheap(request: StoreRequest) -> ArbitrationResult:
 # ---------------------------------------------------------------------------
 
 
+def supersede_for_kind(
+    kind: str, project_id: str, task_id: str, conn: sqlite3.Connection
+) -> SupersedeResult:
+    """將同 project+task_id 的該 kind 舊 active 記錄 supersede。
+    用於 status_update / fleet_member。
+    """
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    cursor = conn.execute(
+        "UPDATE memories SET status='superseded', updated_at=? "
+        "WHERE project_id=? AND task_id=? AND kind=? AND status='active'",
+        (now, project_id, task_id, kind),
+    )
+    return SupersedeResult(superseded_count=cursor.rowcount)
+
+
 def supersede_status_updates(
     project_id: str, task_id: str, conn: sqlite3.Connection
 ) -> SupersedeResult:
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-    cursor = conn.execute(  # noqa: E501
-        "UPDATE memories SET status='superseded', updated_at=? "
-        "WHERE project_id=? AND task_id=? AND kind='status_update' AND status='active'",
-        (now, project_id, task_id),
-    )
-    return SupersedeResult(superseded_count=cursor.rowcount)
+    """向後相容別名：僅 supersede status_update。"""
+    return supersede_for_kind("status_update", project_id, task_id, conn)
 
 
 def cleanup_superseded(conn: sqlite3.Connection, max_age_days: int = 90) -> int:

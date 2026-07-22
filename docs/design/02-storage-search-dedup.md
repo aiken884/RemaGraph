@@ -42,7 +42,7 @@ DESIGN.md 的 `CREATE TABLE memories` 定義**基本正確**，但缺少以下�
 ```sql
 CREATE TABLE IF NOT EXISTS memories (
     id          TEXT PRIMARY KEY,
-    kind        TEXT NOT NULL CHECK (kind IN ('task_handoff', 'status_update', 'discovered_constraint')),
+    kind        TEXT NOT NULL CHECK (kind IN ('task_handoff', 'status_update', 'discovered_constraint', 'fleet_member')),
     task_id     TEXT NOT NULL,
     agent_id    TEXT NOT NULL,
     timestamp   TEXT NOT NULL,                -- 寫入時間（ISO 8601 UTC），MCP 回傳用
@@ -138,7 +138,7 @@ CREATE INDEX IF NOT EXISTS idx_memories_dedup
 -- 主表（已補 timestamp）
 CREATE TABLE IF NOT EXISTS memories (
     id          TEXT PRIMARY KEY,
-    kind        TEXT NOT NULL CHECK (kind IN ('task_handoff', 'status_update', 'discovered_constraint')),
+    kind        TEXT NOT NULL CHECK (kind IN ('task_handoff', 'status_update', 'discovered_constraint', 'fleet_member')),
     task_id     TEXT NOT NULL,
     agent_id    TEXT NOT NULL,
     timestamp   TEXT NOT NULL,

@@ -22,7 +22,7 @@ from typing import Any
 
 DEFAULT_STATE_DIR = Path.home() / ".local" / "state" / "remagraph"
 DB_FILENAME = "remagraph.db"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MAX_DB_SIZE_MB = 100  # soft limit via PRAGMA max_page_count
 _ALLOWED_STATE_DIR_RE = re.compile(r"^[a-zA-Z0-9_/.-]+$")
 DEFAULT_PROJECT_ID = "default"
@@ -88,7 +88,7 @@ def validate_project_metadata(
         raise ValueError(f"Project metadata mismatch: expected {expected_project}, found {current}")
 
 
-def connect(state_dir: Path | None = None) -> sqlite3.Connection:
+def connect(state_dir: Path | None = None, project_id: str | None = None) -> sqlite3.Connection:
     """建立 SQLite 連線並初始化。
 
     1. 展開路徑、建立目錄（若需要）
@@ -98,11 +98,28 @@ def connect(state_dir: Path | None = None) -> sqlite3.Connection:
     5. 設定 DB 檔案權限為 0600
     6. 回傳已就緒的連線
 
+    嚴格安全閥門：若提供 project_id，會驗證 state_dir 與 project 對映。
+
     Raises:
         OSError: 目錄無法建立（權限不足）
         MigrationError: Schema migration 失敗
         sqlite3.DatabaseError: 資料庫損毀
+        SafetyValveError: 不合規的 project/state_dir 使用
     """
+    from remagraph.maintenance import light_maintenance_on_connect, safety_validate_project
+
+    if project_id:
+        # 強制走權威解析 + 安全閥
+        resolved = safety_validate_project(project_id)
+        state_dir = resolved
+    else:
+        # 相容舊呼叫，但記錄警告（未來可移除）
+        if os.environ.get("REMAGRAPH_PROJECT", "default") != "default":
+            # 若 env 有 project 但未傳，嘗試驗證
+            project_id = os.environ.get("REMAGRAPH_PROJECT")
+            resolved = safety_validate_project(project_id)
+            state_dir = resolved
+
     db_path = get_db_path(state_dir=state_dir)
 
     conn = sqlite3.connect(
@@ -132,6 +149,10 @@ def connect(state_dir: Path | None = None) -> sqlite3.Connection:
     except OSError:
         pass
 
+    # 啟動時自動輕量維護（含 integrity + WAL + migration）
+    if project_id:
+        light_maintenance_on_connect(project_id)
+
     return conn
 
 
@@ -160,7 +181,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             id          TEXT PRIMARY KEY,
             project_id  TEXT NOT NULL DEFAULT 'default',
             kind        TEXT NOT NULL CHECK (
-                kind IN ('task_handoff', 'status_update', 'discovered_constraint')
+                kind IN ('task_handoff', 'status_update', 'discovered_constraint', 'fleet_member')
             ),
             task_id     TEXT NOT NULL,
             agent_id    TEXT NOT NULL,
@@ -265,6 +286,9 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if current_version == 2:
         _migrate_v2_to_v3(conn)
         current_version = 3
+    if current_version == 3:
+        _migrate_v3_to_v4(conn)
+        current_version = 4
 
     if current_version > SCHEMA_VERSION:
         raise MigrationError(
@@ -280,3 +304,70 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
 def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE memories ADD COLUMN project_id TEXT NOT NULL DEFAULT 'default'")
     conn.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', '3')")
+
+
+def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
+    """v3→v4: 加入 fleet_member kind（需重建 CHECK 約束）。
+    使用標準 SQLite 重建表方式更新 CHECK。
+    """
+    # 重建表以更新 CHECK constraint 加入 'fleet_member'
+    conn.executescript("""
+        PRAGMA foreign_keys=OFF;
+        BEGIN TRANSACTION;
+        CREATE TABLE memories_new (
+            id          TEXT PRIMARY KEY,
+            project_id  TEXT NOT NULL DEFAULT 'default',
+            kind        TEXT NOT NULL CHECK (
+                kind IN ('task_handoff', 'status_update', 'discovered_constraint', 'fleet_member')
+            ),
+            task_id     TEXT NOT NULL,
+            agent_id    TEXT NOT NULL,
+            timestamp   TEXT NOT NULL,
+            summary     TEXT NOT NULL,
+            learnings   TEXT NOT NULL DEFAULT '[]',
+            handoff_note TEXT NOT NULL DEFAULT '',
+            tags        TEXT NOT NULL DEFAULT '[]',
+            status      TEXT NOT NULL DEFAULT 'active' CHECK (
+                status IN ('active', 'superseded', 'invalidated')
+            ),
+            embedding   BLOB,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+        INSERT INTO memories_new SELECT * FROM memories;
+        DROP TABLE memories;
+        ALTER TABLE memories_new RENAME TO memories;
+
+        -- 重建 FTS 相關 triggers/indexes（_init_schema 已保證存在，但 migration 需重建以對應）
+        DROP TRIGGER IF EXISTS memories_ai;
+        DROP TRIGGER IF EXISTS memories_ad;
+        DROP TRIGGER IF EXISTS memories_au;
+        CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN
+            INSERT INTO memories_fts(rowid, summary, learnings, handoff_note, tags)
+            VALUES (new.rowid, new.summary, new.learnings, new.handoff_note, new.tags);
+        END;
+        CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN
+            INSERT INTO memories_fts(memories_fts, rowid, summary, learnings, handoff_note, tags)
+            VALUES ('delete', old.rowid, old.summary, old.learnings, old.handoff_note, old.tags);
+        END;
+        CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
+            INSERT INTO memories_fts(memories_fts, rowid, summary, learnings, handoff_note, tags)
+            VALUES ('delete', old.rowid, old.summary, old.learnings, old.handoff_note, old.tags);
+            INSERT INTO memories_fts(rowid, summary, learnings, handoff_note, tags)
+            VALUES (new.rowid, new.summary, new.learnings, new.handoff_note, new.tags);
+        END;
+
+        -- 確保 indexes
+        CREATE INDEX IF NOT EXISTS idx_memories_kind ON memories(kind);
+        CREATE INDEX IF NOT EXISTS idx_memories_project_id ON memories(project_id);
+        CREATE INDEX IF NOT EXISTS idx_memories_task_id ON memories(task_id);
+        CREATE INDEX IF NOT EXISTS idx_memories_agent_id ON memories(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
+        CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_memories_dedup
+            ON memories(kind, status) WHERE status = 'active';
+
+        COMMIT;
+        PRAGMA foreign_keys=ON;
+    """)
+    conn.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', '4')")

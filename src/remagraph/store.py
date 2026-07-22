@@ -23,7 +23,7 @@ from remagraph.arbitration import (
     ArbitrationResult,
     invalidate_constraints,
     run_arbitration_rules_cheap,
-    supersede_status_updates,
+    supersede_for_kind,
 )
 from remagraph.audit import append_audit
 from remagraph.dedup import check_duplicate, encode_summary
@@ -216,6 +216,11 @@ def process_store(
 
     回傳 StoreResponse。
     """
+    # 安全閥門（PPLX 共識版）：強制 project + state_dir 對映
+    from remagraph.maintenance import safety_validate_project
+    if request.project_id:
+        safety_validate_project(request.project_id)  # 違規直接 raise SafetyValveError
+
     # 規則 #1, #2, #3, #5: 便宜仲裁
     arb_result = run_arbitration_rules_cheap(request)
     if not arb_result.passed:
@@ -249,16 +254,16 @@ def process_store(
             if other:
                 print(f"WARNING: task '{request.task_id}' in other project", file=sys.stderr)
 
-        # supersede（僅 status_update）
+        # supersede（status_update 或 fleet_member：同 task 保留最新 active）
         superseded_ids: list[str] = []
-        if request.kind == "status_update":
-            result = supersede_status_updates(request.project_id, request.task_id, conn)
+        if request.kind in ("status_update", "fleet_member"):
+            result = supersede_for_kind(request.kind, request.project_id, request.task_id, conn)
             if result.superseded_count > 0:
                 rows = conn.execute(
                     "SELECT id FROM memories WHERE project_id=? AND task_id=? "
-                    "AND kind='status_update' AND status='superseded' "
+                    "AND kind=? AND status='superseded' "
                     "ORDER BY created_at DESC LIMIT ?",
-                    (request.project_id, request.task_id, result.superseded_count),
+                    (request.project_id, request.task_id, request.kind, result.superseded_count),
                 ).fetchall()
                 superseded_ids = [r["id"] for r in rows]
 

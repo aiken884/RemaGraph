@@ -34,7 +34,7 @@ def conn():
             id          TEXT PRIMARY KEY,
             project_id  TEXT NOT NULL DEFAULT 'default',
             kind        TEXT NOT NULL CHECK (
-                kind IN ('task_handoff', 'status_update', 'discovered_constraint')
+                kind IN ('task_handoff', 'status_update', 'discovered_constraint', 'fleet_member')
             ),
             task_id     TEXT NOT NULL,
             agent_id    TEXT NOT NULL,

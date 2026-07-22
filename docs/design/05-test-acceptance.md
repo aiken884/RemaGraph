@@ -29,7 +29,7 @@
 | M2 | `StoreRequest` 定義（`task_id`, `agent_id`, `kind`, `summary`, `learnings`, `handoff_note`, `tags`, `invalidates`） | 單元 | 高 |
 | M3 | `StoreResponse` 含成功回應（`status: "stored"`, `id`, `superseded`）與拒絕回應（`status: "rejected"`, `reason`, `detail`） | 單元 | 高 |
 | M4 | `SearchRequest`（`query`, `top_k`, `kind`, `status` 過濾）與 `SearchResponse`（`results[]`） | 單元 | 高 |
-| M5 | `MemoryKind` literal 限制三值、`MemoryStatus` literal 限制三值 | 單元 | 高 |
+| M5 | `MemoryKind` literal 限制四值（含 fleet_member）、`MemoryStatus` 限制三值 | 單元 | 高 |
 | M6 | Pydantic validation：不合法的 `kind` 拋 `ValidationError` | 單元 | 高 |
 | M7 | `learnings` / `tags` 預設空 list、`handoff_note` 預設空字串 | 單元 | 中 |
 
