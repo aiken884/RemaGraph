@@ -139,6 +139,26 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 - **Migration**：內建 schema 版本追蹤與 migration chain
 - **超期清理**：`cleanup_superseded()` 可清理 90 天前的非 active 記錄
 
+## CLI 子命令（headless agent 用）
+
+除 MCP mode 外，`remagraph` 也支援三種 CLI 子命令，輸出 JSON 到 stdout，適合 shell script 或 headless agent 直接呼叫：
+
+```bash
+# 寫入記憶
+remagraph store \
+  --task-id task-001 --agent-id my-agent --kind status_update \
+  --summary "任務完成，所有測試通過" \
+  --learnings '["使用 FastMCP 要注意生命週期"]' \
+  --handoff-note "交接給下一位" \
+  --tags '["python","mcp"]'
+
+# 查詢記憶（FTS5 全文檢索）
+remagraph search --query "FastMCP 生命週期" --top-k 5
+
+# 查詢最新現況
+remagraph status --limit 10
+```
+
 詳細規格見 [`DESIGN.md`](./DESIGN.md)；對外穩定合約見 [`docs/audit.md`](./docs/audit.md)。
 
 ## 開發與驗證

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added (v2 — Phase 1 公開前必做)
 
+- **CLI subcommand**: `remagraph store`, `remagraph search`, `remagraph status` for headless agent integration. JSON output to stdout. Uses argparse (zero new deps). MCP mode keeps `remagraph serve`.
 - **路徑穿越防禦 (A3)**: `REMAGRAPH_STATE_DIR` 字元正則驗證 + `resolve()` 後禁止系統目錄（`/etc`, `/usr`, `/bin` 等）
 - **Rate limiting (A1)**: per-agent thread-safe token bucket（60 calls/60 秒 window），防止濫用與 DoS
 - **輸入驗證 (A2)**: `task_id` / `agent_id` 經 Pydantic `@field_validator` 檢核格式 `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`

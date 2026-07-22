@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RemaGraph v2 — 專案狀態儀表板</title>
+<style>
+  :root {
+    --primary: #F06000;
+    --primary-hover: #D45200;
+    --text: #1E293B;
+    --text-muted: #64748B;
+    --bg: #FFFFFF;
+    --bg-soft: #F8FAFC;
+    --border: #E2E8F0;
+    --success: #16A34A;
+    --warning: #D97706;
+    --danger: #DC2626;
+    --radius: 8px;
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    color: var(--text);
+    background: var(--bg-soft);
+    line-height: 1.6;
+    padding: 2rem 1rem;
+  }
+  .container { max-width: 960px; margin: 0 auto; }
+  header {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 2rem;
+    box-shadow: var(--shadow);
+    margin-bottom: 1.5rem;
+  }
+  header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-bottom: .25rem;
+  }
+  header .subtitle {
+    color: var(--text-muted);
+    font-size: .95rem;
+    margin-bottom: 1rem;
+  }
+  .badge-group { display: flex; flex-wrap: wrap; gap: .5rem; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    padding: .25rem .75rem;
+    border-radius: 999px;
+    font-size: .8rem;
+    font-weight: 600;
+  }
+  .badge-green { background: #DCFCE7; color: #166534; }
+  .badge-amber { background: #FEF3C7; color: #92400E; }
+  .badge-blue { background: #DBEAFE; color: #1E40AF; }
+  .badge-gray { background: #F1F5F9; color: #475569; }
+  .badge-orange { background: #FFF3E6; color: #9A3C00; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+  @media (max-width: 640px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    box-shadow: var(--shadow);
+  }
+  .card h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    padding-bottom: .5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .card h3 {
+    font-size: .9rem;
+    font-weight: 600;
+    margin-bottom: .25rem;
+  }
+  .stat {
+    text-align: center;
+    padding: 1rem .5rem;
+  }
+  .stat .num {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .stat .label {
+    color: var(--text-muted);
+    font-size: .8rem;
+  }
+  .stat .num.green { color: var(--success); }
+  .stat .num.amber { color: var(--warning); }
+  .stat .num.primary { color: var(--primary); }
+
+  .progress-bar {
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: .5rem;
+  }
+  .progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width .5s;
+  }
+  .progress-fill.green { background: var(--success); }
+  .progress-fill.amber { background: var(--warning); }
+  .progress-fill.primary { background: var(--primary); }
+
+  .list-item {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .35rem 0;
+    font-size: .875rem;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot-green { background: var(--success); }
+  .dot-amber { background: var(--warning); }
+  .dot-muted { background: var(--border); }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+  th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--border); }
+  th { font-weight: 600; color: var(--text-muted); font-size: .75rem; text-transform: uppercase; }
+  .status-cell { display: flex; align-items: center; gap: .35rem; }
+
+  footer {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: .8rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+    margin-top: 2rem;
+  }
+  .mt-1 { margin-top: 1rem; }
+  .mb-1 { margin-bottom: 1rem; }
+  .text-muted { color: var(--text-muted); }
+  .text-sm { font-size: .85rem; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- Header -->
+<header>
+  <h1>RemaGraph</h1>
+  <div class="subtitle">凡走過必留下痕跡 — 輕量 MCP 工具，記錄 AI coding agent 的任務殘跡</div>
+  <div class="badge-group">
+    <span class="badge badge-orange">v0.2.0-alpha</span>
+    <span class="badge badge-green">Apache-2.0</span>
+    <span class="badge badge-blue">Python ≥3.11</span>
+    <span class="badge badge-gray">MCP stdio</span>
+    <span class="badge badge-green">216 tests ✅</span>
+    <span class="badge badge-green">mypy ✅</span>
+    <span class="badge badge-green">ruff ✅</span>
+  </div>
+</header>
+
+<!-- Stats -->
+<div class="grid-3">
+  <div class="card stat">
+    <div class="num green">216</div>
+    <div class="label">通過測試</div>
+    <div class="progress-bar"><div class="progress-fill green" style="width:100%"></div></div>
+  </div>
+  <div class="card stat">
+    <div class="num primary">9</div>
+    <div class="label">源碼模組</div>
+    <div class="progress-bar"><div class="progress-fill primary" style="width:100%"></div></div>
+  </div>
+  <div class="card stat">
+    <div class="num amber">14</div>
+    <div class="label">v2 完成項目</div>
+    <div class="progress-bar"><div class="progress-fill amber" style="width:100%"></div></div>
+  </div>
+</div>
+
+<!-- Phase 1 + 2 -->
+<div class="grid-2">
+  <div class="card">
+    <h2>Phase 1 — 公開前必做</h2>
+    <div class="list-item"><span class="dot dot-green"></span> CONTRIBUTING.md + PR template</div>
+    <div class="list-item"><span class="dot dot-green"></span> PyPI publish pipeline (trusted publishing)</div>
+    <div class="list-item"><span class="dot dot-green"></span> docs/architecture.md</div>
+    <div class="list-item"><span class="dot dot-green"></span> A3 路徑穿越防禦 (regex + resolve)</div>
+    <div class="list-item"><span class="dot dot-green"></span> A1 Rate limiting (thread-safe token bucket)</div>
+    <div class="list-item"><span class="dot dot-green"></span> A2 task_id/agent_id 格式驗證</div>
+    <div class="list-item"><span class="dot dot-green"></span> D1 mypy strict CI gate</div>
+    <div class="list-item"><span class="dot dot-green"></span> O5 Migration 框架啟用</div>
+  </div>
+  <div class="card">
+    <h2>Phase 2 — 短期補上</h2>
+    <div class="list-item"><span class="dot dot-green"></span> O1 Audit rotation (按月分檔)</div>
+    <div class="list-item"><span class="dot dot-green"></span> O3 max_db_size (100MB soft limit)</div>
+    <div class="list-item"><span class="dot dot-green"></span> O2 cleanup_superseded() (90天清理)</div>
+    <div class="list-item"><span class="dot dot-green"></span> ADR 0001 (docs/decisions/)</div>
+    <div class="list-item"><span class="dot dot-green"></span> Dependabot 策略補強 (labels + reviewers)</div>
+    <div class="list-item" style="margin-top:.75rem"><span class="dot dot-green"></span> PPLX 對抗式審查 — 全數修復</div>
+  </div>
+</div>
+
+<!-- Governance Checklist -->
+<div class="card mb-1">
+  <h2>治理檢查清單</h2>
+  <div class="table-wrap">
+  <table>
+    <tr><th colspan="2">P0 — 基礎必備</th><th>狀態</th></tr>
+    <tr><td>P0-1</td><td>版本控制 + git 流程</td><td class="status-cell"><span class="dot dot-green"></span> 全 [x]</td></tr>
+    <tr><td>P0-2</td><td>License + SPDX</td><td class="status-cell"><span class="dot dot-green"></span> Apache-2.0</td></tr>
+    <tr><td>P0-3</td><td>測試 + 覆蓋率 + 冒煙</td><td class="status-cell"><span class="dot dot-green"></span> 216 tests, ≥80%</td></tr>
+    <tr><td>P0-4</td><td>對抗式審查</td><td class="status-cell"><span class="dot dot-green"></span> PPLX 已完成</td></tr>
+    <tr><td>P0-5</td><td>Secret 管理</td><td class="status-cell"><span class="dot dot-green"></span> gitleaks + pre-commit</td></tr>
+    <tr><td>P0-6</td><td>決策文件</td><td class="status-cell"><span class="dot dot-green"></span> README + docs/</td></tr>
+    <tr><td>P0-7</td><td>依賴管理</td><td class="status-cell"><span class="dot dot-green"></span> Dependabot + pip-audit</td></tr>
+    <tr><th colspan="2">P1 — 規模化準備</th><th>狀態</th></tr>
+    <tr><td>P1-1</td><td>mypy + ruff strict CI</td><td class="status-cell"><span class="dot dot-green"></span> [x]</td></tr>
+    <tr><td>P1-2</td><td>Dependabot</td><td class="status-cell"><span class="dot dot-green"></span> [x]</td></tr>
+    <tr><td>P1-3</td><td>ADR 決策紀錄</td><td class="status-cell"><span class="dot dot-green"></span> [x] ADR 0001</td></tr>
+    <tr><td>P1-4</td><td>CONTRIBUTING + PR template</td><td class="status-cell"><span class="dot dot-green"></span> [x]</td></tr>
+    <tr><td>P1-5</td><td>CHANGELOG</td><td class="status-cell"><span class="dot dot-green"></span> [x]</td></tr>
+    <tr><td>P1-6</td><td>PyPI publish pipeline</td><td class="status-cell"><span class="dot dot-green"></span> [x]</td></tr>
+  </table>
+  </div>
+</div>
+
+<!-- Module Structure -->
+<div class="grid-2">
+  <div class="card">
+    <h2>模組架構</h2>
+    <div class="list-item"><span class="dot dot-green"></span> <strong>server.py</strong> — MCP entrypoint + rate limiter</div>
+    <div class="list-item"><span class="dot dot-green"></span> <strong>store.py</strong> — SQLite 讀寫 + process_store 流程</div>
+    <div class="list-item"><span class="dot dot-green"></span> <strong>models.py</strong> — Pydantic schema + validators</div>
+    <div class="list-item"><span class="dot dot-green"></span> <strong>arbitration.py</strong> — 五條仲裁規則 + supersede/invalidate</div>
+    <div class="list-item"><span class="dot dot-green"></span> <strong>dedup.py</strong> — model2vec 語意去重</div>
+    <div class="list-item"><span class="dot dot-green"></span> <strong>search.py</strong> — FTS5 BM25 全文檢索</div>
+    <div class="list-item"><span class="dot dot-green"></span> <strong>db.py</strong> — SQLite 連線 + schema + migration + max_db_size</div>
+    <div class="list-item"><span class="dot dot-green"></span> <strong>audit.py</strong> — audit.jsonl 寫入 + rotation</div>
+  </div>
+  <div class="card">
+    <h2>五條仲裁規則</h2>
+    <div class="list-item"><span class="dot dot-green"></span> #1 summary ≥ 30 字元</div>
+    <div class="list-item"><span class="dot dot-green"></span> #2 learnings 至少一筆非空</div>
+    <div class="list-item"><span class="dot dot-green"></span> #3 handoff_note ≥ 20（僅 task_handoff）</div>
+    <div class="list-item"><span class="dot dot-green"></span> #4 model2vec cosine ≥ 0.90 去重</div>
+    <div class="list-item"><span class="dot dot-green"></span> #5 agent_id 格式 + Lazy Registration</div>
+    <div class="list-item" style="margin-top:.75rem"><span class="dot dot-amber"></span> <strong>等待 V3</strong></div>
+    <div class="list-item text-sm">S1 sqlite-vec 語意搜尋 / T1 Unix socket daemon</div>
+    <div class="list-item text-sm">S2 Hybrid search / S3 中文分詞 / S4 升維</div>
+  </div>
+</div>
+
+<!-- Dependencies -->
+<div class="card">
+  <h2>技術棧</h2>
+  <div class="grid-3" style="margin-bottom:0">
+    <div>
+      <h3>執行期</h3>
+      <div class="list-item"><span class="dot dot-muted"></span> Python ≥3.11</div>
+      <div class="list-item"><span class="dot dot-muted"></span> FastMCP (mcp SDK)</div>
+      <div class="list-item"><span class="dot dot-muted"></span> SQLite + FTS5 (trigram)</div>
+      <div class="list-item"><span class="dot dot-muted"></span> model2vec (potion-multilingual-128M)</div>
+      <div class="list-item"><span class="dot dot-muted"></span> Pydantic v2</div>
+    </div>
+    <div>
+      <h3>開發</h3>
+      <div class="list-item"><span class="dot dot-muted"></span> uv (套件管理)</div>
+      <div class="list-item"><span class="dot dot-muted"></span> ruff (lint + format)</div>
+      <div class="list-item"><span class="dot dot-muted"></span> mypy (type check, strict)</div>
+      <div class="list-item"><span class="dot dot-muted"></span> pytest + pytest-cov</div>
+      <div class="list-item"><span class="dot dot-muted"></span> mutmut (mutation testing)</div>
+    </div>
+    <div>
+      <h3>CI/CD</h3>
+      <div class="list-item"><span class="dot dot-muted"></span> GitHub Actions (currently disabled)</div>
+      <div class="list-item"><span class="dot dot-muted"></span> gitleaks (secret scan)</div>
+      <div class="list-item"><span class="dot dot-muted"></span> pip-audit (dependency scan)</div>
+      <div class="list-item"><span class="dot dot-muted"></span> Dependabot (weekly)</div>
+      <div class="list-item"><span class="dot dot-muted"></span> Branch protection (test gate)</div>
+    </div>
+  </div>
+</div>
+
+<!-- Git History -->
+<div class="card mt-1">
+  <h2>最近 commits</h2>
+  <div class="table-wrap">
+  <table>
+    <tr><th>SHA</th><th>訊息</th><th>日期</th></tr>
+    <tr><td><code>a7e18ab</code></td><td>docs: update all docs for v2 release</td><td>2026-07-22</td></tr>
+    <tr><td><code>130469a</code></td><td>feat: complete v2 Phase 1+2 — security, reliability, governance hardening</td><td>2026-07-22</td></tr>
+    <tr><td><code>99596fe</code></td><td>docs: add v2 roadmap blueprint with PPLX governance alignment</td><td>2026-07-22</td></tr>
+    <tr><td><code>e112b03</code></td><td>chore: close all P0 items — branch protection + stale branch cleanup</td><td>2026-07-22</td></tr>
+    <tr><td><code>f478079</code></td><td>fix: resolve mid-stop agent artifacts</td><td>2026-07-21</td></tr>
+  </table>
+  </div>
+</div>
+
+<footer>
+  RemaGraph · Apache-2.0 · <a href="https://github.com/aiken884/RemaGraph">github.com/aiken884/RemaGraph</a><br>
+  產生於 2026-07-22 · 此檔案不進版控
+</footer>
+
+</div>
+</body>
+</html>

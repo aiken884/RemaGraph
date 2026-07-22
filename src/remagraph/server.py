@@ -1,20 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""MCP server entrypoint (stdio transport) — v1 以 stdio 為主要傳輸模式。
+"""MCP server entrypoint (stdio transport) + CLI subcommands。
 
-透過 FastMCP (mcp SDK) 註冊三個 tool：
-- remagraph_store：寫入記憶（仲裁 → dedup → 寫入 SQLite + FTS5）
-- remagraph_search：FTS5 BM25 全文檢索
-- remagraph_status：查詢專案最新現況（active status_update 依 task_id 去重）
-
-使用方式：
-    remagraph serve          # stdio 模式（預設）
-    REMAGRAPH_STATE_DIR=/tmp remagraph serve  # 自訂 state 目錄
+透過程式進入點自動判斷模式：
+- `remagraph serve` → MCP stdio server（既有）
+- `remagraph store/search/status` → CLI subcommand（headless agent 用）
 """
 
 from __future__ import annotations
 
 import atexit
 import sqlite3
+import sys
 import threading
 import time
 from collections import defaultdict
@@ -190,8 +186,17 @@ def remagraph_status(limit: int = 20) -> dict[str, Any]:
 
 
 def main() -> None:
-    """程式入口：以 stdio transport 啟動 MCP server。"""
-    mcp.run(transport="stdio")
+    """程式入口：自動判斷 CLI 或 MCP 模式。
+
+    - `remagraph serve` → MCP stdio server
+    - `remagraph store/search/status` → CLI 子命令（JSON 輸出）
+    """
+    if len(sys.argv) >= 2 and sys.argv[1] in ("store", "search", "status"):
+        from remagraph.cli import main as cli_main
+
+        cli_main(sys.argv[1:])
+    else:
+        mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":
