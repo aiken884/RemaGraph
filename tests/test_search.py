@@ -194,6 +194,37 @@ class TestSearchMemories:
             resp = search_memories(conn, req)
         assert len(resp.results) == 0
 
+    # ================================================================
+    # Regression: 空字串 query 應等同「列出最近記憶」，而非全文檢索 (#29)
+    # ================================================================
+
+    def test_empty_query_no_filters_lists_recent(self, conn):
+        """空字串 query 且無任何過濾條件時，不應觸發 trigram 最短長度限制
+        而靜默回傳空結果，而應視為「列出最近的記憶」。
+
+        修復前：query="" 命中 `_trigram_char_len(sanitized) < 3` 短路徑，
+        因無 task_id/agent_id/kind/tags 過濾條件，直接回傳空結果 + warning
+        "FTS5 query too short for trigram tokenizer"——即使資料庫內有記錄。
+        """
+        _insert_memory(conn, id="mem-1", kind="task_handoff", summary="任意內容，不含特定查詢字串")
+        req = SearchRequest(query="", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
+
+    def test_empty_query_with_project_id_only_lists_recent(self, conn):
+        """空字串 query + 僅 project_id 過濾（無 task_id/agent_id/kind/tags）時，
+        亦應列出最近記憶——對應 `remagraph search --all-projects` 或跨專案
+        fleet 查詢等僅靠 project_id 篩選的呼叫路徑。
+        """
+        _insert_memory(
+            conn, id="mem-1", kind="task_handoff", summary="專案內容", project_id="proj-a"
+        )
+        req = SearchRequest(query="", project_id="proj-a", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
+
     # -- kind 過濾 --
 
     def test_kind_filter(self, conn):
