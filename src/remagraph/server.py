@@ -194,12 +194,15 @@ def remagraph_search(
 
 @mcp.tool(
     name="remagraph_status",
-    description="查詢最新現況（預設限 project）。",
+    description="查詢最新現況（預設限 project）。同時回傳版本相容性 handshake 資訊"
+    "（server_code_version/db_schema_version/min_reader_version/min_writer_version/"
+    "upgrade_hint/read_only），讓呼叫端能提早掌握是否存在版本落差，不必等寫入失敗。",
 )
 def remagraph_status(
     project_id: str | None = None, limit: int = 20, all_projects: bool = False
 ) -> dict[str, Any]:
-    """查詢所有 active status_update（依 task_id 去重取最新）。"""
+    """查詢所有 active status_update（依 task_id 去重取最新），並附上版本相容性
+    handshake 資訊（見 db.get_compat_status）。"""
     _check_rate_limit("status")
     try:
         conn = _get_conn()
@@ -208,7 +211,9 @@ def remagraph_status(
     eff_project = None if all_projects else project_id
     request = StatusRequest(limit=limit, project_id=eff_project)
     response = get_status(conn, request)
-    return {"latest": response.latest}
+    result: dict[str, Any] = {"latest": response.latest}
+    result.update(_db.get_compat_status(conn))
+    return result
 
 
 @mcp.tool(
