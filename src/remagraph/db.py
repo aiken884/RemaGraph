@@ -22,10 +22,32 @@ from typing import Any
 
 DEFAULT_STATE_DIR = Path.home() / ".local" / "state" / "remagraph"
 DB_FILENAME = "remagraph.db"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 MAX_DB_SIZE_MB = 100  # soft limit via PRAGMA max_page_count
 _ALLOWED_STATE_DIR_RE = re.compile(r"^[a-zA-Z0-9_/.-]+$")
 DEFAULT_PROJECT_ID = "default"
+
+# ---------------------------------------------------------------------------
+# 前向相容性 meta 欄位預設值（自 v5 起）
+#
+# 背景：獨立釘版的舊消費端一旦打開一個 schema_version 比自己程式碼還新的
+# 資料庫，就會卡在 MigrationError，而該錯誤訊息是寫死在「消費端當時執行的
+# 那份舊程式碼」裡 —— 之後即使我們改善訊息文字，舊消費端也永遠讀不到。
+#
+# 解法：把升級指引存進資料庫本身的 _meta 表（消費端一定會開、一定會讀到），
+# 而不是寫死在程式碼字串常數裡。之後任何版本的 migration 都能更新這個存進
+# DB 的值，並讓「讀 _meta.upgrade_hint」這個行為從現在開始就種進消費端。
+# ---------------------------------------------------------------------------
+_MIN_READER_VERSION_DEFAULT = "1"
+
+_UPGRADE_HINT_TEXT = (
+    "此資料庫的 schema 版本比目前執行的 remagraph 程式碼更新，程式碼為避免資料損毀"
+    "已拒絕開啟。請選擇以下其一處理："
+    "1) 將已安裝的 remagraph 套件升級到與此資料庫 schema 相容的版本；"
+    "2) 設定環境變數 REMAGRAPH_STATE_DIR 指向另一個全新、獨立的目錄，改用全新資料庫；"
+    "3) 若確認可捨棄此資料庫的既有資料，找到並刪除該 state_dir 目錄下的 "
+    "remagraph.db 檔案後重新初始化。"
+)
 
 
 class MigrationError(RuntimeError):
@@ -285,10 +307,24 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     row = conn.execute("SELECT value FROM _meta WHERE key='schema_version'").fetchone()
 
     if row is None:
-        # 全新資料庫 —— 寫入初始版本
+        # 全新資料庫 —— 寫入初始版本，並同步種下前向相容性欄位
+        # （min_reader_version / min_writer_version / upgrade_hint），
+        # 不只讓 v4→v5 migration 路徑補上這些欄位。
         conn.execute(
             "INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)",
             (str(SCHEMA_VERSION),),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO _meta (key, value) VALUES ('min_reader_version', ?)",
+            (_MIN_READER_VERSION_DEFAULT,),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO _meta (key, value) VALUES ('min_writer_version', ?)",
+            (str(SCHEMA_VERSION),),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO _meta (key, value) VALUES ('upgrade_hint', ?)",
+            (_UPGRADE_HINT_TEXT,),
         )
         return
 
@@ -311,9 +347,12 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if current_version == 3:
         _migrate_v3_to_v4(conn)
         current_version = 4
+    if current_version == 4:
+        _migrate_v4_to_v5(conn)
+        current_version = 5
 
     if current_version > SCHEMA_VERSION:
-        raise MigrationError(
+        message = (
             f"資料庫 schema_version={current_version} 比程式碼的 "
             f"SCHEMA_VERSION={SCHEMA_VERSION} 還新，無法降級。"
             "請選擇以下其一處理："
@@ -322,6 +361,34 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             "3) 若確認可捨棄此資料庫的既有資料，刪除該 state_dir 下的 "
             f"{DB_FILENAME} 後重新初始化。"
         )
+        stored_hint = _read_upgrade_hint_defensively(conn)
+        if stored_hint:
+            message += f" [資料庫內建升級提示] {stored_hint}"
+        raise MigrationError(message)
+
+
+def _read_upgrade_hint_defensively(conn: sqlite3.Connection) -> str | None:
+    """嘗試從 _meta 讀取 upgrade_hint，供拒絕降級時附加參考資訊。
+
+    此函式必須極度防禦：呼叫當下的資料庫，其 schema_version 已確認比目前
+    程式碼的 SCHEMA_VERSION 還新 —— 換言之它可能來自結構已改變的未來版本，
+    連 _meta 表本身的存在或欄位是否符合預期都不可信任。任何失敗（表不存在、
+    欄位不存在、讀取例外……）一律吞下並回傳 None，絕不讓例外中斷原本的
+    拒絕流程 —— 現有靜態訊息必須永遠是可靠的最終防線。
+    """
+    try:
+        row = conn.execute("SELECT value FROM _meta WHERE key = 'upgrade_hint'").fetchone()
+    except Exception:
+        return None
+    if row is None:
+        return None
+    try:
+        value = row[0]
+    except Exception:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value
 
 
 def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
@@ -398,3 +465,23 @@ def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
         PRAGMA foreign_keys=ON;
     """)
     conn.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', '4')")
+
+
+def _migrate_v4_to_v5(conn: sqlite3.Connection) -> None:
+    """v4→v5: 加入前向相容性 meta 欄位 —— min_reader_version、min_writer_version、
+    upgrade_hint。目的是讓「資料庫本身」成為未來版本回頭教導舊消費端如何升級的
+    管道，而不是依賴消費端當下執行中的程式碼版本（該版本一旦部署就凍結，
+    永遠學不到日後對錯誤訊息的任何改進）。
+    """
+    conn.execute(
+        "INSERT OR REPLACE INTO _meta (key, value) VALUES ('min_reader_version', ?)",
+        (_MIN_READER_VERSION_DEFAULT,),
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO _meta (key, value) VALUES ('min_writer_version', '5')"
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO _meta (key, value) VALUES ('upgrade_hint', ?)",
+        (_UPGRADE_HINT_TEXT,),
+    )
+    conn.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', '5')")
