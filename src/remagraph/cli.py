@@ -98,7 +98,12 @@ def cmd_store(args: argparse.Namespace) -> None:
         tags=_parse_json_list(args.tags) or [],
         invalidates=_parse_json_list(args.invalidates),
     )
-    response = process_store(request, _get_conn())
+    try:
+        conn = _get_conn()
+    except Exception as e:
+        print(f"ERROR: 無法連線資料庫 - {e}", file=sys.stderr)
+        sys.exit(1)
+    response = process_store(request, conn)
     result: dict[str, Any] = {
         "status": response.status,
         "superseded": response.superseded,
@@ -140,7 +145,12 @@ def cmd_search(args: argparse.Namespace) -> None:
         agent_id=args.agent_id,
         task_id=args.task_id,
     )
-    response = search_memories(_get_conn(), request)
+    try:
+        conn = _get_conn()
+    except Exception as e:
+        print(f"ERROR: 無法連線資料庫 - {e}", file=sys.stderr)
+        sys.exit(1)
+    response = search_memories(conn, request)
     _print_json({"results": response.results, "has_more": response.has_more})
 
 
@@ -155,7 +165,11 @@ def cmd_status(args: argparse.Namespace) -> None:
         project = None
     elif not project:
         project = "default"
-    conn = _get_conn()
+    try:
+        conn = _get_conn()
+    except Exception as e:
+        print(f"ERROR: 無法連線資料庫 - {e}", file=sys.stderr)
+        sys.exit(1)
     request = StatusRequest(limit=args.limit, project_id=project)
     response = get_status(conn, request)
     result: dict[str, Any] = {"latest": response.latest}
