@@ -54,6 +54,30 @@ class MigrationError(RuntimeError):
     """Schema migration 失敗。"""
 
 
+class _MarkedConnection(sqlite3.Connection):
+    """sqlite3.Connection 子類別，僅用於取得一般 instance __dict__。
+
+    背景：經拋棄式腳本實測驗證，純 C 擴充型別的 sqlite3.Connection 實例
+    本身**不**支援任意屬性賦值（`conn.foo = 1` 會直接拋出
+    `AttributeError: 'sqlite3.Connection' object has no attribute 'foo'`，
+    因為該型別沒有 instance __dict__）。繼承出的子類別則會取得一般的
+    instance __dict__，因此支援任意屬性賦值 —— 且該子類別實例仍是
+    sqlite3.Connection 的實例（isinstance 檢查、既有型別標註
+    `sqlite3.Connection`、既有呼叫端的所有行為都不受影響，本類別本身
+    不覆寫任何行為/方法）。
+
+    connect() 一律以此類別作為 sqlite3.connect(factory=...) 的 factory，
+    使唯讀降級標記（見 _run_migrations 的三層版本相容性判斷）得以掛載在
+    連線物件上，供 store.process_store() 讀取判斷。
+    """
+
+
+# _run_migrations 判定唯讀降級時，掛在連線物件上的標記屬性名稱。
+# store.process_store() 會以 getattr(conn, READ_ONLY_ATTR, False) 讀取。
+READ_ONLY_ATTR = "remagraph_read_only"
+READ_ONLY_DETAIL_ATTR = "remagraph_read_only_detail"
+
+
 # ---------------------------------------------------------------------------
 # 公開 API
 # ---------------------------------------------------------------------------
@@ -169,6 +193,7 @@ def connect(
         str(db_path),
         isolation_level=None,  # 自動 commit 模式；手動管理 transaction
         check_same_thread=False,
+        factory=_MarkedConnection,
     )
     conn.row_factory = sqlite3.Row
 
@@ -352,19 +377,75 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         current_version = 5
 
     if current_version > SCHEMA_VERSION:
-        message = (
-            f"資料庫 schema_version={current_version} 比程式碼的 "
-            f"SCHEMA_VERSION={SCHEMA_VERSION} 還新，無法降級。"
-            "請選擇以下其一處理："
-            "1) 更新已安裝的 remagraph 套件至相容此 schema 版本的版本；"
-            "2) 設定 REMAGRAPH_STATE_DIR 指向另一個獨立目錄，改用全新資料庫；"
-            "3) 若確認可捨棄此資料庫的既有資料，刪除該 state_dir 下的 "
-            f"{DB_FILENAME} 後重新初始化。"
+        _handle_newer_than_code_schema(conn, current_version)
+
+
+def _handle_newer_than_code_schema(conn: sqlite3.Connection, current_version: int) -> None:
+    """資料庫 schema_version（current_version）比程式碼的 SCHEMA_VERSION 還新時
+    的三層版本相容性判斷。
+
+    比較程式碼的 SCHEMA_VERSION 與資料庫本身存下的 min_reader_version /
+    min_writer_version（見 item 1，_migrate_v4_to_v5 起種下的前向相容性
+    欄位）：
+
+    1. SCHEMA_VERSION >= min_writer_version
+       → 完全相容（讀寫皆安全）：不做任何事、正常 return，維持與過去
+         schema_version <= SCHEMA_VERSION 時完全相同的行為。
+    2. min_reader_version <= SCHEMA_VERSION < min_writer_version
+       → 讀相容但寫不安全：不 raise，只在連線物件上掛唯讀標記
+         （READ_ONLY_ATTR），交由呼叫端（store.process_store）在真正嘗試
+         寫入時才擋下，讀取路徑（search/status）完全不受影響。
+    3. SCHEMA_VERSION < min_reader_version
+       → 連讀都不安全：維持 item 1 既有行為，raise MigrationError（靜態
+         訊息 + 防禦性讀取的 upgrade_hint）。
+
+    防禦性 fallback：min_reader_version / min_writer_version 任一讀取失敗
+    或缺漏（例如結構已改變、連 _meta 表都不可信任的未來資料庫），一律視為
+    兩者都等於 current_version，退回本函式重構前的嚴格全有全無行為 ——
+    絕不能讓「讀不到欄位」意外變成寬鬆預設值。
+    """
+    min_reader = _read_meta_int_defensively(conn, "min_reader_version")
+    min_writer = _read_meta_int_defensively(conn, "min_writer_version")
+    if min_reader is None or min_writer is None:
+        min_reader = current_version
+        min_writer = current_version
+
+    if SCHEMA_VERSION >= min_writer:
+        # Tier 1：完全相容，維持原本「沒事發生」的行為。
+        return
+
+    stored_hint = _read_upgrade_hint_defensively(conn)
+
+    if SCHEMA_VERSION >= min_reader:
+        # Tier 2：讀相容、寫不安全 —— 不 raise，只標記唯讀，交給
+        # store.process_store() 在寫入路徑擋下。
+        detail = (
+            f"此資料庫已升級至 schema_version={current_version}，其要求的最低"
+            f"寫入相容版本 min_writer_version={min_writer} 高於目前執行的程式碼"
+            f"版本 SCHEMA_VERSION={SCHEMA_VERSION}。為避免資料損毀，此連線已切換"
+            "為唯讀模式（remagraph_search / remagraph_status 可正常使用），已"
+            "拒絕本次寫入。請將已安裝的 remagraph 套件升級到與此資料庫相容的"
+            "版本後再重試寫入。"
         )
-        stored_hint = _read_upgrade_hint_defensively(conn)
         if stored_hint:
-            message += f" [資料庫內建升級提示] {stored_hint}"
-        raise MigrationError(message)
+            detail += f" [資料庫內建升級提示] {stored_hint}"
+        setattr(conn, READ_ONLY_ATTR, True)
+        setattr(conn, READ_ONLY_DETAIL_ATTR, detail)
+        return
+
+    # Tier 3：連讀都不安全 —— 維持 item 1 既有的強制拒絕行為不變。
+    message = (
+        f"資料庫 schema_version={current_version} 比程式碼的 "
+        f"SCHEMA_VERSION={SCHEMA_VERSION} 還新，無法降級。"
+        "請選擇以下其一處理："
+        "1) 更新已安裝的 remagraph 套件至相容此 schema 版本的版本；"
+        "2) 設定 REMAGRAPH_STATE_DIR 指向另一個獨立目錄，改用全新資料庫；"
+        "3) 若確認可捨棄此資料庫的既有資料，刪除該 state_dir 下的 "
+        f"{DB_FILENAME} 後重新初始化。"
+    )
+    if stored_hint:
+        message += f" [資料庫內建升級提示] {stored_hint}"
+    raise MigrationError(message)
 
 
 def _read_upgrade_hint_defensively(conn: sqlite3.Connection) -> str | None:
@@ -389,6 +470,28 @@ def _read_upgrade_hint_defensively(conn: sqlite3.Connection) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
     return value
+
+
+def _read_meta_int_defensively(conn: sqlite3.Connection, key: str) -> int | None:
+    """嘗試從 _meta 讀取指定 key 並轉為 int，供三層版本相容性判斷使用。
+
+    與 _read_upgrade_hint_defensively 相同的防禦精神：呼叫當下的資料庫
+    schema_version 已確認比程式碼的 SCHEMA_VERSION 還新，連 _meta 表本身
+    的存在或欄位是否符合預期都不可信任。任何失敗（表不存在、欄位不存在、
+    值無法轉為 int……）一律回傳 None，絕不拋出例外 —— 呼叫端會將 None
+    視為「讀取失敗」並整體 fallback 回嚴格行為，而不是替單一欄位套用
+    寬鬆預設值。
+    """
+    try:
+        row = conn.execute("SELECT value FROM _meta WHERE key = ?", (key,)).fetchone()
+    except Exception:
+        return None
+    if row is None:
+        return None
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return None
 
 
 def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:

@@ -26,6 +26,7 @@ from remagraph.arbitration import (
     supersede_for_kind,
 )
 from remagraph.audit import append_audit
+from remagraph.db import READ_ONLY_ATTR, READ_ONLY_DETAIL_ATTR
 from remagraph.dedup import check_duplicate, encode_summary
 from remagraph.models import Memory, MemoryKind, StoreRequest, StoreResponse
 
@@ -227,6 +228,27 @@ def process_store(
             呼叫者（CLI、MCP server、或任何帶明確 project_id 的呼叫）不得
             傳入，維持預設 False 以保留既有的安全閥門強制行為。
     """
+    # 唯讀降級檢查（PPLX 架構改善計畫 item 2）：必須是本函式最前面執行的
+    # 檢查 —— 早於安全閥門、早於仲裁規則、早於 model2vec 去重（規則 #4），
+    # 完全不嘗試任何 transaction。db.connect() 在三層版本相容性判斷得出
+    # 「讀相容但寫不安全」（tier 2）結論時，會在連線物件上掛
+    # db.READ_ONLY_ATTR 標記（見 db._handle_newer_than_code_schema）。
+    # 沿用既有的 StoreResponse.status="rejected"（不新增列舉值，避免牽動
+    # audit.append_audit 對 status 的 switch），reason 使用專屬字串
+    # "read_only_mode" 供呼叫端區分。
+    if getattr(conn, READ_ONLY_ATTR, False):
+        detail = getattr(
+            conn,
+            READ_ONLY_DETAIL_ATTR,
+            "此連線目前為唯讀模式（資料庫 schema 已升級到超出本程式碼的寫入"
+            "相容版本），已拒絕本次寫入。請升級 remagraph 套件後再重試。",
+        )
+        return StoreResponse(
+            status="rejected",
+            reason="read_only_mode",
+            detail=detail,
+        )
+
     # 安全閥門（PPLX 共識版）：強制 project + state_dir 對映
     from remagraph.maintenance import safety_validate_project
 
