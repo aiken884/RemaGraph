@@ -181,6 +181,8 @@ def remagraph_search(
     task_id: str | None = None,
     all_projects: bool = False,
     cross_project_label: str | None = None,
+    include_related: bool = False,
+    related_hops: int = 1,
 ) -> dict[str, Any]:
     """agent 查詢記憶（FTS5 BM25）。
 
@@ -193,6 +195,15 @@ def remagraph_search(
     表並合併結果（詳見 search._search_cross_project_by_label）。提供
     cross_project_label 時，其餘全文檢索/過濾參數（query/kind/tags/...）
     不適用，只依 label 精確比對。
+
+    include_related（PPLX 架構改善計畫 item 5）：與 cross_project_label /
+    all_projects 是第三個完全獨立的維度——只 fan out 到透過
+    db.recall_related()（project_edges traversal，需先以 `remagraph link`
+    宣告關聯）在 related_hops 之內找到的『明確關聯』專案，且查詢方式是
+    正常的 FTS query（非 label 精確比對），詳見
+    search._search_related_projects。需要 project_id 作為 traversal
+    起點；project_id 為 None 時優雅退化為一般搜尋，不展開 related
+    fan-out（見 search.search_memories 的分派邏輯）。
     """
     _check_rate_limit(agent_id or "anonymous")
     try:
@@ -210,6 +221,8 @@ def remagraph_search(
         agent_id=agent_id,
         task_id=task_id,
         cross_project_label=cross_project_label,
+        include_related=include_related,
+        related_hops=related_hops,
     )
     response = search_memories(conn, request)
     return {
@@ -299,7 +312,16 @@ def main() -> None:
     - `remagraph serve` → MCP stdio server
     - `remagraph store/search/status/init/auto` → CLI 子命令
     """
-    cli_commands = ("store", "search", "status", "init", "auto", "maintain", "migrate-project")
+    cli_commands = (
+        "store",
+        "search",
+        "status",
+        "init",
+        "auto",
+        "maintain",
+        "migrate-project",
+        "link",
+    )
     if len(sys.argv) >= 2 and sys.argv[1] in cli_commands:
         from remagraph.cli import main as cli_main
 

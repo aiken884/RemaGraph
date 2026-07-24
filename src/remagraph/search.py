@@ -20,6 +20,16 @@ db.connect_foreign_project_readonly()（item 4a 的共用 registry 機制）真�
 互不取代、互不影響——本模組刻意讓 cross_project_label 為 None（預設值）時
 完全不觸碰 db.list_known_projects/connect_foreign_project_readonly，維持
 all_projects 既有語意零副作用。
+
+include_related（PPLX 架構改善計畫 item 5）是第三個獨立維度：與
+cross_project_label 對『所有』已知專案無差別 fan-out 不同，include_related
+只 fan out 到透過 db.recall_related()（project_edges traversal）明確找到、
+在 related_hops 之內的「圖形關聯」專案，且查詢方式是正常的 FTS 全文查詢
+（非 label 精確比對）。兩者的「開連線 + 查詢 + 合併 + 依 (source_project_id,
+id) 去重 + fan-out 上限與 capped 回報」這一段模式高度相似，因此抽出共用的
+_cross_project_fanout() 供兩者重用（見該函式 docstring），差異只在於：
+候選專案清單怎麼來（list_known_projects() vs. db.recall_related()）、以及
+對每個連線實際執行的查詢邏輯（依 label 比對 vs. 依 FTS query/過濾條件）。
 """
 
 from __future__ import annotations
@@ -162,11 +172,26 @@ def _row_to_result(row: sqlite3.Row, score: float | None = None) -> dict[str, An
     return result
 
 
-def _list_by_filters(
+def _list_by_filters_rows(
     conn: sqlite3.Connection,
     request: SearchRequest,
-) -> SearchResponse:
-    """無全文查詢時，依 task_id/agent_id 等過濾直接列出（給 auto/recall 用）。"""
+    *,
+    apply_project_filter: bool = True,
+) -> list[sqlite3.Row]:
+    """無全文查詢時，依 task_id/agent_id 等過濾直接列出的核心查詢，回傳原始
+    rows（未套用 top_k 截斷/has_more 判斷）。
+
+    獨立成此函式（供 _list_by_filters 與 item 5 的
+    _query_single_db_for_request 共用），理由與 _query_single_db_for_request
+    docstring 的 apply_project_filter 說明一致：對『目前這個連線自己所屬的
+    專案』要套用 request.project_id 過濾（維持既有行為），但對 fan-out 到的
+    『另一個』相關專案自己獨立的資料庫檔案，不該套用這個屬於 origin 專案的
+    過濾條件。
+
+    Args:
+        apply_project_filter: 是否套用 request.project_id 過濾，預設 True
+            （維持 _list_by_filters 對外的既有行為不變）。
+    """
     where: list[str] = []
     params: list[Any] = []
 
@@ -179,7 +204,7 @@ def _list_by_filters(
     else:
         where.append("status = ?")
         params.append("active")
-    if request.project_id is not None:
+    if apply_project_filter and request.project_id is not None:
         where.append("project_id = ?")
         params.append(request.project_id)
     if request.agent_id is not None:
@@ -201,7 +226,15 @@ def _list_by_filters(
         ORDER BY timestamp DESC
         LIMIT ?
     """
-    rows = conn.execute(sql, params).fetchall()
+    return conn.execute(sql, params).fetchall()
+
+
+def _list_by_filters(
+    conn: sqlite3.Connection,
+    request: SearchRequest,
+) -> SearchResponse:
+    """無全文查詢時，依 task_id/agent_id 等過濾直接列出（給 auto/recall 用）。"""
+    rows = _list_by_filters_rows(conn, request, apply_project_filter=True)
     has_more = len(rows) > request.top_k
     results = [_row_to_result(r) for r in rows[: request.top_k]]
     return SearchResponse(results=results, has_more=has_more)
@@ -230,6 +263,22 @@ def search_memories(
     """
     if request.cross_project_label:
         return _search_cross_project_by_label(conn, request)
+
+    if request.include_related:
+        if request.project_id is None:
+            # 呼叫端使用錯誤（而非系統錯誤）：include_related 需要一個
+            # project_id 作為 db.recall_related() traversal 的起點，
+            # project_id=None 時沒有『我』這個起點可以走。優雅退化為
+            # 一般搜尋（不展開 related fan-out），不拋出例外——見模組頂端
+            # 說明與 tests/test_project_edges_and_recall_related.py 的
+            # test_include_related_with_project_id_none_does_not_crash_and_falls_back。
+            logger.warning(
+                "include_related=True but project_id is None — nothing to traverse "
+                "from (recall_related requires a starting project_id); falling back "
+                "to a normal search without related-project fan-out"
+            )
+        else:
+            return _search_related_projects(conn, request)
 
     sanitized = sanitize_fts5_query(request.query or "")
 
@@ -302,6 +351,153 @@ def search_memories(
 
 
 # ---------------------------------------------------------------------------
+# 共用跨專案 fan-out 骨架（PPLX 架構改善計畫 item 4b Part 3 起，item 5 重用）
+#
+# 抽出理由：item 4b 的「依 label 對『所有』已知專案 fan-out」與 item 5 的
+# 「依 FTS query 對『明確關聯』專案 fan-out」，兩者的骨架完全一致——(a) 查
+# 目前這個連線自己的資料庫、(b) 逐一對候選的『其他』project_id 開唯讀連線
+# 執行同一份查詢、(c) 合併並依 (source_project_id, id) 去重、(d) 套用
+# fan-out 上限與 cross_project_fanout_capped 回報慣例——差異只在於「候選
+# project_id 清單怎麼來」（item 4b：db.list_known_projects() 全量；item 5：
+# db.recall_related() 的 hop-bounded traversal）與「對每個連線實際執行的
+# 查詢邏輯」（item 4b：依 label 精確比對；item 5：依 FTS query/過濾條件）。
+# 因此把 (a)(b)(c)(d) 這段共用骨架抽成 _cross_project_fanout()，兩個呼叫端
+# 只需各自提供候選清單與查詢 closure，不重複維護一份幾乎相同的迴圈/去重/
+# 上限邏輯。
+# ---------------------------------------------------------------------------
+
+
+def _optional_score(row: sqlite3.Row) -> float | None:
+    """回傳 row 若含有 FTS5 BM25 查詢附加的 'score' 欄位，否則回傳 None。
+
+    label 比對查詢（SELECT m.*）與 list-by-filters 查詢（SELECT * FROM
+    memories）的 rows 都沒有這個欄位；FTS5 全文查詢的 rows
+    （SELECT m.*, bm25(memories_fts) AS score ...）才有。獨立成小函式，讓
+    _cross_project_fanout() 的合併邏輯不必知道 query_fn 究竟是哪一種查詢，
+    一律嘗試讀取、讀不到就退回 _row_to_result() 既有的 0.0 預設值。
+    """
+    try:
+        return float(row["score"])
+    except (IndexError, KeyError):
+        return None
+
+
+def _cross_project_fanout(
+    conn: sqlite3.Connection,
+    request: SearchRequest,
+    *,
+    own_project_id: str | None,
+    candidate_project_ids: list[str],
+    query_fn: Any,
+    cap: int,
+    log_label: str,
+) -> SearchResponse:
+    """共用的跨專案 fan-out 骨架，見上方模組內說明。
+
+    Args:
+        conn: 目前這個連線（呼叫端自己所屬的專案，或無特定專案時的預設
+            連線）。
+        request: 原始 SearchRequest，僅用於 top_k 截斷/has_more 判斷。
+        own_project_id: 目前這個連線所屬的 project_id（可能為 None——見
+            下方對 (source_project_id, id) 去重機制的說明，None 時仍保證
+            正確、只是無法提前跳過候選清單中『恰好等於自己』的那一項）。
+        candidate_project_ids: 候選的『其他』project_id 清單（item 4b 傳入
+            db.list_known_projects() 的全量；item 5 傳入
+            db.recall_related() 的 hop-bounded 結果）。
+        query_fn: 對『任一』連線（自己的或某個候選 project 的唯讀連線）
+            執行同一份查詢邏輯的 callable：Callable[[sqlite3.Connection],
+            list[sqlite3.Row]]。同一個 query_fn 同時用於 (a) 自己的連線與
+            (b) 每一個候選連線——這正是兩個呼叫端「查詢邏輯不同、但骨架
+            相同」得以共用本函式的關鍵：查詢邏輯的差異完全封裝在呼叫端
+            傳入的 closure 裡。
+        cap: fan-out 上限（item 4b/5 目前都重用同一個
+            _CROSS_PROJECT_FANOUT_CAP，見該常數與呼叫端的說明）。
+        log_label: 超過上限時 warning log 訊息裡標明是哪一種 fan-out
+            （"cross_project_label" 或 "include_related"），方便日後從
+            log 判斷是哪個功能觸發。
+
+    韌性：db.connect_foreign_project_readonly() 對任何已註冊但目前不可達的
+    專案一律回傳 None——遇到 None 時直接跳過、繼續處理其餘候選，絕不讓整個
+    搜尋因單一專案不可達而失敗；query_fn 拋出 sqlite3.OperationalError
+    （例如該外部專案的資料庫尚未升級到含所需表格的 schema 版本）時同樣
+    防禦性跳過。
+
+    去重：(source_project_id, id) —— 沿用 item 4b bug 回歸修復的既有結論：
+    不論 own_project_id 是否為 None（因而讓下方「跳過候選清單中等於自己的
+    那一項」這個提前優化是否有命中），一律在合併後的最終結果集上依
+    (source_project_id, id) 去重，正確性不依賴這個提前優化。
+    """
+    from remagraph import db as db_mod
+
+    all_results: list[dict[str, Any]] = []
+
+    # (a) 目前這個連線自己所屬專案的資料庫
+    own_rows = query_fn(conn)
+    for row in own_rows:
+        result = _row_to_result(row, score=_optional_score(row))
+        result["source_project_id"] = own_project_id or row["project_id"]
+        all_results.append(result)
+
+    # (b) 候選的其他專案
+    fanout_capped = False
+    fanned_out = 0
+    for pid in candidate_project_ids:
+        if not pid:
+            continue
+        if own_project_id and pid == own_project_id:
+            continue  # 已經在 (a) 查過，避免重複計入 fan-out 上限、重複結果
+
+        if fanned_out >= cap:
+            fanout_capped = True
+            logger.warning(
+                "%s fan-out cap (%d) reached; %d candidate projects in total — "
+                "results may be incomplete",
+                log_label,
+                cap,
+                len(candidate_project_ids),
+            )
+            break
+
+        fanned_out += 1
+        foreign_conn = db_mod.connect_foreign_project_readonly(pid)
+        if foreign_conn is None:
+            # 已註冊但目前不可達（例如 state_dir 已被刪除）——跳過，不讓
+            # 整個搜尋因單一專案失敗。
+            continue
+        try:
+            rows = query_fn(foreign_conn)
+        except sqlite3.OperationalError:
+            # 例如該外部專案的資料庫尚未升級到含所需表格的 schema 版本——
+            # 防禦性跳過，不讓整個搜尋失敗。
+            continue
+        finally:
+            foreign_conn.close()
+
+        for row in rows:
+            result = _row_to_result(row, score=_optional_score(row))
+            result["source_project_id"] = pid
+            all_results.append(result)
+
+    seen_keys: set[tuple[str, str]] = set()
+    deduped_results: list[dict[str, Any]] = []
+    for result in all_results:
+        key = (result["source_project_id"], result["id"])
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduped_results.append(result)
+
+    has_more = len(deduped_results) > request.top_k
+    trimmed = deduped_results[: request.top_k]
+
+    return SearchResponse(
+        results=trimmed,
+        has_more=has_more,
+        cross_project_fanout_capped=fanout_capped,
+    )
+
+
+# ---------------------------------------------------------------------------
 # 跨專案標籤搜尋（PPLX 架構改善計畫 item 4b Part 3）
 # ---------------------------------------------------------------------------
 
@@ -332,15 +528,12 @@ def _search_cross_project_by_label(
     """跨專案標籤搜尋：(a) 查詢目前連線自己的資料庫 + (b) 透過 item 4a 的
     registry 逐一開啟其他已知專案的唯讀連線查詢，合併結果並標記各筆結果的
     來源 project_id（見模組頂端說明，此為與既有 all_projects 完全獨立的
-    新能力）。
+    新能力）。骨架部分（開連線/查詢/合併/去重/上限）由 _cross_project_fanout
+    共用，本函式只負責準備 label 搜尋專屬的查詢 closure 與候選清單。
 
     status 過濾：預設只回傳 status='active'（沿用 _list_by_filters 對
     『無全文查詢、走列表模式』查詢的既有預設慣例），若呼叫端明確指定
     request.status 則改用該值。
-
-    韌性：db.connect_foreign_project_readonly() 對任何已註冊但目前不可達的
-    專案（例如目錄已被刪除）一律回傳 None——遇到 None 時直接跳過該專案、
-    繼續處理其餘專案，絕不讓整個搜尋因單一專案不可達而失敗。
 
     Fan-out 上限：見模組頂端 _CROSS_PROJECT_FANOUT_CAP 的說明。超過上限時
     SearchResponse.cross_project_fanout_capped 設為 True 並記一筆 warning
@@ -353,98 +546,155 @@ def _search_cross_project_by_label(
     status = request.status or "active"
     limit = request.top_k + 1
 
-    all_results: list[dict[str, Any]] = []
+    def _query(c: sqlite3.Connection) -> list[sqlite3.Row]:
+        return _query_labeled_memories(c, label, status, limit)
 
-    # (a) 目前這個連線自己所屬專案的資料庫
-    own_rows = _query_labeled_memories(conn, label, status, limit)
-    own_project_id = request.project_id
-    for row in own_rows:
-        result = _row_to_result(row)
-        result["source_project_id"] = own_project_id or row["project_id"]
-        all_results.append(result)
-
-    # (b) 其他已知專案（item 4a 的共用 registry）
     known_projects = db_mod.list_known_projects()
-    fanout_capped = False
-    fanned_out = 0
-    for project in known_projects:
-        pid = project.get("project_id")
-        if not pid:
-            continue
-        if own_project_id and pid == own_project_id:
-            continue  # 已經在 (a) 查過，避免重複計入 fan-out 上限、重複結果
+    candidate_ids = [
+        pid for p in known_projects if (pid := p.get("project_id"))
+    ]
 
-        if fanned_out >= _CROSS_PROJECT_FANOUT_CAP:
-            fanout_capped = True
-            logger.warning(
-                "cross_project_label fan-out cap (%d) reached; %d known projects "
-                "registered in total — results for label=%r may be incomplete",
-                _CROSS_PROJECT_FANOUT_CAP,
-                len(known_projects),
-                label,
-            )
-            break
+    return _cross_project_fanout(
+        conn,
+        request,
+        own_project_id=request.project_id,
+        candidate_project_ids=candidate_ids,
+        query_fn=_query,
+        cap=_CROSS_PROJECT_FANOUT_CAP,
+        log_label="cross_project_label",
+    )
 
-        fanned_out += 1
-        foreign_conn = db_mod.connect_foreign_project_readonly(pid)
-        if foreign_conn is None:
-            # 已註冊但目前不可達（例如 state_dir 已被刪除）——跳過，不讓
-            # 整個搜尋因單一專案失敗。
-            continue
-        try:
-            rows = _query_labeled_memories(foreign_conn, label, status, limit)
-        except sqlite3.OperationalError:
-            # 例如該外部專案的資料庫尚未升級到含 memory_labels 表的 schema
-            # 版本——防禦性跳過，不讓整個搜尋失敗。
-            continue
-        finally:
-            foreign_conn.close()
 
-        for row in rows:
-            result = _row_to_result(row)
-            result["source_project_id"] = pid
-            all_results.append(result)
+# ---------------------------------------------------------------------------
+# include_related：依 project_edges traversal 範圍限縮的 fan-out
+# (PPLX 架構改善計畫 item 5)
+# ---------------------------------------------------------------------------
 
-    # 去重：(source_project_id, id) —— bug 回歸修復。
-    #
-    # 背景：上面的 `if own_project_id and pid == own_project_id: continue`
-    # 只有在呼叫端明確提供 request.project_id 時才能正確判斷「這個已知專案
-    # 就是目前這個連線自己所屬的專案」；一旦 request.project_id 為 None
-    # （SearchRequest.project_id 的合法預設值——remagraph_search 工具本身
-    # 在呼叫端未傳 project_id 時的預設，也會在 all_projects=True 併用
-    # cross_project_label 時出現，見 server.remagraph_search 的
-    # eff_project = None if all_projects else project_id），
-    # own_project_id 為 falsy，該 guard 恆為 False，於是目前這個連線自己
-    # 所屬的專案（已在上方 (a) 直接查過）又會在 (b) 的 fan-out 迴圈中被當成
-    # 『別的』已知專案重新查一次，回傳同一筆記憶兩次。
-    #
-    # 選擇在合併後的最終結果集上依 (source_project_id, id) 去重，而不是
-    # 試圖在 fan-out 前更準確地『預先算出』own_project_id 再跳過（例如反查
-    # conn 對應的 project.json 或由更上層呼叫端傳入解析後的 project_id）：
-    # 這裡的去重無論 request.project_id 是否明確提供都保證正確，也不依賴
-    # 「目前這個連線屬於哪個 project_id」這件事在未來如何被解析或傳遞——
-    # 只要 (a) 直接查與 (b) fan-out 查到的是同一筆實體記憶，其
-    # (source_project_id, id) 必然相同（同一個資料庫檔案、同一個 memories
-    # row），去重後恆為一筆。上方既有的 guard 仍保留：多數呼叫端明確提供
-    # project_id 時，可省下一次不必要的 fan-out 連線與查詢；但正確性不再
-    # 依賴這個 guard 是否有命中。
-    seen_keys: set[tuple[str, str]] = set()
-    deduped_results: list[dict[str, Any]] = []
-    for result in all_results:
-        key = (result["source_project_id"], result["id"])
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        deduped_results.append(result)
-    all_results = deduped_results
 
-    has_more = len(all_results) > request.top_k
-    trimmed = all_results[: request.top_k]
+def _query_single_db_for_request(
+    conn: sqlite3.Connection,
+    request: SearchRequest,
+    *,
+    apply_project_filter: bool,
+) -> list[sqlite3.Row]:
+    """對單一連線執行『目前這個 SearchRequest』所描述的一般全文/過濾查詢
+    （FTS5 BM25，或短查詢時的 list-by-filters fallback），回傳原始 rows
+    （已套用 LIMIT top_k+1，尚未做去重/has_more/top_k 截斷——那些留給呼叫端
+    在合併多個資料庫的結果之後統一處理，見 _cross_project_fanout）。
 
-    return SearchResponse(
-        results=trimmed,
-        has_more=has_more,
-        cross_project_fanout_capped=fanout_capped,
+    供 _search_related_projects 對『目前這個連線』與每一個 related project
+    各自的資料庫檔案共用同一份查詢邏輯——差異只在於 conn 參數指向哪一個
+    資料庫檔案，以及 apply_project_filter。
+
+    刻意不在此處理『查詢過短且無過濾條件』時的 warning log——該 log 屬於
+    呼叫端一次性的行為（同一個 request.query 對每個資料庫都會得到相同的
+    『太短』判斷結果，若在此處逐一 per-db 記錄，對多個 related project
+    fan-out 時會重複記錄多筆幾乎相同的 warning），交由呼叫端視情境自行決定
+    是否記錄。
+
+    Args:
+        apply_project_filter: 是否套用 request.project_id 過濾。對『目前
+            這個連線自己所屬的專案』應傳 True（維持既有行為）；對 fan-out
+            到的『另一個』相關專案自己獨立的資料庫檔案應傳 False——該檔案
+            本來就整個屬於那一個 related project，request.project_id 指的
+            是『目前這個』origin 專案，與該檔案的內容無關（比照 item 4b
+            cross_project_label 對外部連線一律不過濾 project_id 的既有
+            慣例，見 _query_labeled_memories 完全不含 project_id 過濾）。
+    """
+    sanitized = sanitize_fts5_query(request.query or "")
+
+    if _trigram_char_len(sanitized) < 3:
+        if request.task_id or request.agent_id or request.kind or request.tags:
+            return _list_by_filters_rows(conn, request, apply_project_filter=apply_project_filter)
+        return []
+
+    match_clause = _build_fts5_match(sanitized)
+    where: list[str] = []
+    params: list[Any] = [match_clause]
+
+    if request.kind is not None:
+        where.append("m.kind = ?")
+        params.append(request.kind)
+    if request.status is not None:
+        where.append("m.status = ?")
+        params.append(request.status)
+    if apply_project_filter and request.project_id is not None:
+        where.append("m.project_id = ?")
+        params.append(request.project_id)
+    if request.agent_id is not None:
+        where.append("m.agent_id = ?")
+        params.append(request.agent_id)
+    if request.task_id is not None:
+        where.append("m.task_id = ?")
+        params.append(request.task_id)
+    if request.tags:
+        for tag in request.tags:
+            where.append("EXISTS (SELECT 1 FROM json_each(m.tags) WHERE value = ?)")
+            params.append(tag)
+
+    where_sql = (" AND " + " AND ".join(where)) if where else ""
+    params.append(request.top_k + 1)
+
+    sql = f"""
+        SELECT m.*, bm25(memories_fts) AS score
+        FROM memories_fts
+        JOIN memories m ON m.rowid = memories_fts.rowid
+        WHERE memories_fts MATCH ?{where_sql}
+        ORDER BY score
+        LIMIT ?
+    """
+    try:
+        return conn.execute(sql, params).fetchall()
+    except sqlite3.OperationalError:
+        logger.exception("FTS5 query failed for: %r", request.query)
+        return []
+
+
+def _search_related_projects(
+    conn: sqlite3.Connection,
+    request: SearchRequest,
+) -> SearchResponse:
+    """include_related 分支：對『目前這個連線』執行正常的 FTS 全文查詢
+    （非 item 4b 的 label 搜尋），並額外 fan out 到透過 db.recall_related()
+    （project_edges traversal，見該函式對稱性 vs. 方向性的完整討論）在
+    request.related_hops 之內找到的『明確宣告為圖形關聯』專案，合併結果並
+    套用與 item 4b 相同的去重/上限慣例（_cross_project_fanout 共用骨架）。
+
+    呼叫端（search_memories）已保證 request.project_id 非 None 才會走到
+    這裡——include_related 需要一個 project_id 作為 traversal 起點。
+
+    Fan-out 上限：重用既有的 _CROSS_PROJECT_FANOUT_CAP 常數（而非另立新的
+    hop-bounded 專屬上限）。理由：project_edges 的候選集合天生就已經是
+    「使用者透過 `remagraph link` 明確宣告過關聯」的子集，範圍遠比 item 4b
+    「所有已知專案」小得多，因此撞到同一個上限的機率更低；重用同一個常數
+    避免徒增一個新的、意義相近卻獨立維護的魔術數字，兩處 fan-out 上限的
+    語意（「單次搜尋最多開幾個『其他』專案的資料庫連線」）也完全一致，
+    合用同一個常數更容易讓人一次理解、一次調整。
+    """
+    from remagraph import db as db_mod
+
+    own_project_id = request.project_id
+    assert own_project_id is not None  # 呼叫端已保證非 None 才會走到這裡
+
+    related_ids = sorted(db_mod.recall_related(own_project_id, hops=request.related_hops))
+
+    def _query_own(c: sqlite3.Connection) -> list[sqlite3.Row]:
+        return _query_single_db_for_request(c, request, apply_project_filter=True)
+
+    def _query_foreign(c: sqlite3.Connection) -> list[sqlite3.Row]:
+        return _query_single_db_for_request(c, request, apply_project_filter=False)
+
+    def _query(c: sqlite3.Connection) -> list[sqlite3.Row]:
+        return _query_own(c) if c is conn else _query_foreign(c)
+
+    return _cross_project_fanout(
+        conn,
+        request,
+        own_project_id=own_project_id,
+        candidate_project_ids=related_ids,
+        query_fn=_query,
+        cap=_CROSS_PROJECT_FANOUT_CAP,
+        log_label="include_related",
     )
 
 

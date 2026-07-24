@@ -306,6 +306,44 @@ _PROJECT_REGISTRY_DDL = """
     )
 """
 
+# ---------------------------------------------------------------------------
+# Cross-project edges（PPLX 架構改善計畫 item 5）
+#
+# 背景：item 4a 的 project_registry 只記錄「有哪些 project 存在、各自的
+# state_dir 在哪」，並不記錄「這些 project 彼此之間有什麼關係」。item 5 需要
+# 這層關係，才能實作 recall_related()：從某個 project_id 出發，沿著明確宣告
+# 過的關聯邊，找出範圍受限（而非 item 4b cross_project_label 那種對『所有』
+# 已知專案無差別 fan-out）的一組「相關」專案。
+#
+# 這是專案『之間』的關聯 metadata（不屬於任一單一專案自己的記憶內容），因此
+# 依循與 project_registry 完全相同的落地決策：落在 DEFAULT_STATE_DIR 的
+# remagraph.db（與 project_registry 同一份檔案），透過同一個
+# _connect_default_registry_db() 冪等建表輔助函式管理，同樣刻意獨立於
+# per-project 的 SCHEMA_VERSION migration chain（理由與 project_registry
+# 完全相同，見上方 item 4a 的大段說明——這張表與任何單一專案自己的記憶
+# schema 無關，混進每個專案自己的資料庫檔案會弄髒既有的『孤島』隔離設計）。
+# ---------------------------------------------------------------------------
+
+_PROJECT_EDGES_DDL = """
+    CREATE TABLE IF NOT EXISTS project_edges (
+        from_project TEXT NOT NULL,
+        to_project   TEXT NOT NULL,
+        relation     TEXT NOT NULL CHECK (
+            relation IN ('depends_on', 'sibling', 'shares_upstream', 'monorepo_member')
+        ),
+        created_at   TEXT NOT NULL,
+        PRIMARY KEY (from_project, to_project, relation)
+    )
+"""
+
+# 與 DDL 內的 CHECK 約束保持同步的 Python 端合法值集合，供
+# declare_project_edge() 在寫入資料庫前先行驗證，讓呼叫端拿到的是清楚的
+# ValueError（而不是等 CHECK 約束在 SQL 層才失敗、被目前 best-effort 的
+# try/except Exception 吞掉、悄無聲息地什麼都沒發生）。
+_VALID_PROJECT_EDGE_RELATIONS = frozenset(
+    {"depends_on", "sibling", "shares_upstream", "monorepo_member"}
+)
+
 
 def _utcnow_iso() -> str:
     """回傳目前 UTC 時間的 ISO8601 字串，供 registry first_seen/last_seen 使用。
@@ -325,10 +363,11 @@ def _connect_default_registry_db() -> sqlite3.Connection:
     get_state_dir() 的優先序），而 registry 的存在理由正是「不論目前呼叫
     行程的 project 情境是什麼，都能有同一個、唯一的共用落地位置」。
 
-    僅確保 project_registry 表存在（CREATE TABLE IF NOT EXISTS，冪等），
-    刻意不呼叫 _init_schema()/_run_migrations() —— 那兩者屬於一般
-    per-project 記憶 schema 的初始化路徑，registry 表與其無關，也不需要
-    參與 memories/_meta 的 migration chain（見上方設計決策說明）。
+    僅確保 project_registry 與 project_edges（PPLX 架構改善計畫 item 5，見
+    下方說明）兩張表存在（皆為 CREATE TABLE IF NOT EXISTS，冪等），刻意不
+    呼叫 _init_schema()/_run_migrations() —— 那兩者屬於一般 per-project
+    記憶 schema 的初始化路徑，這兩張表與其無關，也不需要參與 memories/_meta
+    的 migration chain（見上方設計決策說明）。
     """
     DEFAULT_STATE_DIR.mkdir(parents=True, exist_ok=True)
     DEFAULT_STATE_DIR.chmod(0o700)
@@ -341,6 +380,7 @@ def _connect_default_registry_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(_PROJECT_REGISTRY_DDL)
+    conn.execute(_PROJECT_EDGES_DDL)
     try:
         db_path.chmod(0o600)
     except OSError:
@@ -515,6 +555,171 @@ def connect_foreign_project_readonly(project_id: str) -> sqlite3.Connection | No
         return None
     except Exception:
         return None
+
+
+def declare_project_edge(from_project: str, to_project: str, relation: str) -> None:
+    """宣告一筆 (from_project, to_project, relation) 關聯 edge（PPLX 架構
+    改善計畫 item 5），供 recall_related() traversal 使用。
+
+    冪等：同一個 (from_project, to_project, relation) 三元組重複宣告只是
+    no-op（PRIMARY KEY 衝突時以 INSERT OR IGNORE 靜默略過，不更新
+    created_at ——一筆關聯『何時第一次被宣告』本身沒有理由被後續重複宣告
+    改寫，這點與 project_registry.first_seen 的保留邏輯精神一致）。
+
+    錯誤處理的兩種層次，刻意分開對待（與 register_known_project 的純
+    best-effort 慣例不同，這裡多了一層）：
+
+    1. relation 不在 _VALID_PROJECT_EDGE_RELATIONS 內 —— 這是呼叫端的
+       程式設計錯誤（傳入了 schema 不接受的關係類型），而不是「寫入當下
+       剛好失敗」這種基礎設施層級的問題。呼叫端應該在開發階段就發現並修正
+       這個錯誤，而不是被靜默吞掉、造成「明明呼叫了卻什麼都沒發生」的
+       困惑——因此明確 raise ValueError，不吞。CLI 的 `remagraph link`
+       子命令會捕捉這個例外並轉換為使用者可讀的錯誤訊息（見 cli.cmd_link）。
+    2. 目錄無法建立、DB 鎖定、權限不足等基礎設施層級的失敗 —— 與
+       register_known_project 一致，一律 best-effort 吞下、不拋出，因為
+       呼叫端（CLI `link` 子命令）在這類情境下能做的補救有限，且不應該讓
+       「registry 這個輔助功能寫入失敗」阻斷呼叫端原本要做的事。
+    """
+    if relation not in _VALID_PROJECT_EDGE_RELATIONS:
+        raise ValueError(
+            f"invalid relation {relation!r}; must be one of "
+            f"{sorted(_VALID_PROJECT_EDGE_RELATIONS)}"
+        )
+
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = _connect_default_registry_db()
+        now = _utcnow_iso()
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO project_edges
+                (from_project, to_project, relation, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (from_project, to_project, relation, now),
+        )
+    except Exception:
+        pass
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def get_project_edges(project_id: str) -> list[dict[str, Any]]:
+    """回傳 project_id 涉及的所有 edges，不論它是 from_project 還是
+    to_project。
+
+    對稱讀取的理由：對「什麼東西跟我相關」這個問題而言，關聯本身在
+    traversal 的意義上並不因為『是我宣告的』還是『對方宣告的』而有差異——
+    A 宣告了 A depends_on B，從 B 的角度看，「A 相關」這件事同樣成立
+    （見下方 recall_related() docstring 對於方向性/對稱性更完整的討論）。
+    因此本函式一律用 `WHERE from_project = ? OR to_project = ?` 查詢，讓
+    呼叫端不必自己判斷、也不必記得兩次分別查詢兩個方向。
+
+    任何讀取失敗一律回傳空清單，不拋出例外（與 list_known_projects 一致的
+    防禦慣例）。
+    """
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = _connect_default_registry_db()
+        rows = conn.execute(
+            """
+            SELECT from_project, to_project, relation, created_at
+            FROM project_edges
+            WHERE from_project = ? OR to_project = ?
+            ORDER BY from_project, to_project, relation
+            """,
+            (project_id, project_id),
+        ).fetchall()
+        return [
+            {
+                "from_project": str(row["from_project"]),
+                "to_project": str(row["to_project"]),
+                "relation": str(row["relation"]),
+                "created_at": str(row["created_at"]),
+            }
+            for row in rows
+        ]
+    except Exception:
+        return []
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def recall_related(project_id: str, hops: int = 1) -> set[str]:
+    """從 project_id 出發，沿 project_edges 做廣度優先搜尋（BFS），回傳
+    `hops` 層以內、所有相關的 project_id 集合（不含 project_id 自己）。
+
+    方向性 vs. 對稱性的設計決策（四種 relation 一律視為對稱、雙向可走）：
+
+    project_edges 的 schema 本身是有方向的（from_project/to_project 各自
+    是獨立欄位），這保留了『誰宣告的、宣告時的方向語意是什麼』這個歷史
+    紀錄；但本函式的 traversal 刻意把全部四種 relation 都當成無向邊來走，
+    理由：
+
+    - sibling / shares_upstream：這兩者從語意上就是互相的關係——A 是 B
+      的 sibling，等同 B 也是 A 的 sibling；A、B 共享同一個上游，這個事實
+      對雙方都成立。方向性在這裡只是『誰先打了這行指令』的偶然，不帶有
+      任何額外資訊，若只單向可走，反而會產生「B 明明也 sibling A，卻在
+      recall 時看不到 A」這種違反直覺的不對稱。
+    - depends_on：這是四者中唯一『看起來』該有方向性的——A depends_on B
+      直覺上像是「A 需要知道 B 的事，B 不需要知道 A 的事」。但本專案的
+      recall_related 目的並非建構一個嚴謹的相依關係圖（例如拓樸排序、
+      建構順序），而是『這個 agent 手上這個專案，還有哪些别的專案的記憶
+      可能對目前這個任務有幫助』這種盡力而為的探索式召回：若 A
+      depends_on B，B 的變更（例如 API 修改、已知限制）幾乎必然是 A 需要
+      知道的事——這正是既有的正向直覺；但反過來，A 使用 B 過程中踩到的坑
+      （例如「呼叫 B 的某個 API 時要注意這個限制」）對『正在維護 B』的
+      agent 來說同樣是有價值的上游回饋（B 的維護者常常需要知道下游是怎麼
+      用的、遇到什麼問題）。既然 recall_related 只是『多找一些可能有關的
+      上下文來源』、而非強制寫入或改變任何資料，讓下游/上游都能雙向互相
+      發現彼此的記憶，利大於弊。
+    - monorepo_member：同一個 monorepo 的成員關係本質上是群組隸屬，天生
+      對稱（A、B 同屬一個 monorepo，這件事不因宣告方向而改變）。
+
+    綜合以上：四種 relation 在 traversal 上一律對稱處理，這與
+    get_project_edges() 本身（不論從哪一側查詢都找得到同一筆 edge）的
+    對稱讀取語意完全一致，也是實作上最簡單、最不容易在未來出現「咦，這個
+    方向怎麼漏了」這種細微 bug 的做法。
+
+    cycle 安全：以 visited 集合追蹤已走訪過的 project_id，每一層只擴展
+    尚未走訪過的鄰居，因此即使 edge graph 中存在環（例如 A-B-C-A），也不會
+    重複走訪、不會無窮迴圈——最多在『目前已知的所有 project_id 數量』耗盡
+    前就會自然終止（frontier 收斂為空集合時提前 break）。
+
+    hops<=0 時直接回傳空集合（沒有任何一層可以走）。
+    """
+    if hops <= 0:
+        return set()
+
+    visited: set[str] = {project_id}
+    frontier: set[str] = {project_id}
+    related: set[str] = set()
+
+    for _ in range(hops):
+        if not frontier:
+            break
+        next_frontier: set[str] = set()
+        for pid in frontier:
+            for edge in get_project_edges(pid):
+                neighbor = (
+                    edge["to_project"] if edge["from_project"] == pid else edge["from_project"]
+                )
+                if neighbor in visited:
+                    continue
+                visited.add(neighbor)
+                next_frontier.add(neighbor)
+                related.add(neighbor)
+        frontier = next_frontier
+
+    return related
 
 
 # ---------------------------------------------------------------------------
