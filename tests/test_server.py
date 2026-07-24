@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 import remagraph.server as server
+from remagraph.db import MigrationError
 
 
 def _reset_conn():
@@ -165,6 +166,62 @@ def test_search_short_query():
     assert result["has_more"] is False
 
 
+def test_search_result_includes_cross_project_fanout_capped_key():
+    """Regression: remagraph_search 回傳值須新增
+    cross_project_fanout_capped 欄位（附加、預設 False，向後相容）。"""
+    result = server.remagraph_search(query="AB")
+
+    assert result["cross_project_fanout_capped"] is False
+
+
+# ---------------------------------------------------------------------------
+# remagraph_store — labels（PPLX 架構改善計畫 item 4b）
+# ---------------------------------------------------------------------------
+
+
+def test_store_with_labels_wires_through_to_memory_labels():
+    """Regression: remagraph_store 的 labels 參數須正確傳遞到
+    process_store()，寫入 memory_labels 資料表。"""
+    result = server.remagraph_store(
+        project_id="testproj",
+        task_id="task-test-labels-001",
+        agent_id="oc-test",
+        kind="task_handoff",
+        summary="這是一段足夠長的 summary 來測試 labels 參數是否正確傳遞到 store 層",
+        learnings=["學到了 labels 的用法"],
+        handoff_note="這是一段給接手者的交接筆記，至少要二十個字以上才算夠長",
+        labels=["dep:opencode", "topic:auth"],
+    )
+
+    assert result["status"] == "stored"
+
+    conn = server._get_conn()
+    rows = conn.execute(
+        "SELECT label FROM memory_labels WHERE memory_id = ? ORDER BY label",
+        (result["id"],),
+    ).fetchall()
+    assert [r["label"] for r in rows] == ["dep:opencode", "topic:auth"]
+
+
+def test_store_with_malformed_label_rejected_via_server():
+    """Regression: 格式不符的 label 透過 remagraph_store 傳入時，須整批被
+    拒絕（與 process_store 的既有拒絕慣例一致），而非被伺服器層悄悄丟棄
+    或造成未捕捉例外。"""
+    result = server.remagraph_store(
+        project_id="testproj",
+        task_id="task-test-labels-002",
+        agent_id="oc-test",
+        kind="task_handoff",
+        summary="這是一段足夠長的 summary 來測試格式錯誤的 label 會被伺服器層正確拒絕",
+        learnings=["學到了"],
+        handoff_note="這是一段給接手者的交接筆記，至少要二十個字以上才算夠長",
+        labels=["not-a-valid-label"],
+    )
+
+    assert result["status"] == "rejected"
+    assert result["reason"] == "invalid_label"
+
+
 # ---------------------------------------------------------------------------
 # remagraph_status
 # ---------------------------------------------------------------------------
@@ -196,3 +253,65 @@ def test_status_with_updates():
     found = result["latest"][0]
     assert found["task_id"] == "task-test-006"
     assert found["kind"] == "status_update"
+
+
+# ---------------------------------------------------------------------------
+# 例外處理一致性：_get_conn() 拋出例外時（例如 MigrationError）
+# remagraph_store / remagraph_search / remagraph_status 應回傳乾淨的
+# {"status": "error", "reason": str(e)} 結構，而不是讓例外原樣往外傳。
+# ---------------------------------------------------------------------------
+
+_MIGRATION_ERROR_MESSAGE = (
+    "資料庫 schema_version=99 比程式碼的 SCHEMA_VERSION=4 還新，無法降級。"
+    "請選擇以下其一處理："
+    "1) 更新已安裝的 remagraph 套件至相容此 schema 版本的版本；"
+    "2) 設定 REMAGRAPH_STATE_DIR 指向另一個獨立目錄，改用全新資料庫；"
+    "3) 若確認可捨棄此資料庫的既有資料，刪除該 state_dir 下的 "
+    "remagraph.db 後重新初始化。"
+)
+
+
+def _raise_migration_error():
+    raise MigrationError(_MIGRATION_ERROR_MESSAGE)
+
+
+def test_store_returns_clean_error_when_get_conn_raises_migration_error(monkeypatch):
+    """_get_conn() 拋出 MigrationError 時，remagraph_store 應回傳乾淨錯誤結構，
+    而非讓例外原樣傳出。"""
+    monkeypatch.setattr(server, "_get_conn", _raise_migration_error)
+
+    result = server.remagraph_store(
+        project_id="testproj",
+        task_id="task-test-007",
+        agent_id="oc-test",
+        kind="task_handoff",
+        summary="這是一段足夠長的 summary 來通過仲裁規則檢查，至少需要三十個中文字元才能過關",
+        learnings=["學到了重要的事情"],
+        handoff_note="這是一段給接手者的交接筆記，至少要二十個字以上才算夠長",
+        tags=["test"],
+    )
+
+    assert result["status"] == "error"
+    assert result["reason"] == _MIGRATION_ERROR_MESSAGE
+
+
+def test_search_returns_clean_error_when_get_conn_raises_migration_error(monkeypatch):
+    """_get_conn() 拋出 MigrationError 時，remagraph_search 應回傳乾淨錯誤結構，
+    而非讓例外原樣傳出。"""
+    monkeypatch.setattr(server, "_get_conn", _raise_migration_error)
+
+    result = server.remagraph_search(query="測試查詢")
+
+    assert result["status"] == "error"
+    assert result["reason"] == _MIGRATION_ERROR_MESSAGE
+
+
+def test_status_returns_clean_error_when_get_conn_raises_migration_error(monkeypatch):
+    """_get_conn() 拋出 MigrationError 時，remagraph_status 應回傳乾淨錯誤結構，
+    而非讓例外原樣傳出。"""
+    monkeypatch.setattr(server, "_get_conn", _raise_migration_error)
+
+    result = server.remagraph_status(limit=10)
+
+    assert result["status"] == "error"
+    assert result["reason"] == _MIGRATION_ERROR_MESSAGE

@@ -7,6 +7,7 @@ Usage:
     remagraph search [--query STR] [--task-id STR] [options]
     remagraph status [options]
     remagraph auto --task-id STR --agent-id STR [--] CMD [ARGS...]
+    remagraph install-hooks [--global] [--force]
 """
 
 from __future__ import annotations
@@ -97,8 +98,14 @@ def cmd_store(args: argparse.Namespace) -> None:
         handoff_note=args.handoff_note,
         tags=_parse_json_list(args.tags) or [],
         invalidates=_parse_json_list(args.invalidates),
+        labels=_parse_json_list(args.labels) or [],
     )
-    response = process_store(request, _get_conn())
+    try:
+        conn = _get_conn()
+    except Exception as e:
+        print(f"ERROR: 無法連線資料庫 - {e}", file=sys.stderr)
+        sys.exit(1)
+    response = process_store(request, conn)
     result: dict[str, Any] = {
         "status": response.status,
         "superseded": response.superseded,
@@ -124,9 +131,16 @@ def cmd_search(args: argparse.Namespace) -> None:
         project = None
     elif not project:
         project = "default"
-    if not args.query and not args.task_id and not args.agent_id and not args.all_projects:
+    if (
+        not args.query
+        and not args.task_id
+        and not args.agent_id
+        and not args.all_projects
+        and not args.cross_project_label
+    ):
         print(
-            "error: 請提供 --query，或至少提供 --task-id / --agent-id，或使用 --all-projects",
+            "error: 請提供 --query，或至少提供 --task-id / --agent-id，"
+            "或使用 --all-projects / --cross-project-label",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -139,9 +153,23 @@ def cmd_search(args: argparse.Namespace) -> None:
         project_id=project,
         agent_id=args.agent_id,
         task_id=args.task_id,
+        cross_project_label=args.cross_project_label,
+        include_related=args.include_related,
+        related_hops=args.related_hops,
     )
-    response = search_memories(_get_conn(), request)
-    _print_json({"results": response.results, "has_more": response.has_more})
+    try:
+        conn = _get_conn()
+    except Exception as e:
+        print(f"ERROR: 無法連線資料庫 - {e}", file=sys.stderr)
+        sys.exit(1)
+    response = search_memories(conn, request)
+    _print_json(
+        {
+            "results": response.results,
+            "has_more": response.has_more,
+            "cross_project_fanout_capped": response.cross_project_fanout_capped,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -155,9 +183,16 @@ def cmd_status(args: argparse.Namespace) -> None:
         project = None
     elif not project:
         project = "default"
+    try:
+        conn = _get_conn()
+    except Exception as e:
+        print(f"ERROR: 無法連線資料庫 - {e}", file=sys.stderr)
+        sys.exit(1)
     request = StatusRequest(limit=args.limit, project_id=project)
-    response = get_status(_get_conn(), request)
-    _print_json({"latest": response.latest})
+    response = get_status(conn, request)
+    result: dict[str, Any] = {"latest": response.latest}
+    result.update(_db.get_compat_status(conn))
+    _print_json(result)
 
 
 # ---------------------------------------------------------------------------
@@ -374,6 +409,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_store.add_argument("--handoff-note", default="")
     p_store.add_argument("--tags", help="JSON 陣列")
     p_store.add_argument("--invalidates", help="JSON 陣列")
+    p_store.add_argument(
+        "--labels",
+        help=(
+            "JSON 陣列，命名空間化標籤，例如 '[\"dep:opencode\",\"topic:auth\"]'"
+            "（與 --tags 是不同概念：labels 有 namespace:value 格式要求，"
+            "供跨專案標籤搜尋使用，見 search --cross-project-label）"
+        ),
+    )
 
     # search
     p_search = sub.add_parser("search", help="查詢記憶（可用 --task-id 不帶 --query）")
@@ -390,6 +433,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--task-id")
     p_search.add_argument(
         "--all-projects", action="store_true", help="跨所有 project 查詢（需同意）"
+    )
+    p_search.add_argument(
+        "--cross-project-label",
+        default=None,
+        help=(
+            "依命名空間化 label（如 'dep:opencode'）跨『所有已知 project 各自"
+            "獨立的資料庫檔案』搜尋（見 item 4a registry），與 --all-projects"
+            "（僅移除目前這個資料庫檔案內的 project 過濾）是完全不同的兩件事"
+        ),
+    )
+    p_search.add_argument(
+        "--include-related",
+        action="store_true",
+        help=(
+            "額外 fan out 到透過 `remagraph link` 明確宣告為圖形關聯、且在"
+            "--related-hops 之內的 project（見 project_edges/recall_related，"
+            "item 5），與 --cross-project-label（對所有已知 project 無差別"
+            "fan-out）、--all-projects 是三個完全獨立的維度。需要 --project"
+            "（或 REMAGRAPH_PROJECT）作為 traversal 起點，未提供時優雅退化為"
+            "一般搜尋"
+        ),
+    )
+    p_search.add_argument(
+        "--related-hops",
+        type=int,
+        default=1,
+        help="--include-related 的 BFS traversal 深度（預設 1，僅限直接關聯）",
     )
 
     # status
@@ -446,6 +516,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_maintain.add_argument("--force", action="store_true", help="強制所有維護操作")
     p_maintain.add_argument("--dry-run", action="store_true", help="只顯示會做什麼，不實際執行")
 
+    # link
+    p_link = sub.add_parser(
+        "link",
+        help="宣告兩個 project 之間的關聯 edge（供 --include-related recall 使用）",
+    )
+    p_link.add_argument("--from", dest="from_project", required=True, help="來源 project_id")
+    p_link.add_argument("--to", dest="to_project", required=True, help="目標 project_id")
+    p_link.add_argument(
+        "--relation",
+        required=True,
+        choices=["depends_on", "sibling", "shares_upstream", "monorepo_member"],
+        help="關聯類型（traversal 時一律視為對稱雙向，見 db.recall_related 說明）",
+    )
+
     # migrate-project
     p_migrate = sub.add_parser(
         "migrate-project",
@@ -455,6 +539,38 @@ def build_parser() -> argparse.ArgumentParser:
     p_migrate.add_argument("--to", dest="to_project", required=True, help="目標 project")
     p_migrate.add_argument("--dry-run", action="store_true")
     p_migrate.add_argument("--force", action="store_true", help="忽略部分安全檢查")
+
+    # install-hooks
+    p_install_hooks = sub.add_parser(
+        "install-hooks",
+        help="安裝 git post-commit hook，讓 commit 自動把摘要寫回 RemaGraph",
+        description=(
+            "安裝 git post-commit hook，讓 commit 自動把摘要寫回 RemaGraph，"
+            "不需要手動從其他專案複製檔案。預設安裝到目前 repo（自動辨識"
+            "worktree、core.hooksPath），--global 則額外設定 git 原生的 "
+            "init.templateDir，讓『之後』新建立的 repo 自動帶有此 hook —— "
+            "但有兩個限制：(1) 只影響本指令執行後新建立的 repo，既有 repo "
+            "仍須各自執行一次非 --global 的 install-hooks；(2) 不建議在 CI "
+            "環境中使用 --global（CI runner 的 $HOME 可能是暫時性或跨 "
+            "job/repo 共用，尤其自架 runner，有安全疑慮 —— CI pipeline 應"
+            "改為每個 repo、每個 job 各自明確執行一次非 --global 的 "
+            "install-hooks）。"
+        ),
+    )
+    p_install_hooks.add_argument(
+        "--global",
+        dest="global_install",
+        action="store_true",
+        help=(
+            "額外設定 git 原生 init.templateDir，讓之後新建立的 repo 自動帶有此 "
+            "hook（見上方 description 的兩個限制）"
+        ),
+    )
+    p_install_hooks.add_argument(
+        "--force",
+        action="store_true",
+        help="覆蓋既有非 remagraph 管理的 hook 檔案或符號連結（會先備份再覆蓋）",
+    )
 
     return parser
 
@@ -503,6 +619,10 @@ def main(argv: list[str] | None = None) -> None:
         cmd_maintain(args)
     elif args.command == "migrate-project":
         cmd_migrate_project(args)
+    elif args.command == "link":
+        cmd_link(args)
+    elif args.command == "install-hooks":
+        cmd_install_hooks(args)
 
 
 # ---------------------------------------------------------------------------
@@ -622,6 +742,59 @@ def cmd_migrate_project(args: argparse.Namespace) -> None:
     print(f"遷移完成：{migrated} 筆")
     if not args.force:
         print("建議：執行 remagraph maintain --project {to_proj} --force 清理目標 DB")
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: link（PPLX 架構改善計畫 item 5）
+# ---------------------------------------------------------------------------
+
+
+def cmd_link(args: argparse.Namespace) -> None:
+    """宣告兩個 project 之間的關聯 edge，供之後 `search --include-related`
+    使用（見 db.declare_project_edge / db.get_project_edges /
+    db.recall_related）。
+
+    edge 本身落在共用的 DEFAULT_STATE_DIR registry（與 item 4a 的
+    project_registry 同一份檔案），與『目前這個 CLI 呼叫端當下所在的
+    project 情境』無關——因此本子命令刻意不像 store/search/status 那樣走
+    _get_conn()/safety_validate_project，不需要開啟任何一個特定 project
+    自己的記憶資料庫。
+    """
+    try:
+        _db.declare_project_edge(args.from_project, args.to_project, args.relation)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"已宣告關聯：{args.from_project} --{args.relation}--> {args.to_project}")
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: install-hooks
+# ---------------------------------------------------------------------------
+
+
+def cmd_install_hooks(args: argparse.Namespace) -> None:
+    """安裝／升級 git post-commit hook 的薄 wrapper。
+
+    實際邏輯（衝突偵測、symlink 處理、core.hooksPath/init.templateDir 解析）
+    全部放在 remagraph.hooks_installer，這裡只負責：呼叫對應函式、把
+    HooksInstallerError 轉成使用者看得懂的乾淨錯誤訊息（絕不讓原始
+    subprocess stderr 或 Python traceback 外洩）、印出結果。
+    """
+    from remagraph.hooks_installer import HooksInstallerError, install_global, install_local
+
+    try:
+        if args.global_install:
+            outcome = install_global(force=args.force)
+        else:
+            outcome = install_local(cwd=Path.cwd(), force=args.force)
+    except HooksInstallerError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    for message in outcome.messages:
+        print(message)
+    print(f"post-commit hook 安裝路徑：{outcome.path}")
 
 
 if __name__ == "__main__":

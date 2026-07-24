@@ -36,17 +36,34 @@ def _insert_memory(
     summary: str,
     status: str = "active",
     tags: list[str] | None = None,
+    learnings: list[str] | None = None,
+    handoff_note: str = "",
     timestamp: str | None = None,
     project_id: str = "default",
 ) -> None:
     """插入一筆記憶記錄，自動觸發 FTS5 同步。"""
     tags_json = json.dumps(tags or [], ensure_ascii=False)
+    learnings_json = json.dumps(learnings or [], ensure_ascii=False)
     ts = timestamp or _now_iso()
     conn.execute(
         "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, '[]', '', ?, ?, ?, ?)",
-        (id, project_id, kind, task_id, agent_id, ts, summary, tags_json, status, ts, ts),
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            id,
+            project_id,
+            kind,
+            task_id,
+            agent_id,
+            ts,
+            summary,
+            learnings_json,
+            handoff_note,
+            tags_json,
+            status,
+            ts,
+            ts,
+        ),
     )
 
 
@@ -176,6 +193,37 @@ class TestSearchMemories:
             req = SearchRequest(query='**""')
             resp = search_memories(conn, req)
         assert len(resp.results) == 0
+
+    # ================================================================
+    # Regression: 空字串 query 應等同「列出最近記憶」，而非全文檢索 (#29)
+    # ================================================================
+
+    def test_empty_query_no_filters_lists_recent(self, conn):
+        """空字串 query 且無任何過濾條件時，不應觸發 trigram 最短長度限制
+        而靜默回傳空結果，而應視為「列出最近的記憶」。
+
+        修復前：query="" 命中 `_trigram_char_len(sanitized) < 3` 短路徑，
+        因無 task_id/agent_id/kind/tags 過濾條件，直接回傳空結果 + warning
+        "FTS5 query too short for trigram tokenizer"——即使資料庫內有記錄。
+        """
+        _insert_memory(conn, id="mem-1", kind="task_handoff", summary="任意內容，不含特定查詢字串")
+        req = SearchRequest(query="", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
+
+    def test_empty_query_with_project_id_only_lists_recent(self, conn):
+        """空字串 query + 僅 project_id 過濾（無 task_id/agent_id/kind/tags）時，
+        亦應列出最近記憶——對應 `remagraph search --all-projects` 或跨專案
+        fleet 查詢等僅靠 project_id 篩選的呼叫路徑。
+        """
+        _insert_memory(
+            conn, id="mem-1", kind="task_handoff", summary="專案內容", project_id="proj-a"
+        )
+        req = SearchRequest(query="", project_id="proj-a", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
 
     # -- kind 過濾 --
 
@@ -444,6 +492,90 @@ class TestSearchMemories:
         assert len(resp.results) == 0
         assert "too short" in caplog.text.lower()
 
+    # ================================================================
+    # 特殊字元 query（regression: 連字號被 FTS5 誤解為 column-filter 語法）
+    # ================================================================
+
+    def test_hyphenated_query_matches_literal_substring(self, conn):
+        """Regression: 查詢字串含連字號應能匹配儲存記錄中逐字相同的子字串。
+
+        修復前：FTS5 query 語法會將未加引號的 "deny-subagent" 解析成
+        column-filter 表達式（"-subagent" 被視為欲排除的欄位名稱），
+        因不存在名為 subagent 的欄位而拋出 sqlite3.OperationalError
+        （no such column: subagent），search_memories 的例外處理會將其
+        吞掉並回傳空結果 —— 即使該子字串在記錄中逐字存在。
+        """
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            task_id="deny-subagent-reconnect",
+            summary="修正 deny-subagent-reconnect 導致的連線失敗問題",
+        )
+        req = SearchRequest(query="deny-subagent", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
+
+    def test_colon_query_matches_literal_substring(self, conn):
+        """查詢字串含冒號時，FTS5 會將其誤解為 column-filter（col:term）語法。"""
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="狀態更新 task:done 已完成部署",
+        )
+        req = SearchRequest(query="task:done", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
+
+    def test_underscore_query_matches(self, conn):
+        """底線並非 FTS5 特殊字元，查詢應正常匹配（確保修復未破壞既有行為）。"""
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="更新 build_pipeline_v2 設定檔",
+        )
+        req = SearchRequest(query="build_pipeline_v2", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
+
+    def test_reserved_keyword_as_literal_search_term_still_works(self, conn):
+        """AND/OR/NOT/NEAR 作為一般搜尋詞時，應仍能正常匹配（既有行為不受影響）。"""
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="採購清單：biscuits AND gravy 兩項",
+        )
+        req = SearchRequest(query="AND", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
+
+    def test_cjk_query_still_matches_after_special_char_fix(self, conn):
+        """中文查詢應不受連字號/特殊字元修復影響，繼續正常匹配。"""
+        _insert_memory(
+            conn, id="mem-1", kind="task_handoff", summary="測試中文查詢內容是否正常"
+        )
+        req = SearchRequest(query="測試中文查詢", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
+
+    def test_short_query_still_short_circuits_after_special_char_fix(self, conn, caplog):
+        """<3 字元短查詢應繼續維持既有的 short-circuit 行為（不受本次修復影響）。"""
+        _insert_memory(conn, id="mem-1", kind="task_handoff", summary="ab test data")
+        with caplog.at_level(logging.WARNING):
+            req = SearchRequest(query="ab")
+            resp = search_memories(conn, req)
+        assert len(resp.results) == 0
+        assert resp.has_more is False
+        assert "too short" in caplog.text.lower()
+
     # -- 結果結構驗證 --
 
     def test_result_includes_all_fields(self, conn):
@@ -465,6 +597,103 @@ class TestSearchMemories:
         assert r["task_id"] == "task-x"
         assert "timestamp" in r
         assert "score" in r
+
+    # ================================================================
+    # Regression: handoff_note / learnings / tags 遺漏 (task #20)
+    # ================================================================
+
+    def test_result_includes_handoff_note(self, conn):
+        """Regression: 搜尋結果須包含 handoff_note 真實內容，不得為 None 或缺漏。
+
+        修復前：_row_to_result 從未複製 handoff_note 欄位，即使資料庫中
+        該筆記錄的 handoff_note 有實際內容，回傳的 dict 中也完全沒有這個
+        key（而非只是空字串），導致呼叫端讀不到交接備註。
+        """
+        distinctive_note = "交接備註：連線池上限已調整為 50，勿再調高，否則會撞到雲端 RDS 連線上限"
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="hello world handoff",
+            handoff_note=distinctive_note,
+        )
+        req = SearchRequest(query="hello world handoff", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["handoff_note"] == distinctive_note
+
+    def test_result_includes_learnings_and_tags_as_decoded_lists(self, conn):
+        """Regression: learnings/tags 存為 JSON 字串，回傳時須 json.loads 還原為 list。"""
+        distinctive_learnings = ["連線池上限設 50 會撞到 RDS 上限", "重試機制需搭配指數退避"]
+        distinctive_tags = ["db", "緊急", "connection-pool"]
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="hello world learnings test",
+            learnings=distinctive_learnings,
+            tags=distinctive_tags,
+        )
+        req = SearchRequest(query="hello world learnings", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        r = resp.results[0]
+        assert isinstance(r["learnings"], list)
+        assert r["learnings"] == distinctive_learnings
+        assert isinstance(r["tags"], list)
+        assert r["tags"] == distinctive_tags
+
+    def test_result_backward_compatible_fields_unchanged(self, conn):
+        """Regression: 新增欄位須為 additive，既有 8 個欄位須維持原值不變。"""
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="hello world compat",
+            agent_id="test-agent",
+            task_id="task-x",
+            project_id="default",
+        )
+        req = SearchRequest(query="hello world compat", top_k=10)
+        resp = search_memories(conn, req)
+        r = resp.results[0]
+        assert r["id"] == "mem-1"
+        assert r["project_id"] == "default"
+        assert r["summary"] == "hello world compat"
+        assert r["agent_id"] == "test-agent"
+        assert r["kind"] == "task_handoff"
+        assert r["task_id"] == "task-x"
+        assert "timestamp" in r
+        assert isinstance(r["score"], (int, float))
+
+    def test_result_includes_status_field(self, conn):
+        """Regression: status 欄位也應被回傳（先前完全未複製）。"""
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="hello world status field",
+            status="active",
+        )
+        req = SearchRequest(query="hello world status", top_k=10)
+        resp = search_memories(conn, req)
+        assert resp.results[0]["status"] == "active"
+
+    def test_list_by_filters_path_also_includes_new_fields(self, conn):
+        """無全文查詢、走 _list_by_filters 過濾路徑時，新欄位同樣須存在。"""
+        distinctive_note = "list-by-filters 路徑的交接備註"
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="無關查詢字串內容",
+            handoff_note=distinctive_note,
+            task_id="task-filters",
+        )
+        req = SearchRequest(query="", task_id="task-filters", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["handoff_note"] == distinctive_note
 
 
 # ===================================================================
@@ -631,5 +860,58 @@ class TestGetStatus:
         assert r["agent_id"] == "agent-x"
         assert r["kind"] == "status_update"
         assert r["summary"] == "完整欄位測試"
+        assert r["status"] == "active"
+        assert "timestamp" in r
+
+    # ================================================================
+    # Regression: handoff_note / learnings / tags 遺漏 (task #20)
+    # ================================================================
+
+    def test_status_result_includes_handoff_note_learnings_tags(self, conn):
+        """Regression: get_status 內建 dict 從未複製 handoff_note/learnings/tags，
+        與 search_memories 的 _row_to_result 有相同的欄位遺漏問題。
+        """
+        distinctive_note = "status 交接備註：部署已卡在 canary 階段，勿自動 rollback"
+        distinctive_learnings = ["canary 階段需人工確認才能 promote"]
+        distinctive_tags = ["deploy", "canary"]
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="status_update",
+            task_id="task-a",
+            summary="canary 部署中",
+            status="active",
+            handoff_note=distinctive_note,
+            learnings=distinctive_learnings,
+            tags=distinctive_tags,
+        )
+        resp = get_status(conn, StatusRequest(limit=10))
+        assert len(resp.latest) == 1
+        r = resp.latest[0]
+        assert r["handoff_note"] == distinctive_note
+        assert isinstance(r["learnings"], list)
+        assert r["learnings"] == distinctive_learnings
+        assert isinstance(r["tags"], list)
+        assert r["tags"] == distinctive_tags
+
+    def test_status_result_backward_compatible_fields_unchanged(self, conn):
+        """Regression: get_status 新增欄位須為 additive，既有欄位維持原值不變。"""
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="status_update",
+            task_id="task-a",
+            agent_id="agent-x",
+            summary="既有欄位相容性測試",
+            status="active",
+        )
+        resp = get_status(conn, StatusRequest(limit=10))
+        r = resp.latest[0]
+        assert r["id"] == "mem-1"
+        assert r["project_id"] == "default"
+        assert r["task_id"] == "task-a"
+        assert r["agent_id"] == "agent-x"
+        assert r["kind"] == "status_update"
+        assert r["summary"] == "既有欄位相容性測試"
         assert r["status"] == "active"
         assert "timestamp" in r

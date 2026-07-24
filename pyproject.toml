@@ -36,6 +36,18 @@ dev = [
 [project.urls]
 Homepage = "https://github.com/aiken884/RemaGraph"
 
+# `install-hooks` 需要在執行期（editable install / wheel 安裝皆同）透過
+# importlib.resources 讀到 src/remagraph/hooks/post-commit 這個非 .py 的
+# package data 檔案。hatchling 對 src-layout 的預設行為本來就會把偵測到的
+# package 目錄底下所有檔案（不限副檔名）一併打包進 wheel/sdist ——
+# 已實際執行 `uv build`／`uv build --wheel` 並用 zipfile/tarfile 檢視內容
+# 驗證過 remagraph/hooks/post-commit 確實存在於兩者之中。這裡仍明確宣告
+# packages，把這個目前『預設剛好正確』的行為釘死成『明確設定』，避免日後
+# hatchling 版本更新或旁人調整 pyproject.toml 時，在不知情下改掉自動偵測
+# 邏輯而悄悄漏掉這個檔案。
+[tool.hatch.build.targets.wheel]
+packages = ["src/remagraph"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

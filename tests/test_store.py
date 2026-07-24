@@ -431,6 +431,144 @@ def test_get_latest_status_updates_respects_limit(conn, now):
 # === _row_to_memory ===
 
 
+# === labels（PPLX 架構改善計畫 item 4b） ===
+
+
+def _patched_model():
+    """回傳一個 patch context manager，讓 process_store 免下載真實模型。"""
+    mock_model = MagicMock()
+    mock_model.dim = EMBEDDING_DIM
+    mock_model.encode.return_value = np.array([0.2] * EMBEDDING_DIM, dtype=np.float32)
+    return patch("remagraph.dedup._get_model", return_value=mock_model)
+
+
+def test_process_store_inserts_memory_labels_in_same_transaction(conn, now):
+    """Regression: 提供合法 labels 時，process_store 須在同一個 transaction
+    內把對應的 (memory_id, label) 列寫進 memory_labels。"""
+    req = StoreRequest(
+        project_id="testproj",
+        task_id="task-labels-001",
+        agent_id="test-agent",
+        kind="task_handoff",
+        summary="這是一段足夠長的摘要，用來測試 labels 是否正確寫入 memory_labels 資料表",
+        learnings=["learned something about labels"],
+        handoff_note="handoff note that is at least twenty characters long here",
+        labels=["dep:opencode", "topic:auth"],
+    )
+
+    with _patched_model():
+        response = process_store(req, conn)
+
+    assert response.status == "stored"
+    assert response.id is not None
+
+    rows = conn.execute(
+        "SELECT label FROM memory_labels WHERE memory_id = ? ORDER BY label", (response.id,)
+    ).fetchall()
+    labels = [r["label"] for r in rows]
+    assert labels == ["dep:opencode", "topic:auth"]
+
+
+def test_process_store_dedupes_repeated_labels(conn, now):
+    """Regression: 重複的 label 不應撞上 (memory_id, label) 複合主鍵而拋出
+    IntegrityError —— process_store 須自行去重後才寫入。"""
+    req = StoreRequest(
+        project_id="testproj",
+        task_id="task-labels-002",
+        agent_id="test-agent",
+        kind="task_handoff",
+        summary="這是一段足夠長的摘要，用來測試重複 labels 不會撞到複合主鍵約束",
+        learnings=["learned something about duplicate labels"],
+        handoff_note="handoff note that is at least twenty characters long too",
+        labels=["dep:opencode", "dep:opencode", "topic:auth"],
+    )
+
+    with _patched_model():
+        response = process_store(req, conn)
+
+    assert response.status == "stored"
+    rows = conn.execute(
+        "SELECT label FROM memory_labels WHERE memory_id = ? ORDER BY label", (response.id,)
+    ).fetchall()
+    assert [r["label"] for r in rows] == ["dep:opencode", "topic:auth"]
+
+
+def test_process_store_rejects_malformed_label(conn, now):
+    """Regression: 不符合 namespace:value 格式的 label 須讓整個 store 請求
+    被拒絕（status=rejected, reason=invalid_label），且不得寫入任何
+    memories / memory_labels 記錄（不得只存一半）。"""
+    req = StoreRequest(
+        project_id="testproj",
+        task_id="task-labels-003",
+        agent_id="test-agent",
+        kind="task_handoff",
+        summary="這是一段足夠長的摘要，用來測試格式錯誤的 label 會被整批拒絕",
+        learnings=["learned something"],
+        handoff_note="handoff note that is at least twenty characters long yes",
+        labels=["not-a-valid-label-without-colon"],
+    )
+
+    response = process_store(req, conn)
+
+    assert response.status == "rejected"
+    assert response.reason == "invalid_label"
+    assert response.id is None
+
+    # 不應有任何部分寫入殘留
+    mem_rows = conn.execute(
+        "SELECT id FROM memories WHERE task_id = 'task-labels-003'"
+    ).fetchall()
+    assert mem_rows == []
+    label_rows = conn.execute("SELECT * FROM memory_labels").fetchall()
+    assert label_rows == []
+
+
+def test_process_store_rejects_when_any_label_in_list_is_malformed(conn, now):
+    """Regression: labels 清單中只要有一個格式不符，整批（含其餘合法的）
+    都不寫入 —— 驗證『整批拒絕』而非『靜默跳過壞的、留下好的』這個設計選擇。
+    """
+    req = StoreRequest(
+        project_id="testproj",
+        task_id="task-labels-004",
+        agent_id="test-agent",
+        kind="task_handoff",
+        summary="這是一段足夠長的摘要，混合合法與不合法的 label 應整批被拒絕",
+        learnings=["learned something"],
+        handoff_note="handoff note that is at least twenty characters long ok",
+        labels=["dep:opencode", "BADNAMESPACE:value"],
+    )
+
+    response = process_store(req, conn)
+
+    assert response.status == "rejected"
+    assert response.reason == "invalid_label"
+    label_rows = conn.execute("SELECT * FROM memory_labels").fetchall()
+    assert label_rows == [], "合法的 dep:opencode 也不該被單獨留下"
+
+
+def test_process_store_labels_default_empty_is_backward_compatible(conn, now):
+    """Regression: 未提供 labels 時（既有呼叫端行為）須維持完全不受影響 ——
+    stored 成功、memory_labels 內沒有任何列。"""
+    req = StoreRequest(
+        project_id="testproj",
+        task_id="task-labels-005",
+        agent_id="test-agent",
+        kind="task_handoff",
+        summary="這是一段足夠長的摘要，完全不提供 labels 參數，測試向後相容性",
+        learnings=["learned something"],
+        handoff_note="handoff note that is at least twenty characters long fine",
+    )
+
+    with _patched_model():
+        response = process_store(req, conn)
+
+    assert response.status == "stored"
+    label_rows = conn.execute(
+        "SELECT * FROM memory_labels WHERE memory_id = ?", (response.id,)
+    ).fetchall()
+    assert label_rows == []
+
+
 def test_row_to_memory(conn, now):
     """_row_to_memory：正確轉換 sqlite3.Row 為 Memory。"""
     mem = _make_memory()
