@@ -14,6 +14,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from remagraph.models import StoreRequest, StoreResponse
 
@@ -79,6 +80,40 @@ def append_audit(response: StoreResponse, request: StoreRequest) -> None:
         detail = _sanitize_detail(response.detail)
         if detail:
             record["detail"] = detail
+
+    try:
+        path = _audit_path()
+        _ensure_dir(path)
+        with open(path, "a", encoding="utf-8") as f:
+            json.dump(record, f, ensure_ascii=False)
+            f.write("\n")
+        os.chmod(path, 0o600)
+    except OSError:
+        pass  # 審計寫入失敗不應中斷主流程
+
+
+def append_event(action: str, detail: dict[str, Any]) -> None:
+    """記錄維護／生命週期事件（非 remagraph_store 交易）到同一 audit.jsonl。
+
+    與 append_audit 共用同一份 audit-YYYYMM.jsonl（同路徑、同 rotation、
+    同 0600/0700 權限、append-only、絕不拋出例外的慣例），但用於
+    remagraph_store 之外的事件（例如安全閥門違規、維護完成/失敗）。
+
+    append_audit 是專為 StoreResponse/StoreRequest 設計的型別化 writer，
+    不應被鴨子定型濫用；本函式才是通用維護事件應呼叫的入口。
+
+    Args:
+        action: 事件名稱，例如 "safety_violation"、"maintenance_completed"、
+            "maintenance_light_failed"。
+        detail: 事件詳細內容（純資料，不含 traceback）。
+
+    此函式不應拋出例外 —— 寫入失敗僅靜默忽略。
+    """
+    record: dict[str, Any] = {
+        "action": action,
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        **detail,
+    }
 
     try:
         path = _audit_path()

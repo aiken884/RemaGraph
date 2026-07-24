@@ -19,7 +19,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from remagraph.audit import append_audit
+from remagraph.audit import append_event
 from remagraph.db import (
     connect as _raw_connect,
 )
@@ -85,7 +85,7 @@ def safety_validate_project(project_id: str, *, require_env_match: bool = True) 
 def _record_violation(project_id: str, reason: str) -> None:
     """記錄違規到 audit 與 memory（discovered_constraint）。"""
     try:
-        append_audit("safety_violation", {"project_id": project_id, "reason": reason})  # type: ignore[arg-type]
+        append_event("safety_violation", {"project_id": project_id, "reason": reason})
     except Exception:
         pass
     # 盡量寫入 memory（若可用）
@@ -102,7 +102,7 @@ def _record_violation(project_id: str, reason: str) -> None:
             project_id=project_id,
             tags=["safety", "violation", reason],
         )
-        conn = _raw_connect(resolve_project_state_dir(project_id))
+        conn = _raw_connect(resolve_project_state_dir(project_id), skip_maintenance=True)
         process_store(req, conn)
         conn.close()
     except Exception:
@@ -133,7 +133,7 @@ def run_maintenance(
     """執行自動維護。**只接受 project_id**，內部自行建立正確 conn。"""
     state_dir = safety_validate_project(project_id)
     if conn is None:
-        conn = _raw_connect(state_dir)
+        conn = _raw_connect(state_dir, skip_maintenance=True)
     stats: dict[str, Any] = {
         "project_id": project_id,
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -173,7 +173,7 @@ def run_maintenance(
                 _record_violation(project_id, "integrity_failed")
                 raise RuntimeError(f"DB integrity failed: {stats['integrity']}")
 
-        append_audit("maintenance_completed", {"project_id": project_id, **stats})
+        append_event("maintenance_completed", {"project_id": project_id, **stats})
         return stats
     finally:
         if conn:
@@ -213,4 +213,4 @@ def light_maintenance_on_connect(project_id: str = "default") -> None:
         run_maintenance(policy, project_id, force=False)
     except Exception as e:
         # 不阻斷啟動，但記錄
-        append_audit("maintenance_light_failed", {"error": str(e), "project_id": project_id})  # type: ignore[arg-type]
+        append_event("maintenance_light_failed", {"error": str(e), "project_id": project_id})
