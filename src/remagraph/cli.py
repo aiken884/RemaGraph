@@ -97,6 +97,7 @@ def cmd_store(args: argparse.Namespace) -> None:
         handoff_note=args.handoff_note,
         tags=_parse_json_list(args.tags) or [],
         invalidates=_parse_json_list(args.invalidates),
+        labels=_parse_json_list(args.labels) or [],
     )
     try:
         conn = _get_conn()
@@ -129,9 +130,16 @@ def cmd_search(args: argparse.Namespace) -> None:
         project = None
     elif not project:
         project = "default"
-    if not args.query and not args.task_id and not args.agent_id and not args.all_projects:
+    if (
+        not args.query
+        and not args.task_id
+        and not args.agent_id
+        and not args.all_projects
+        and not args.cross_project_label
+    ):
         print(
-            "error: 請提供 --query，或至少提供 --task-id / --agent-id，或使用 --all-projects",
+            "error: 請提供 --query，或至少提供 --task-id / --agent-id，"
+            "或使用 --all-projects / --cross-project-label",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -144,6 +152,7 @@ def cmd_search(args: argparse.Namespace) -> None:
         project_id=project,
         agent_id=args.agent_id,
         task_id=args.task_id,
+        cross_project_label=args.cross_project_label,
     )
     try:
         conn = _get_conn()
@@ -151,7 +160,13 @@ def cmd_search(args: argparse.Namespace) -> None:
         print(f"ERROR: 無法連線資料庫 - {e}", file=sys.stderr)
         sys.exit(1)
     response = search_memories(conn, request)
-    _print_json({"results": response.results, "has_more": response.has_more})
+    _print_json(
+        {
+            "results": response.results,
+            "has_more": response.has_more,
+            "cross_project_fanout_capped": response.cross_project_fanout_capped,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +406,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_store.add_argument("--handoff-note", default="")
     p_store.add_argument("--tags", help="JSON 陣列")
     p_store.add_argument("--invalidates", help="JSON 陣列")
+    p_store.add_argument(
+        "--labels",
+        help=(
+            "JSON 陣列，命名空間化標籤，例如 '[\"dep:opencode\",\"topic:auth\"]'"
+            "（與 --tags 是不同概念：labels 有 namespace:value 格式要求，"
+            "供跨專案標籤搜尋使用，見 search --cross-project-label）"
+        ),
+    )
 
     # search
     p_search = sub.add_parser("search", help="查詢記憶（可用 --task-id 不帶 --query）")
@@ -407,6 +430,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--task-id")
     p_search.add_argument(
         "--all-projects", action="store_true", help="跨所有 project 查詢（需同意）"
+    )
+    p_search.add_argument(
+        "--cross-project-label",
+        default=None,
+        help=(
+            "依命名空間化 label（如 'dep:opencode'）跨『所有已知 project 各自"
+            "獨立的資料庫檔案』搜尋（見 item 4a registry），與 --all-projects"
+            "（僅移除目前這個資料庫檔案內的 project 過濾）是完全不同的兩件事"
+        ),
     )
 
     # status

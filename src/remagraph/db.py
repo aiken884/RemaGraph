@@ -23,7 +23,7 @@ from typing import Any
 
 DEFAULT_STATE_DIR = Path.home() / ".local" / "state" / "remagraph"
 DB_FILENAME = "remagraph.db"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 MAX_DB_SIZE_MB = 100  # soft limit via PRAGMA max_page_count
 _ALLOWED_STATE_DIR_RE = re.compile(r"^[a-zA-Z0-9_/.-]+$")
 DEFAULT_PROJECT_ID = "default"
@@ -442,10 +442,30 @@ def connect_foreign_project_readonly(project_id: str) -> sqlite3.Connection | No
     連線額外設定 PRAGMA query_only=1，讓這個連線在 SQLite 層級真的無法
     寫入，落實「readonly」這個名稱的承諾。
 
+    TOCTOU 安全性（獨立對抗式審查發現，追蹤事項 #22）：改以 SQLite URI
+    `file:<path>?mode=ro` 開啟連線（sqlite3.connect(uri, uri=True)），而不是
+    依賴一個獨立的 `foreign_db_path.exists()` 預檢查 + 一般模式 connect()。
+    原因：一般模式的 sqlite3.connect() 對『不存在的檔案』並不會拋出例外，
+    而是悄悄建立一個全新的空白資料庫檔案——若檔案在 exists() 檢查之後、
+    connect() 呼叫之前才被刪除（另一行程清掉了該 project 的 state_dir），
+    舊實作會回傳一個「看起來正常、實則完全空白」的連線，違反本函式
+    『絕不憑空生出一個新的空資料庫』的承諾。mode=ro 讓 SQLite 在檔案不存在
+    時於 connect() 呼叫當下就直接拋出 sqlite3.OperationalError（mode=ro
+    明確禁止建立新檔案），因此這個競態窗口從根本上不存在——真正的安全機制
+    是 connect() 本身，不是任何檢查時間點的快照。下方仍保留一個
+    `foreign_db_path.exists()` 判斷，但純粹是快速路徑最佳化（避免明知不存在
+    還嘗試開啟連線、產生不必要的 OperationalError 例外），不是安全機制本身；
+    即使這個預檢查因競態而誤報「存在」，下面的 mode=ro connect() 仍會在
+    真正嘗試開啟時正確地拋出並被捕捉、回傳 None（見
+    tests/test_project_registry.py 的
+    test_connect_foreign_project_readonly_closes_toctou_gap_via_ro_uri，
+    專門驗證此點——刻意讓 exists() 預檢查說謊也不影響最終正確性）。
+
     Returns:
         已就緒、真正唯讀的連線；若 project_id 不在 registry 內、其
         state_dir/db 檔案已不存在（registry 可能已過期 —— 對應目錄可能已
-        被刪除）、或開啟過程任何原因失敗，一律回傳 None，絕不拋出例外。
+        被刪除，或在檢查與開啟之間才被刪除）、或開啟過程任何原因失敗，一律
+        回傳 None，絕不拋出例外，也絕不會在該路徑憑空建立新檔案。
     """
     conn: sqlite3.Connection | None = None
     row: sqlite3.Row | None = None
@@ -473,17 +493,26 @@ def connect_foreign_project_readonly(project_id: str) -> sqlite3.Connection | No
 
     foreign_db_path = Path(state_dir_str) / DB_FILENAME
     if not foreign_db_path.exists():
+        # 快速路徑最佳化，非安全機制本身 —— 見上方 docstring。即使這個判斷
+        # 因競態而誤報，下面的 mode=ro connect() 仍是真正把關的那一道。
         return None
 
     try:
         foreign_conn = sqlite3.connect(
-            str(foreign_db_path),
+            f"file:{foreign_db_path}?mode=ro",
+            uri=True,
             isolation_level=None,
             check_same_thread=False,
         )
         foreign_conn.row_factory = sqlite3.Row
         foreign_conn.execute("PRAGMA query_only = 1")
         return foreign_conn
+    except sqlite3.OperationalError:
+        # mode=ro 對不存在的檔案會在此處拋出（"unable to open database
+        # file"）——這正是 TOCTOU 競態視窗（exists() 檢查之後、connect() 之前
+        # 檔案才被刪除）下會發生的情況。mode=ro 明確禁止建立新檔案，因此絕不
+        # 會像一般模式那樣悄悄生出一個空白資料庫；正確地回傳 None。
+        return None
     except Exception:
         return None
 
@@ -568,6 +597,23 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+
+        -- 每個記憶可掛上多個命名空間化標籤（PPLX 架構改善計畫 item 4b），
+        -- 供跨專案標籤搜尋使用（見 db.list_known_projects /
+        -- db.connect_foreign_project_readonly，item 4a）。標籤格式慣例
+        -- （namespace:value，如 dep:opencode、topic:auth）由 arbitration.py
+        -- 的 validate_labels() 於 store 時驗證，本表本身不對 label 內容加
+        -- CHECK 約束（與 tags 欄位一致，驗證邏輯放在應用層而非 DDL 層）。
+        CREATE TABLE IF NOT EXISTS memory_labels (
+            memory_id TEXT NOT NULL REFERENCES memories(id),
+            label     TEXT NOT NULL,
+            PRIMARY KEY (memory_id, label)
+        );
+
+        -- 依 label 本身查詢（不限定 memory_id）的效能 index —— 跨專案標籤
+        -- 搜尋會對每個已知專案各自的資料庫都執行「WHERE label = ?」，此
+        -- index 讓每個資料庫檔案各自的這類查詢維持高效。
+        CREATE INDEX IF NOT EXISTS idx_memory_labels_label ON memory_labels(label);
     """)
 
 
@@ -630,6 +676,9 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if current_version == 4:
         _migrate_v4_to_v5(conn)
         current_version = 5
+    if current_version == 5:
+        _migrate_v5_to_v6(conn)
+        current_version = 6
 
     if current_version > SCHEMA_VERSION:
         _handle_newer_than_code_schema(conn, current_version)
@@ -843,3 +892,30 @@ def _migrate_v4_to_v5(conn: sqlite3.Connection) -> None:
         (_UPGRADE_HINT_TEXT,),
     )
     conn.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', '5')")
+
+
+def _migrate_v5_to_v6(conn: sqlite3.Connection) -> None:
+    """v5→v6: 加入 memory_labels 多對多命名空間標籤表（PPLX 架構改善計畫
+    item 4b）。
+
+    與 _init_schema() 內對 memory_labels 的定義完全一致（皆為
+    IF NOT EXISTS，冪等），確保透過 _init_schema 直接建立的全新資料庫，
+    與透過本 migration 補上該表的既有 v5 資料庫，最終結構完全相同。
+
+    刻意不更新 min_reader_version / min_writer_version（維持 v4→v5 種下的
+    值不變）：memory_labels 是純新增的獨立表，不修改 memories 表本身的欄位
+    或 CHECK 約束，因此仍未升級的舊版（SCHEMA_VERSION=5）程式碼，對一個已
+    升級到 v6 的資料庫寫入一般 memories 記錄仍然完全安全——只是不會意識到
+    / 不會寫入 memory_labels 而已，不構成資料損毀風險。這與 v4→v5 那次
+    migration 的情境不同（該次的 min_writer_version 語意是防範『未來若真的
+    修改 memories 表結構』的假設性風險，而非本次這種純加法變更）。
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS memory_labels (
+            memory_id TEXT NOT NULL REFERENCES memories(id),
+            label     TEXT NOT NULL,
+            PRIMARY KEY (memory_id, label)
+        );
+        CREATE INDEX IF NOT EXISTS idx_memory_labels_label ON memory_labels(label);
+    """)
+    conn.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', '6')")

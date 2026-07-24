@@ -33,6 +33,7 @@ ArbitrationReason = Literal[
     "invalid_agent_id",
     "invalidates_not_found",
     "invalidates_kind_mismatch",
+    "invalid_label",
 ]
 
 
@@ -67,6 +68,29 @@ class InvalidateResult:
 # ---------------------------------------------------------------------------
 
 AGENT_ID_REGEX = re.compile(r"^[a-z0-9_-]+$")
+
+# PPLX 架構改善計畫 item 4b：labels 為命名空間化字串（namespace:value），
+# 例如 dep:opencode、topic:auth、kind:bug。namespace 一律小寫字母（刻意
+# 是一組小、受控的字首集合，避免標籤本身隨時間演變成破碎、不一致的自由
+# 格式字串——這是 PPLX 研究對這類跨專案共用標籤的明確建議）；value 允許
+# 大小寫英數字、底線、連字號，與既有 project_id/task_id/agent_id 慣例
+# （models._TASK_ID_RE）的字元集一致，方便沿用既有的合理字元範圍認知。
+#
+# 尾端刻意用 \Z 而非 $：Python re 的 `$`（非 MULTILINE 模式）除了匹配
+# 字串結尾，也會匹配『結尾前恰有一個換行字元』的位置——也就是說，即使
+# `\n` 並不在上面宣告的 value 字元類別 [a-zA-Z0-9_-] 之內，
+# `^[a-z]+:[a-zA-Z0-9_-]+$` 仍會誤判 "dep:foo\n" 為格式合法（`match()`
+# 只驗證字串開頭，不要求整個字串被消耗，`$` 又額外放行結尾前一個換行）。
+# `\Z` 只匹配『絕對的字串結尾』，沒有這個換行例外，是這裡唯一正確的錨點。
+LABEL_REGEX = re.compile(r"^[a-z]+:[a-zA-Z0-9_-]+\Z")
+
+# labels 長度上限（PPLX 架構改善計畫 item 4b 硬化項目）：與 models.py
+# _TASK_ID_RE 對 project_id/task_id/agent_id 既有的 64 字元上限慣例一致
+# （見 models.py 的 `{0,63}` → 總長 64）。LABEL_REGEX 本身的字元類別
+# （[a-zA-Z0-9_-]+）對長度沒有上限，若不額外檢查，一個數十/數百 KB 的
+# 字串會被判定為合法 label 並寫入 memory_labels 表——套用與既有欄位一致
+# 的合理上限，避免這個縫隙。
+LABEL_MAX_LENGTH = 64
 
 # ---------------------------------------------------------------------------
 # 規則 #1: summary 長度門檻
@@ -147,12 +171,73 @@ def validate_agent_id(agent_id: str) -> ArbitrationResult:
 
 
 # ---------------------------------------------------------------------------
+# labels 格式驗證（PPLX 架構改善計畫 item 4b，非 D02 原始五條仲裁規則之一，
+# 但沿用同一套 ArbitrationResult 優雅拒絕慣例）
+# ---------------------------------------------------------------------------
+
+
+def validate_labels(labels: list[str]) -> ArbitrationResult:
+    """驗證 labels 清單內每個字串是否符合 namespace:value 格式
+    （見 LABEL_REGEX，例如 dep:opencode、topic:auth、kind:bug），且長度不超過
+    LABEL_MAX_LENGTH。
+
+    長度檢查沿用同一個 reason="invalid_label"（而非另立
+    "label_too_long"）：對呼叫端而言，兩者都是『這個 label 不符合本系統對
+    labels 的格式要求』這同一件事的兩種呈現方式，detail 欄位已足以說明
+    究竟是格式不符還是超長；沒有必要為此新增一個 ArbitrationReason
+    Literal 成員，讓呼叫端多處理一種 reason 值。
+
+    設計決策 —— 整批拒絕 vs. 靜默跳過單一格式不符的 label：
+    本函式選擇只要有任一 label 不符格式，就讓整個 store 請求被拒絕（透過
+    ArbitrationResult(passed=False, reason="invalid_label", ...)，與其餘
+    仲裁規則走同一條 StoreResponse(status="rejected") 路徑），而不是悄悄
+    跳過那一個壞掉的 label、只留下合法的繼續寫入。理由：
+
+    1. labels 存在的價值就是『受控詞彙』（一小組固定 namespace，例如
+       dep/topic/kind），目的是避免長期演變成破碎、不一致的自由格式標籤
+       （PPLX 研究的核心建議）。若允許格式錯誤的 label 被悄悄丟棄，呼叫端
+       永遠不會得知自己用錯了格式，久而久之會出現『以為存進去了、其實沒有』
+       的標籤，這正是『受控詞彙』想避免的破碎化問題本身，靜默跳過反而在
+       長期上助長了它。
+    2. 與本模組既有慣例一致：project_id/task_id/agent_id 等有明確格式
+       要求的欄位，本模組（models._TASK_ID_RE 的 field_validator、本檔的
+       validate_agent_id）一律硬性拒絕格式不符的輸入，而非略過或靜默改寫。
+       labels 既然也有明確的格式要求（不同於完全自由格式的 tags 欄位），
+       延續『格式有要求 → 硬性拒絕』這條既有慣例最一致。
+    3. 與 arbitration.py 既有規則的失敗模式一致（即整個 store 操作失敗、
+       但以乾淨的 StoreResponse 呈現，不是未捕捉例外——呼叫端拿到清楚的
+       reason="invalid_label" + detail 說明哪個 label、期待什麼格式，可
+       立即修正重試，不會有任何資料被『部分寫入』的曖昧狀態）。
+    """
+    for label in labels:
+        if len(label) > LABEL_MAX_LENGTH:
+            return ArbitrationResult(
+                passed=False,
+                reason="invalid_label",
+                detail=(
+                    f"label 長度需 ≤ {LABEL_MAX_LENGTH} 字元，"
+                    f"目前 {len(label)} 字元：{label[:80]!r}..."
+                ),
+            )
+        if not LABEL_REGEX.match(label):
+            return ArbitrationResult(
+                passed=False,
+                reason="invalid_label",
+                detail=(
+                    f"label {label!r} 不符合命名空間格式 {LABEL_REGEX.pattern}"
+                    "（例如 'dep:opencode'、'topic:auth'、'kind:bug'）"
+                ),
+            )
+    return ArbitrationResult(passed=True)
+
+
+# ---------------------------------------------------------------------------
 # 便宜規則組合（先執行規則 #1, #2, #3, #5，最後才 #4）
 # ---------------------------------------------------------------------------
 
 
 def run_arbitration_rules_cheap(request: StoreRequest) -> ArbitrationResult:
-    """依序執行便宜仲裁規則（#1, #2, #3, #5），任一失敗即停止。
+    """依序執行便宜仲裁規則（#1, #2, #3, #5 + labels 格式），任一失敗即停止。
 
     規則 #4 (model2vec 去重) 由 dedup.py 負責，在呼叫此函式後執行。
     """
@@ -173,6 +258,11 @@ def run_arbitration_rules_cheap(request: StoreRequest) -> ArbitrationResult:
 
     # 規則 #5: agent_id 格式
     result = validate_agent_id(request.agent_id)
+    if not result.passed:
+        return result
+
+    # labels 格式（item 4b，非原始五條規則之一，見上方 validate_labels 說明）
+    result = validate_labels(request.labels)
     if not result.passed:
         return result
 
