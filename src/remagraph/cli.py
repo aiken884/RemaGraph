@@ -155,9 +155,12 @@ def cmd_status(args: argparse.Namespace) -> None:
         project = None
     elif not project:
         project = "default"
+    conn = _get_conn()
     request = StatusRequest(limit=args.limit, project_id=project)
-    response = get_status(_get_conn(), request)
-    _print_json({"latest": response.latest})
+    response = get_status(conn, request)
+    result: dict[str, Any] = {"latest": response.latest}
+    result.update(_db.get_compat_status(conn))
+    _print_json(result)
 
 
 # ---------------------------------------------------------------------------

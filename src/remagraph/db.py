@@ -233,6 +233,41 @@ def close(conn: sqlite3.Connection) -> None:
         pass
 
 
+def get_compat_status(conn: sqlite3.Connection) -> dict[str, Any]:
+    """回傳目前連線的版本相容性 handshake 資訊。
+
+    供 remagraph_status（MCP tool 與 CLI `status` 子命令共用）在回應中附加
+    版本落差資訊，讓呼叫端（agent）能在 session 一開始或定期呼叫時就提早
+    掌握相容性現況，而不必等到 remagraph_store 寫入失敗才第一次得知
+    （PPLX 架構改善計畫 item 3；三層版本判斷本身見 item 2 的
+    _handle_newer_than_code_schema）。
+
+    回傳欄位：
+        server_code_version: 目前執行中程式碼的 SCHEMA_VERSION 常數。
+        db_schema_version: 資料庫 _meta 表實際存下的 schema_version
+            （防禦性讀取 —— connect() 成功後理論上必定存在，但仍走
+            _read_meta_int_defensively，不假設它一定等於
+            server_code_version，也不因結構意外而拋例外）。
+        min_reader_version / min_writer_version: 資料庫存下的前向相容性
+            欄位（見 item 1 / _migrate_v4_to_v5 起種下）。若資料庫是
+            item 1 之前建立、且尚未走過該 migration（例如未升級的 v4
+            資料庫），這兩個欄位可能不存在 —— 一律回傳 None，不拋例外。
+        upgrade_hint: 資料庫存下的升級指引文字，重用既有的
+            _read_upgrade_hint_defensively（item 1 拒絕降級訊息已使用的
+            同一套防禦性讀取邏輯），缺漏時回傳 None。
+        read_only: 目前連線是否處於 item 2 引入的唯讀降級模式
+            （見 READ_ONLY_ATTR）。
+    """
+    return {
+        "server_code_version": SCHEMA_VERSION,
+        "db_schema_version": _read_meta_int_defensively(conn, "schema_version"),
+        "min_reader_version": _read_meta_int_defensively(conn, "min_reader_version"),
+        "min_writer_version": _read_meta_int_defensively(conn, "min_writer_version"),
+        "upgrade_hint": _read_upgrade_hint_defensively(conn),
+        "read_only": bool(getattr(conn, READ_ONLY_ATTR, False)),
+    }
+
+
 # ---------------------------------------------------------------------------
 # 內部函式
 # ---------------------------------------------------------------------------
