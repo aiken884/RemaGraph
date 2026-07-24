@@ -444,6 +444,90 @@ class TestSearchMemories:
         assert len(resp.results) == 0
         assert "too short" in caplog.text.lower()
 
+    # ================================================================
+    # 特殊字元 query（regression: 連字號被 FTS5 誤解為 column-filter 語法）
+    # ================================================================
+
+    def test_hyphenated_query_matches_literal_substring(self, conn):
+        """Regression: 查詢字串含連字號應能匹配儲存記錄中逐字相同的子字串。
+
+        修復前：FTS5 query 語法會將未加引號的 "deny-subagent" 解析成
+        column-filter 表達式（"-subagent" 被視為欲排除的欄位名稱），
+        因不存在名為 subagent 的欄位而拋出 sqlite3.OperationalError
+        （no such column: subagent），search_memories 的例外處理會將其
+        吞掉並回傳空結果 —— 即使該子字串在記錄中逐字存在。
+        """
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            task_id="deny-subagent-reconnect",
+            summary="修正 deny-subagent-reconnect 導致的連線失敗問題",
+        )
+        req = SearchRequest(query="deny-subagent", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
+
+    def test_colon_query_matches_literal_substring(self, conn):
+        """查詢字串含冒號時，FTS5 會將其誤解為 column-filter（col:term）語法。"""
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="狀態更新 task:done 已完成部署",
+        )
+        req = SearchRequest(query="task:done", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
+
+    def test_underscore_query_matches(self, conn):
+        """底線並非 FTS5 特殊字元，查詢應正常匹配（確保修復未破壞既有行為）。"""
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="更新 build_pipeline_v2 設定檔",
+        )
+        req = SearchRequest(query="build_pipeline_v2", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
+
+    def test_reserved_keyword_as_literal_search_term_still_works(self, conn):
+        """AND/OR/NOT/NEAR 作為一般搜尋詞時，應仍能正常匹配（既有行為不受影響）。"""
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="採購清單：biscuits AND gravy 兩項",
+        )
+        req = SearchRequest(query="AND", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
+
+    def test_cjk_query_still_matches_after_special_char_fix(self, conn):
+        """中文查詢應不受連字號/特殊字元修復影響，繼續正常匹配。"""
+        _insert_memory(
+            conn, id="mem-1", kind="task_handoff", summary="測試中文查詢內容是否正常"
+        )
+        req = SearchRequest(query="測試中文查詢", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["id"] == "mem-1"
+
+    def test_short_query_still_short_circuits_after_special_char_fix(self, conn, caplog):
+        """<3 字元短查詢應繼續維持既有的 short-circuit 行為（不受本次修復影響）。"""
+        _insert_memory(conn, id="mem-1", kind="task_handoff", summary="ab test data")
+        with caplog.at_level(logging.WARNING):
+            req = SearchRequest(query="ab")
+            resp = search_memories(conn, req)
+        assert len(resp.results) == 0
+        assert resp.has_more is False
+        assert "too short" in caplog.text.lower()
+
     # -- 結果結構驗證 --
 
     def test_result_includes_all_fields(self, conn):
