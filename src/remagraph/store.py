@@ -345,6 +345,21 @@ def process_store(
         # INSERT
         insert_memory(conn, memory, emb_array)
 
+        # 寫入 memory_labels（PPLX 架構改善計畫 item 4b）：與 memory 本身的
+        # INSERT 在同一個 transaction 內，確保 memory 與其 labels 要嘛一起
+        # commit、要嘛一起 rollback，不會出現「memory 寫入成功但 labels
+        # 遺漏」的不一致狀態。此時 request.labels 內每個元素都已保證通過
+        # run_arbitration_rules_cheap 的 validate_labels() 格式檢查（見該
+        # 函式呼叫順序 —— 早於本函式的 transaction 區塊），故此處不再重複
+        # 驗證格式，只做去重（dict.fromkeys 保留原順序）以避免呼叫端傳入
+        # 重複 label 時，撞上 memory_labels 的 (memory_id, label) 複合主鍵
+        # 而拋出 IntegrityError。
+        for label in dict.fromkeys(request.labels):
+            conn.execute(
+                "INSERT INTO memory_labels (memory_id, label) VALUES (?, ?)",
+                (mem_id, label),
+            )
+
         conn.execute("COMMIT")
 
         response = StoreResponse(

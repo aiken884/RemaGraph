@@ -19,6 +19,7 @@ db.DEFAULT_STATE_DIR 這個模組常數本身都 monkeypatch 成 tmp_path 底下
 from __future__ import annotations
 
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -211,6 +212,74 @@ def test_connect_foreign_project_readonly_returns_none_when_directory_deleted(
 
     result = db_mod.connect_foreign_project_readonly("ephemeral-proj")
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# 6. TOCTOU 硬化：exists() 預檢查與實際 connect() 之間的競態窗口
+#    （PPLX 架構改善計畫 item 4b Part 1，追蹤事項 #22）
+# ---------------------------------------------------------------------------
+
+
+def test_connect_foreign_project_readonly_closes_toctou_gap_via_ro_uri(tmp_path, monkeypatch):
+    """回歸測試：TOCTOU 縫隙必須被 connect() 本身（mode=ro URI）杜絕，而不是
+    只靠 exists() 預檢查恰好夠即時。
+
+    背景（獨立對抗式審查發現）：舊實作是
+    `if foreign_db_path.exists(): sqlite3.connect(str(foreign_db_path))`。
+    若檔案在 exists() 檢查『之後』、connect() 呼叫『之前』被刪除（例如另一
+    行程剛好清掉了該 project 的 state_dir），plain sqlite3.connect() 並不會
+    拋出例外——它會悄悄在該路徑建立一個全新的空白資料庫檔案，讓呼叫端拿到
+    一個「看起來正常、實則完全空白」的連線，直接違反本函式的既有承諾（絕不
+    憑空生出一個新的空資料庫，見上方
+    test_connect_foreign_project_readonly_returns_none_when_directory_deleted）。
+
+    真正修復：改用 `sqlite3.connect(f"file:{path}?mode=ro", uri=True)`——
+    mode=ro 讓 SQLite 在檔案不存在時於 connect() 呼叫當下就直接拋出
+    sqlite3.OperationalError（因為 mode=ro 明確禁止建立新檔案），而不是像
+    預設模式一樣「先成功打開／建立，之後才可能出錯」。
+
+    本測試刻意讓 exists() 預檢查本身「說謊」（在檔案真的已被刪除後，仍對
+    這一個特定路徑回報 True），藉此排除「只是因為 exists() 檢查剛好夠即時、
+    從未真的暴露競態」這種假通過的可能性——唯有當真正的安全機制是 connect()
+    本身（而非可能受競態影響的 exists() 預檢查）時，本測試才會通過。若實作
+    退回成單純移除 exists() 檢查、但底層仍用一般（非 mode=ro）的
+    sqlite3.connect()，本測試一樣會抓到（因為一般模式一樣會悄悄建立空檔案）。
+    """
+    proj_dir = tmp_path / "toctou-proj-state"
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(proj_dir))
+    monkeypatch.setenv("REMAGRAPH_PROJECT", "toctou-proj")
+
+    conn = db_mod.connect(project_id="toctou-proj")
+    conn.close()
+
+    db_path = proj_dir.resolve() / db_mod.DB_FILENAME
+    assert db_path.exists(), "sanity check: db 檔案須先真的存在"
+
+    known = {p["project_id"] for p in db_mod.list_known_projects()}
+    assert "toctou-proj" in known, "sanity check: project 須先被登記"
+
+    # 模擬競態：真的刪除檔案，但讓 Path.exists() 對「這一個特定路徑」持續
+    # 說謊回報 True —— 重現「exists() 檢查當下檔案還在，但 connect() 呼叫
+    # 當下檔案已經消失」的競態窗口。
+    original_exists = Path.exists
+    db_path.unlink()
+    assert not original_exists(db_path), "sanity check: 檔案須先真的被刪除"
+
+    def _lying_exists(self: Path) -> bool:
+        if self == db_path:
+            return True
+        return original_exists(self)
+
+    monkeypatch.setattr(Path, "exists", _lying_exists, raising=True)
+
+    result = db_mod.connect_foreign_project_readonly("toctou-proj")
+
+    assert result is None, (
+        "即使 exists() 預檢查說謊回報檔案仍存在，connect_foreign_project_readonly "
+        "仍必須回傳 None —— 真正的安全機制必須是 connect() 本身（mode=ro），"
+        "而不是可能受競態影響的 exists() 預檢查"
+    )
+    assert not original_exists(db_path), "絕不能憑空在該路徑生出一個新的空白資料庫檔案"
 
 
 # ---------------------------------------------------------------------------

@@ -152,7 +152,14 @@ def test_migrate_v4_to_v5_populates_meta_keys(tmp_path):
         return row[0] if row is not None else None
 
     assert _meta("schema_version") == str(db.SCHEMA_VERSION)
-    assert db.SCHEMA_VERSION == 5
+    # 這個字面值斷言刻意當「金絲雀」使用：SCHEMA_VERSION 每次往上調（例如
+    # item 4b 新增 memory_labels 表，5→6），都會讓這裡先失敗，提醒回頭確認
+    # 下面 min_writer_version 的字面值 "5" 是否仍然正確 —— 該值來自
+    # _migrate_v4_to_v5 內寫死的 '5'（代表「min_writer_version 這個欄位是
+    # 從 schema v5 開始種下的」這個歷史事實，不隨 SCHEMA_VERSION 之後繼續
+    # 往上調而改變；item 4b 的 _migrate_v5_to_v6 刻意不觸碰
+    # min_writer_version，理由見 db._migrate_v5_to_v6 docstring）。
+    assert db.SCHEMA_VERSION == 6
     assert _meta("min_reader_version") == "1"
     assert _meta("min_writer_version") == "5"
     hint = _meta("upgrade_hint")

@@ -122,8 +122,17 @@ def remagraph_store(
     handoff_note: str = "",
     tags: list[str] | None = None,
     invalidates: list[str] | None = None,
+    labels: list[str] | None = None,
 ) -> dict[str, Any]:
-    """agent 寫入記憶。"""
+    """agent 寫入記憶。
+
+    labels（PPLX 架構改善計畫 item 4b）：與 tags 是兩個獨立的概念，刻意不
+    合併——tags 是既有的自由格式欄位（無格式要求，供既有的 tag 過濾搜尋
+    使用，見 search.py 的 kind/status/tags/agent_id/task_id 過濾），改動
+    tags 的語意會牽動既有呼叫端；labels 則是新增的、有明確 namespace:value
+    格式要求的受控詞彙（見 arbitration.validate_labels），專供 item 4b 的
+    跨專案標籤搜尋使用（remagraph_search 的 cross_project_label 參數）。
+    """
     _check_rate_limit(agent_id)
     try:
         conn = _get_conn()
@@ -139,6 +148,7 @@ def remagraph_store(
         handoff_note=handoff_note,
         tags=tags or [],
         invalidates=invalidates,
+        labels=labels or [],
     )
     response = process_store(request, conn)
     result: dict[str, Any] = {
@@ -170,8 +180,20 @@ def remagraph_search(
     agent_id: str | None = None,
     task_id: str | None = None,
     all_projects: bool = False,
+    cross_project_label: str | None = None,
 ) -> dict[str, Any]:
-    """agent 查詢記憶（FTS5 BM25）。"""
+    """agent 查詢記憶（FTS5 BM25）。
+
+    cross_project_label（PPLX 架構改善計畫 item 4b）：與既有的 all_projects
+    是完全獨立的兩個維度，刻意不合併——all_projects 只移除『目前這個資料庫
+    檔案內』的 project_id 過濾（每個 project 各自是獨立的 SQLite 檔案，
+    all_projects 從不開啟其他檔案）；cross_project_label 則會透過 item 4a
+    的 registry（db.list_known_projects/connect_foreign_project_readonly）
+    真正開啟其他 project 各自獨立的資料庫檔案，查詢各自的 memory_labels
+    表並合併結果（詳見 search._search_cross_project_by_label）。提供
+    cross_project_label 時，其餘全文檢索/過濾參數（query/kind/tags/...）
+    不適用，只依 label 精確比對。
+    """
     _check_rate_limit(agent_id or "anonymous")
     try:
         conn = _get_conn()
@@ -187,9 +209,14 @@ def remagraph_search(
         project_id=eff_project,
         agent_id=agent_id,
         task_id=task_id,
+        cross_project_label=cross_project_label,
     )
     response = search_memories(conn, request)
-    return {"results": response.results, "has_more": response.has_more}
+    return {
+        "results": response.results,
+        "has_more": response.has_more,
+        "cross_project_fanout_capped": response.cross_project_fanout_capped,
+    }
 
 
 @mcp.tool(

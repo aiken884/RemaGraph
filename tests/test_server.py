@@ -166,6 +166,62 @@ def test_search_short_query():
     assert result["has_more"] is False
 
 
+def test_search_result_includes_cross_project_fanout_capped_key():
+    """Regression: remagraph_search 回傳值須新增
+    cross_project_fanout_capped 欄位（附加、預設 False，向後相容）。"""
+    result = server.remagraph_search(query="AB")
+
+    assert result["cross_project_fanout_capped"] is False
+
+
+# ---------------------------------------------------------------------------
+# remagraph_store — labels（PPLX 架構改善計畫 item 4b）
+# ---------------------------------------------------------------------------
+
+
+def test_store_with_labels_wires_through_to_memory_labels():
+    """Regression: remagraph_store 的 labels 參數須正確傳遞到
+    process_store()，寫入 memory_labels 資料表。"""
+    result = server.remagraph_store(
+        project_id="testproj",
+        task_id="task-test-labels-001",
+        agent_id="oc-test",
+        kind="task_handoff",
+        summary="這是一段足夠長的 summary 來測試 labels 參數是否正確傳遞到 store 層",
+        learnings=["學到了 labels 的用法"],
+        handoff_note="這是一段給接手者的交接筆記，至少要二十個字以上才算夠長",
+        labels=["dep:opencode", "topic:auth"],
+    )
+
+    assert result["status"] == "stored"
+
+    conn = server._get_conn()
+    rows = conn.execute(
+        "SELECT label FROM memory_labels WHERE memory_id = ? ORDER BY label",
+        (result["id"],),
+    ).fetchall()
+    assert [r["label"] for r in rows] == ["dep:opencode", "topic:auth"]
+
+
+def test_store_with_malformed_label_rejected_via_server():
+    """Regression: 格式不符的 label 透過 remagraph_store 傳入時，須整批被
+    拒絕（與 process_store 的既有拒絕慣例一致），而非被伺服器層悄悄丟棄
+    或造成未捕捉例外。"""
+    result = server.remagraph_store(
+        project_id="testproj",
+        task_id="task-test-labels-002",
+        agent_id="oc-test",
+        kind="task_handoff",
+        summary="這是一段足夠長的 summary 來測試格式錯誤的 label 會被伺服器層正確拒絕",
+        learnings=["學到了"],
+        handoff_note="這是一段給接手者的交接筆記，至少要二十個字以上才算夠長",
+        labels=["not-a-valid-label"],
+    )
+
+    assert result["status"] == "rejected"
+    assert result["reason"] == "invalid_label"
+
+
 # ---------------------------------------------------------------------------
 # remagraph_status
 # ---------------------------------------------------------------------------
