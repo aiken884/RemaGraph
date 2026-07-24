@@ -94,11 +94,35 @@ def _record_violation(project_id: str, reason: str) -> None:
     skip_safety_check=True —— 這個略過旗標僅限本函式使用，任何其他呼叫者
     （CLI、MCP server 或帶明確 project_id 的一般呼叫）都不得傳入，安全閥門
     對它們維持完整強制。
+
+    目錄解析只做一次：resolve_project_state_dir(project_id) 是「權威、
+    project-aware」的解析器（REMAGRAPH_STATE_DIR 未設定時會 fallback 到
+    project 專屬目錄，而非 audit.py 環境變數導向的共用預設目錄）。若在此
+    直接呼叫 append_event 而不傳入解析結果，append_event 內部的
+    _audit_path() 會各自重新從環境變數推導目錄 —— 對於
+    "missing_remagraph_state_dir" 這類原因（定義上就是 REMAGRAPH_STATE_DIR
+    未設定），兩邊 fallback 邏輯不一致，會導致同一違規事件的 audit 記錄與
+    memory 記錄落在兩個不同目錄。因此這裡先解析一次，再明確傳給
+    append_event(state_dir=...)，確保與下方 memory 記錄使用同一目錄。
     """
     try:
-        append_event("safety_violation", {"project_id": project_id, "reason": reason})
+        state_dir = resolve_project_state_dir(project_id)
+    except Exception:
+        # 解析失敗時退回舊行為：讓 append_event 用它自己的環境變數 fallback。
+        state_dir = None
+
+    try:
+        append_event(
+            "safety_violation",
+            {"project_id": project_id, "reason": reason},
+            state_dir=state_dir,
+        )
     except Exception:
         pass
+
+    if state_dir is None:
+        return
+
     # 盡量寫入 memory（若可用）
     try:
         from remagraph.models import StoreRequest
@@ -114,7 +138,7 @@ def _record_violation(project_id: str, reason: str) -> None:
             tags=["safety", "violation", reason],
         )
         conn = _raw_connect(
-            resolve_project_state_dir(project_id),
+            state_dir,
             skip_maintenance=True,
             skip_safety_check=True,
         )

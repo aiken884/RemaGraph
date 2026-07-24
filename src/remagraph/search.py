@@ -71,10 +71,31 @@ def _trigram_char_len(s: str) -> int:
 def _build_fts5_match(sanitized: str) -> str:
     """將 sanitized query 包裝為 FTS5 MATCH 字串。
 
-    多詞時不做額外 AND 串接——FTS5 預設 MATCH 多詞即隱含 AND 語意，
-    交由 trigram tokenizer 自行分詞。
+    每個 token 都以雙引號包成 FTS5 phrase literal，使其被 FTS5 query
+    parser 視為純文字，不會被重新解讀為 AND/OR/NOT/NEAR、column-filter
+    （如 "col:term"）或其他語法。這比逐一列舉並移除「特殊字元」更完整、
+    更不脆弱——例如連字號（-）雖不在 _FTS5_SPECIAL_RE 涵蓋範圍內，卻是
+    FTS5 column-filter 排除語法（"-colname:term"）的觸發字元，未加引號時
+    會被誤解析為欲排除的欄位名稱，因欄位不存在而拋出
+    sqlite3.OperationalError（no such column），導致本應命中的查詢被
+    search_memories 的例外處理吞掉、回傳空結果。
+
+    包成雙引號後，phrase 內容仍會交由底層 tokenizer（trigram，支援 CJK）
+    正常斷詞，因此中文查詢、既有的 AND/OR/NOT/NEAR 關鍵字加引號行為，
+    以及多詞查詢的隱含 AND 語意皆維持不變；只是每個 token 各自成為一個
+    literal phrase，彼此之間仍以空白隱含 AND 串接。
+
+    若 sanitize_fts5_query() 已將保留字包成 "AND" 形式，此處會先去除
+    外層引號再重新包裝並跳脫內部引號，避免產生 ""AND"" 這種雙重引號。
     """
-    return sanitized
+    tokens = sanitized.split()
+    quoted: list[str] = []
+    for t in tokens:
+        if len(t) >= 2 and t[0] == '"' and t[-1] == '"':
+            t = t[1:-1]
+        escaped = t.replace('"', '""')
+        quoted.append(f'"{escaped}"')
+    return " ".join(quoted)
 
 
 def _row_to_result(row: sqlite3.Row, score: float | None = None) -> dict[str, Any]:

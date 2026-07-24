@@ -40,9 +40,16 @@ def _read_jsonl(path):
 
 @pytest.fixture
 def audit_file(tmp_path, monkeypatch):
-    """Route audit writes to a temp audit.jsonl and expose its path."""
+    """Route audit writes to a temp audit.jsonl and expose its path.
+
+    Accepts an optional state_dir positional arg (ignored) so this fixture
+    stays compatible with append_event's state_dir override parameter
+    (added for the audit/memory directory-consistency fix) -- every write
+    routed through this fixture lands in the same fixed temp file regardless
+    of whether a caller passes an explicit state_dir.
+    """
     path = tmp_path / "audit-current.jsonl"
-    monkeypatch.setattr("remagraph.audit._audit_path", lambda: path)
+    monkeypatch.setattr("remagraph.audit._audit_path", lambda state_dir=None: path)
     return path
 
 
