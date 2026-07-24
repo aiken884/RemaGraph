@@ -89,6 +89,41 @@ def get_db_path(state_dir: Path | None = None) -> Path:
     return resolved / DB_FILENAME
 
 
+def _resolve_default_state_dir() -> Path:
+    """解析『共用/預設』state 目錄目前實際生效的位置。
+
+    背景（外部 subprocess 隔離缺口）：DEFAULT_STATE_DIR 是模組載入當下就
+    算好的常數（Path.home() / ".local" / "state" / "remagraph"），過去唯一
+    能覆寫它的方式是 Python 層級 monkeypatch 這個模組屬性本身（見
+    tests/conftest.py 的 _isolate_default_state_dir autouse fixture）——這
+    只對「同一個 process 內」執行的程式碼有效。任何透過 subprocess 呼叫真正
+    安裝好的 `remagraph` CLI 的外部整合測試/工具，是完全不同的 OS process，
+    monkeypatch 完全碰不到它，會悄悄把寫入洩漏到這台機器真正的
+    ~/.local/state/remagraph/remagraph.db（PPLX 架構審查確認過的真實缺口）。
+
+    因此新增 REMAGRAPH_HOME 環境變數，作為 REMAGRAPH_STATE_DIR 之外、專門
+    給外部消費端使用的獨立覆寫機制：
+    - 有設定：套用與 REMAGRAPH_STATE_DIR 完全相同的安全驗證（
+      _ALLOWED_STATE_DIR_RE 字元白名單 + 禁止落在系統目錄下），驗證通過後
+      resolve() 回傳。
+    - 未設定：原樣回傳目前的 DEFAULT_STATE_DIR 模組屬性 —— 不論它是否已被
+      conftest.py monkeypatch 過。這保證兩個機制彼此獨立、可以同時並存：
+      conftest.py 的 monkeypatch 繼續完整掌控 RemaGraph 自己 pytest 套件的
+      隔離（走這個 else 分支），REMAGRAPH_HOME 則是外部消費端專屬、額外的
+      環境變數層級覆寫（走 if 分支），兩者互不干擾。
+    """
+    env_home = os.environ.get("REMAGRAPH_HOME")
+    if env_home:
+        if not _ALLOWED_STATE_DIR_RE.match(env_home):
+            raise ValueError(f"REMAGRAPH_HOME contains invalid characters: {env_home!r}")
+        resolved_home = Path(env_home).resolve()
+        forbidden_prefixes = ("/etc", "/usr", "/bin", "/sbin", "/dev", "/proc", "/sys")
+        if str(resolved_home).startswith(forbidden_prefixes):
+            raise ValueError(f"REMAGRAPH_HOME invalid: {resolved_home}")
+        return resolved_home
+    return DEFAULT_STATE_DIR
+
+
 def get_state_dir(state_dir: Path | None = None) -> Path:
     env_dir = os.environ.get("REMAGRAPH_STATE_DIR")
     if env_dir:
@@ -99,9 +134,18 @@ def get_state_dir(state_dir: Path | None = None) -> Path:
         if str(resolved).startswith(forbidden_prefixes):
             raise ValueError(f"REMAGRAPH_STATE_DIR invalid: {resolved}")
     elif state_dir is not None:
-        resolved = state_dir
+        # 與上面 REMAGRAPH_STATE_DIR 分支、下面 _resolve_default_state_dir()
+        # 一致地呼叫 .resolve()：is_using_default_state_dir() 會拿這個分支的
+        # 回傳值去跟 _resolve_default_state_dir()（一律回傳已 resolve 過的
+        # 路徑）比較是否相等。若這裡不 resolve，呼叫端傳入的『同一個真實目錄』
+        # 只要拼法不同（例如 macOS 上 /tmp vs /private/tmp、或帶了尚未展開的
+        # ".." 片段），就會被誤判為不同目錄而回傳錯誤的 False（對抗式審查
+        # 發現，見 tests/test_remagraph_home_env.py 的
+        # test_is_using_default_state_dir_true_when_explicit_dir_is_unresolved_
+        # spelling_of_remagraph_home）。
+        resolved = state_dir.resolve()
     else:
-        resolved = DEFAULT_STATE_DIR
+        resolved = _resolve_default_state_dir()
     resolved.mkdir(parents=True, exist_ok=True)
     resolved.chmod(0o700)
     return resolved
@@ -109,7 +153,7 @@ def get_state_dir(state_dir: Path | None = None) -> Path:
 
 def is_using_default_state_dir(state_dir: Path | None = None) -> bool:
     resolved = get_state_dir(state_dir)
-    return resolved == DEFAULT_STATE_DIR
+    return resolved == _resolve_default_state_dir()
 
 
 def load_project_metadata(state_dir: Path | None = None) -> dict[str, Any]:
@@ -381,11 +425,18 @@ def _utcnow_iso() -> str:
 def _connect_default_registry_db() -> sqlite3.Connection:
     """開啟『真正的』DEFAULT_STATE_DIR 的 remagraph.db 連線，供 registry 讀寫。
 
-    刻意直接使用 DEFAULT_STATE_DIR 模組常數，完全不經過
-    get_state_dir()/resolve_project_state_dir() 的環境變數導向解析 ——
+    刻意直接使用 _resolve_default_state_dir() 的解析結果，完全不經過
+    get_state_dir()/resolve_project_state_dir() 的一般環境變數導向解析 ——
     REMAGRAPH_STATE_DIR 一旦設定，會整個蓋掉呼叫端想要的目標目錄（見
     get_state_dir() 的優先序），而 registry 的存在理由正是「不論目前呼叫
     行程的 project 情境是什麼，都能有同一個、唯一的共用落地位置」。
+
+    _resolve_default_state_dir() 本身只認 REMAGRAPH_HOME 這個獨立於
+    REMAGRAPH_STATE_DIR 之外的專屬環境變數（未設定時原樣回傳 DEFAULT_
+    STATE_DIR 模組常數，見該函式 docstring）——因此外部消費端（例如透過
+    subprocess 呼叫真正安裝好的 `remagraph` CLI 的整合測試）可以用
+    REMAGRAPH_HOME 重新導向這個共用落地位置，而不必依賴只在同一個 process
+    內有效的 Python 層級 monkeypatch。
 
     僅確保 project_registry 與 project_edges（PPLX 架構改善計畫 item 5，見
     下方說明）兩張表存在（皆為 CREATE TABLE IF NOT EXISTS，冪等），刻意不
@@ -393,9 +444,10 @@ def _connect_default_registry_db() -> sqlite3.Connection:
     記憶 schema 的初始化路徑，這兩張表與其無關，也不需要參與 memories/_meta
     的 migration chain（見上方設計決策說明）。
     """
-    DEFAULT_STATE_DIR.mkdir(parents=True, exist_ok=True)
-    DEFAULT_STATE_DIR.chmod(0o700)
-    db_path = DEFAULT_STATE_DIR / DB_FILENAME
+    default_state_dir = _resolve_default_state_dir()
+    default_state_dir.mkdir(parents=True, exist_ok=True)
+    default_state_dir.chmod(0o700)
+    db_path = default_state_dir / DB_FILENAME
     conn = sqlite3.connect(
         str(db_path),
         isolation_level=None,
