@@ -36,17 +36,34 @@ def _insert_memory(
     summary: str,
     status: str = "active",
     tags: list[str] | None = None,
+    learnings: list[str] | None = None,
+    handoff_note: str = "",
     timestamp: str | None = None,
     project_id: str = "default",
 ) -> None:
     """插入一筆記憶記錄，自動觸發 FTS5 同步。"""
     tags_json = json.dumps(tags or [], ensure_ascii=False)
+    learnings_json = json.dumps(learnings or [], ensure_ascii=False)
     ts = timestamp or _now_iso()
     conn.execute(
         "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, summary, "
         "learnings, handoff_note, tags, status, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, '[]', '', ?, ?, ?, ?)",
-        (id, project_id, kind, task_id, agent_id, ts, summary, tags_json, status, ts, ts),
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            id,
+            project_id,
+            kind,
+            task_id,
+            agent_id,
+            ts,
+            summary,
+            learnings_json,
+            handoff_note,
+            tags_json,
+            status,
+            ts,
+            ts,
+        ),
     )
 
 
@@ -550,6 +567,103 @@ class TestSearchMemories:
         assert "timestamp" in r
         assert "score" in r
 
+    # ================================================================
+    # Regression: handoff_note / learnings / tags 遺漏 (task #20)
+    # ================================================================
+
+    def test_result_includes_handoff_note(self, conn):
+        """Regression: 搜尋結果須包含 handoff_note 真實內容，不得為 None 或缺漏。
+
+        修復前：_row_to_result 從未複製 handoff_note 欄位，即使資料庫中
+        該筆記錄的 handoff_note 有實際內容，回傳的 dict 中也完全沒有這個
+        key（而非只是空字串），導致呼叫端讀不到交接備註。
+        """
+        distinctive_note = "交接備註：連線池上限已調整為 50，勿再調高，否則會撞到雲端 RDS 連線上限"
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="hello world handoff",
+            handoff_note=distinctive_note,
+        )
+        req = SearchRequest(query="hello world handoff", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["handoff_note"] == distinctive_note
+
+    def test_result_includes_learnings_and_tags_as_decoded_lists(self, conn):
+        """Regression: learnings/tags 存為 JSON 字串，回傳時須 json.loads 還原為 list。"""
+        distinctive_learnings = ["連線池上限設 50 會撞到 RDS 上限", "重試機制需搭配指數退避"]
+        distinctive_tags = ["db", "緊急", "connection-pool"]
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="hello world learnings test",
+            learnings=distinctive_learnings,
+            tags=distinctive_tags,
+        )
+        req = SearchRequest(query="hello world learnings", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        r = resp.results[0]
+        assert isinstance(r["learnings"], list)
+        assert r["learnings"] == distinctive_learnings
+        assert isinstance(r["tags"], list)
+        assert r["tags"] == distinctive_tags
+
+    def test_result_backward_compatible_fields_unchanged(self, conn):
+        """Regression: 新增欄位須為 additive，既有 8 個欄位須維持原值不變。"""
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="hello world compat",
+            agent_id="test-agent",
+            task_id="task-x",
+            project_id="default",
+        )
+        req = SearchRequest(query="hello world compat", top_k=10)
+        resp = search_memories(conn, req)
+        r = resp.results[0]
+        assert r["id"] == "mem-1"
+        assert r["project_id"] == "default"
+        assert r["summary"] == "hello world compat"
+        assert r["agent_id"] == "test-agent"
+        assert r["kind"] == "task_handoff"
+        assert r["task_id"] == "task-x"
+        assert "timestamp" in r
+        assert isinstance(r["score"], (int, float))
+
+    def test_result_includes_status_field(self, conn):
+        """Regression: status 欄位也應被回傳（先前完全未複製）。"""
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="hello world status field",
+            status="active",
+        )
+        req = SearchRequest(query="hello world status", top_k=10)
+        resp = search_memories(conn, req)
+        assert resp.results[0]["status"] == "active"
+
+    def test_list_by_filters_path_also_includes_new_fields(self, conn):
+        """無全文查詢、走 _list_by_filters 過濾路徑時，新欄位同樣須存在。"""
+        distinctive_note = "list-by-filters 路徑的交接備註"
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="task_handoff",
+            summary="無關查詢字串內容",
+            handoff_note=distinctive_note,
+            task_id="task-filters",
+        )
+        req = SearchRequest(query="", task_id="task-filters", top_k=10)
+        resp = search_memories(conn, req)
+        assert len(resp.results) == 1
+        assert resp.results[0]["handoff_note"] == distinctive_note
+
 
 # ===================================================================
 # get_status
@@ -715,5 +829,58 @@ class TestGetStatus:
         assert r["agent_id"] == "agent-x"
         assert r["kind"] == "status_update"
         assert r["summary"] == "完整欄位測試"
+        assert r["status"] == "active"
+        assert "timestamp" in r
+
+    # ================================================================
+    # Regression: handoff_note / learnings / tags 遺漏 (task #20)
+    # ================================================================
+
+    def test_status_result_includes_handoff_note_learnings_tags(self, conn):
+        """Regression: get_status 內建 dict 從未複製 handoff_note/learnings/tags，
+        與 search_memories 的 _row_to_result 有相同的欄位遺漏問題。
+        """
+        distinctive_note = "status 交接備註：部署已卡在 canary 階段，勿自動 rollback"
+        distinctive_learnings = ["canary 階段需人工確認才能 promote"]
+        distinctive_tags = ["deploy", "canary"]
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="status_update",
+            task_id="task-a",
+            summary="canary 部署中",
+            status="active",
+            handoff_note=distinctive_note,
+            learnings=distinctive_learnings,
+            tags=distinctive_tags,
+        )
+        resp = get_status(conn, StatusRequest(limit=10))
+        assert len(resp.latest) == 1
+        r = resp.latest[0]
+        assert r["handoff_note"] == distinctive_note
+        assert isinstance(r["learnings"], list)
+        assert r["learnings"] == distinctive_learnings
+        assert isinstance(r["tags"], list)
+        assert r["tags"] == distinctive_tags
+
+    def test_status_result_backward_compatible_fields_unchanged(self, conn):
+        """Regression: get_status 新增欄位須為 additive，既有欄位維持原值不變。"""
+        _insert_memory(
+            conn,
+            id="mem-1",
+            kind="status_update",
+            task_id="task-a",
+            agent_id="agent-x",
+            summary="既有欄位相容性測試",
+            status="active",
+        )
+        resp = get_status(conn, StatusRequest(limit=10))
+        r = resp.latest[0]
+        assert r["id"] == "mem-1"
+        assert r["project_id"] == "default"
+        assert r["task_id"] == "task-a"
+        assert r["agent_id"] == "agent-x"
+        assert r["kind"] == "status_update"
+        assert r["summary"] == "既有欄位相容性測試"
         assert r["status"] == "active"
         assert "timestamp" in r
