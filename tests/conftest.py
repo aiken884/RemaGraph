@@ -47,7 +47,18 @@ def _isolate_default_state_dir(tmp_path, monkeypatch):
     `db_mod.DEFAULT_STATE_DIR` module-attribute references are used, all of
     which resolve through the module's own namespace at call time and are
     therefore all covered by patching the attribute here.
+
+    Also clears REMAGRAPH_HOME (see db._resolve_default_state_dir()): that
+    function checks this env var FIRST, unconditionally, before ever falling
+    back to the DEFAULT_STATE_DIR attribute patched above. An ambient
+    REMAGRAPH_HOME set in a developer's shell (plausible -- this env var
+    exists specifically to support external subprocess testing) would
+    otherwise silently win over the monkeypatch above for this test and
+    every other test in the suite, defeating this fixture's entire purpose.
+    Mirrors the same defensive delenv pattern several test files already use
+    for REMAGRAPH_STATE_DIR/REMAGRAPH_PROJECT.
     """
     fake_default = tmp_path / "isolated-default-state-dir"
     monkeypatch.setattr(db_mod, "DEFAULT_STATE_DIR", fake_default)
+    monkeypatch.delenv("REMAGRAPH_HOME", raising=False)
     return fake_default

@@ -39,9 +39,14 @@ this test itself, even during a regression.
 
 from __future__ import annotations
 
+import os
+import shutil
 import sqlite3
+import tempfile
 import uuid
 from pathlib import Path
+
+import pytest
 
 from remagraph import db as db_mod
 from remagraph import maintenance as maint_mod
@@ -140,3 +145,83 @@ def test_resolve_project_state_dir_never_touches_real_default_state_dir(monkeypa
                 f"{real_db_path} -- the autouse DEFAULT_STATE_DIR isolation "
                 "fixture failed to take effect"
             )
+
+
+# ---------------------------------------------------------------------------
+# Regression: an AMBIENT REMAGRAPH_HOME env var (e.g. exported in the
+# developer's shell -- plausible, since REMAGRAPH_HOME exists specifically to
+# support external subprocess testing) must not defeat the isolation above.
+#
+# Root cause: db._resolve_default_state_dir() checks
+# os.environ.get("REMAGRAPH_HOME") FIRST, unconditionally, before ever
+# falling back to the (monkeypatched) DEFAULT_STATE_DIR module attribute --
+# but the autouse `_isolate_default_state_dir` fixture in conftest.py only
+# does monkeypatch.setattr(db_mod, "DEFAULT_STATE_DIR", fake_default) and
+# (before the fix) never clears REMAGRAPH_HOME. So an ambient REMAGRAPH_HOME
+# silently wins over the monkeypatched attribute for the ENTIRE suite,
+# defeating isolation exactly like the pre-fix bug this file otherwise
+# guards against.
+#
+# Note this can't simply be reproduced by setting REMAGRAPH_HOME from inside
+# a test body: by the time the test body runs, the function-scoped autouse
+# fixture has ALREADY executed. To genuinely simulate "the shell already had
+# it exported before pytest started", we use a MODULE-scoped autouse fixture
+# below -- pytest instantiates higher-scoped fixtures before lower-scoped
+# ones within the same test request, so this sets REMAGRAPH_HOME before the
+# function-scoped `_isolate_default_state_dir` fixture ever runs for any test
+# in this module.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ambient_remagraph_home_env():
+    """Simulate an ambient REMAGRAPH_HOME already exported in the shell,
+    BEFORE the per-test (function-scoped) autouse isolation fixture in
+    conftest.py runs. Module scope + autouse guarantees this fixture sets up
+    first for every test in this module (pytest instantiates higher-scoped
+    fixtures before lower-scoped ones), then tears down only after every test
+    in the module has finished -- restoring whatever REMAGRAPH_HOME was (or
+    was not) set to beforehand, and removing the decoy directory.
+    """
+    decoy_dir = Path(tempfile.mkdtemp(prefix="remagraph-ambient-decoy-"))
+    original = os.environ.get("REMAGRAPH_HOME")
+    os.environ["REMAGRAPH_HOME"] = str(decoy_dir)
+    try:
+        yield decoy_dir
+    finally:
+        if original is None:
+            os.environ.pop("REMAGRAPH_HOME", None)
+        else:
+            os.environ["REMAGRAPH_HOME"] = original
+        shutil.rmtree(decoy_dir, ignore_errors=True)
+
+
+def test_ambient_remagraph_home_does_not_defeat_autouse_isolation(
+    tmp_path, _ambient_remagraph_home_env
+):
+    """The exact scenario the independent reviewer reproduced: a developer
+    with REMAGRAPH_HOME set in their shell runs pytest in that same shell.
+    The autouse `_isolate_default_state_dir` fixture's monkeypatch of
+    DEFAULT_STATE_DIR must still be what wins for this test's registry
+    writes -- the ambient REMAGRAPH_HOME must never take precedence.
+    """
+    decoy_dir = _ambient_remagraph_home_env
+
+    db_mod.register_known_project("proj-ambient-remagraph-home-check", tmp_path / "proj-state")
+
+    isolated_registry_db = db_mod.DEFAULT_STATE_DIR / db_mod.DB_FILENAME
+    decoy_registry_db = decoy_dir / db_mod.DB_FILENAME
+
+    assert isolated_registry_db.exists(), (
+        "expected register_known_project()'s best-effort write to land in "
+        "the autouse-isolated DEFAULT_STATE_DIR, even with an ambient "
+        "REMAGRAPH_HOME env var set -- the autouse fixture must clear "
+        "REMAGRAPH_HOME so it cannot silently override the monkeypatched "
+        "DEFAULT_STATE_DIR for the rest of this test"
+    )
+    assert not decoy_registry_db.exists(), (
+        f"LEAK: the registry write landed in the ambient REMAGRAPH_HOME "
+        f"decoy dir {decoy_dir} instead of the isolated DEFAULT_STATE_DIR -- "
+        "an ambient REMAGRAPH_HOME env var defeated the autouse isolation "
+        "fixture for this test"
+    )
