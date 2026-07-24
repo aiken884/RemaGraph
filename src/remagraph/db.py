@@ -93,6 +93,7 @@ def connect(
     project_id: str | None = None,
     *,
     skip_maintenance: bool = False,
+    skip_safety_check: bool = False,
 ) -> sqlite3.Connection:
     """建立 SQLite 連線並初始化。
 
@@ -111,6 +112,12 @@ def connect(
             maintenance.py 內部開連線時重新觸發維護，造成無窮遞迴。一般
             外部呼叫者（CLI、MCP server）不得傳入，維持預設 False 以保留
             既有行為。
+        skip_safety_check: 僅供 maintenance._record_violation 自身開啟連線
+            時使用 —— 略過本函式開頭（明確 project_id 分支與
+            REMAGRAPH_PROJECT 環境變數相容分支）的 safety_validate_project
+            呼叫，避免「記錄違規已發生」這個內部自我記錄路徑重新觸發同一個
+            目前正在失敗的安全驗證，造成無窮遞迴。一般外部呼叫者（CLI、MCP
+            server）不得傳入，維持預設 False 以保留既有的安全閥門強制行為。
 
     Raises:
         OSError: 目錄無法建立（權限不足）
@@ -121,16 +128,18 @@ def connect(
     from remagraph.maintenance import light_maintenance_on_connect, safety_validate_project
 
     if project_id:
-        # 強制走權威解析 + 安全閥
-        resolved = safety_validate_project(project_id)
-        state_dir = resolved
+        # 強制走權威解析 + 安全閥（除非呼叫者明確要求略過，見上方 skip_safety_check 說明）
+        if not skip_safety_check:
+            resolved = safety_validate_project(project_id)
+            state_dir = resolved
     else:
         # 相容舊呼叫，但記錄警告（未來可移除）
         if os.environ.get("REMAGRAPH_PROJECT", "default") != "default":
             # 若 env 有 project 但未傳，嘗試驗證
             project_id = os.environ.get("REMAGRAPH_PROJECT")
-            resolved = safety_validate_project(project_id)
-            state_dir = resolved
+            if not skip_safety_check:
+                resolved = safety_validate_project(project_id)
+                state_dir = resolved
 
     db_path = get_db_path(state_dir=state_dir)
 

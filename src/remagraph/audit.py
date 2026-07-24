@@ -105,22 +105,35 @@ def append_event(action: str, detail: dict[str, Any]) -> None:
     Args:
         action: 事件名稱，例如 "safety_violation"、"maintenance_completed"、
             "maintenance_light_failed"。
-        detail: 事件詳細內容（純資料，不含 traceback）。
+        detail: 事件詳細內容（純資料，不含 traceback）。detail 內任何字串值
+            都會先套用 _sanitize_detail 移除 traceback，實際在程式碼中落實
+            （而非僅靠呼叫端自律）與 append_audit 相同的不洩漏 traceback
+            保證。
 
-    此函式不應拋出例外 —— 寫入失敗僅靜默忽略。
+    此函式保證絕不拋出例外，也絕不寫入半殘/損毀的行 —— record 會先在記憶體
+    中完整序列化成字串（json.dumps），只有序列化成功才會開檔寫入；若
+    detail 內含不可 JSON 序列化的值（例如誤傳了例外物件），序列化會在開檔
+    前就失敗，事件會被靜默捨棄，不會留下不完整的 JSON 片段。
     """
+    sanitized_detail: dict[str, Any] = {
+        key: (_sanitize_detail(value) if isinstance(value, str) else value)
+        for key, value in detail.items()
+    }
     record: dict[str, Any] = {
         "action": action,
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        **detail,
+        **sanitized_detail,
     }
 
     try:
+        # 先在記憶體中完整序列化；失敗（TypeError/ValueError）不會碰到檔案，
+        # 因此絕不會留下半殘的行。
+        serialized = json.dumps(record, ensure_ascii=False)
         path = _audit_path()
         _ensure_dir(path)
         with open(path, "a", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False)
+            f.write(serialized)
             f.write("\n")
         os.chmod(path, 0o600)
-    except OSError:
-        pass  # 審計寫入失敗不應中斷主流程
+    except (OSError, TypeError, ValueError):
+        pass  # 審計寫入失敗（含序列化失敗）不應中斷主流程

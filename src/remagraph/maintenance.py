@@ -83,7 +83,18 @@ def safety_validate_project(project_id: str, *, require_env_match: bool = True) 
 
 
 def _record_violation(project_id: str, reason: str) -> None:
-    """記錄違規到 audit 與 memory（discovered_constraint）。"""
+    """記錄違規到 audit 與 memory（discovered_constraint）。
+
+    注意：這是「記錄違規已發生」的內部自我記錄路徑 —— 其存在的唯一目的
+    就是記錄 safety_validate_project 剛剛失敗這件事，因此絕不能重新觸發
+    同一個目前正在失敗的安全驗證，否則會形成
+    safety_validate_project -> _record_violation -> process_store ->
+    safety_validate_project 的無窮遞迴（同一個違規原因不會因為重新驗證而
+    改變）。下方對 _raw_connect 與 process_store 的呼叫因此都明確傳入
+    skip_safety_check=True —— 這個略過旗標僅限本函式使用，任何其他呼叫者
+    （CLI、MCP server 或帶明確 project_id 的一般呼叫）都不得傳入，安全閥門
+    對它們維持完整強制。
+    """
     try:
         append_event("safety_violation", {"project_id": project_id, "reason": reason})
     except Exception:
@@ -102,8 +113,12 @@ def _record_violation(project_id: str, reason: str) -> None:
             project_id=project_id,
             tags=["safety", "violation", reason],
         )
-        conn = _raw_connect(resolve_project_state_dir(project_id), skip_maintenance=True)
-        process_store(req, conn)
+        conn = _raw_connect(
+            resolve_project_state_dir(project_id),
+            skip_maintenance=True,
+            skip_safety_check=True,
+        )
+        process_store(req, conn, skip_safety_check=True)
         conn.close()
     except Exception:
         pass  # 避免維護本身失敗

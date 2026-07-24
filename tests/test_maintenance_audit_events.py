@@ -82,6 +82,62 @@ def test_append_event_never_raises_on_write_failure(monkeypatch):
     append_event("maintenance_completed", {"project_id": "x"})
 
 
+def test_append_event_non_serializable_detail_does_not_raise(audit_file):
+    """Round 2 hardening: before the fix, append_event wrote with
+    json.dump(record, f) directly into the open file handle. json.dump
+    writes incrementally *before* raising on a non-serializable value, so a
+    broken fragment was left appended to the audit file, and only OSError
+    was caught -- the TypeError escaped uncaught.
+    """
+
+    class _Unserializable:
+        """Stand-in for e.g. an exception object passed by mistake."""
+
+    # Must not raise, even though `detail` contains a value json can't encode.
+    append_event("safety_violation", {"project_id": "p1", "bad_value": _Unserializable()})
+
+
+def test_append_event_non_serializable_detail_leaves_no_corrupted_line(audit_file):
+    class _Unserializable:
+        pass
+
+    append_event("safety_violation", {"project_id": "p1", "bad_value": _Unserializable()})
+    # A subsequent, valid event must still append cleanly.
+    append_event("safety_violation", {"project_id": "p2", "reason": "ok"})
+
+    assert audit_file.exists()
+    with open(audit_file, "r", encoding="utf-8") as f:
+        lines = [line for line in f.read().split("\n") if line]
+    # Every remaining line must be a single, complete, valid JSON object --
+    # no truncated/partial fragment from the failed serialization.
+    for line in lines:
+        json.loads(line)  # raises if any line is corrupted/partial
+    # Only the successful event should have been written.
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["project_id"] == "p2"
+
+
+def test_append_event_sanitizes_traceback_in_string_detail_values(audit_file):
+    """append_event must enforce the no-traceback-leakage guarantee in code
+    (like append_audit's _sanitize_detail), not merely rely on caller
+    discipline, per the existing docstring convention.
+    """
+    traceback_like = (
+        "Traceback (most recent call last):\n"
+        '  File "maintenance.py", line 42, in run_maintenance\n'
+        "    conn.execute(...)\n"
+        "sqlite3.OperationalError: database is locked"
+    )
+    append_event("maintenance_light_failed", {"project_id": "p1", "error": traceback_like})
+
+    records = _read_jsonl(audit_file)
+    assert len(records) == 1
+    assert "Traceback" not in records[0]["error"]
+    assert "File " not in records[0]["error"]
+    assert "database is locked" in records[0]["error"]
+
+
 # ---------------------------------------------------------------------------
 # The three real call sites must no longer crash / silently drop the event
 # ---------------------------------------------------------------------------

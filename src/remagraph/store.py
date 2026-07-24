@@ -205,6 +205,8 @@ def _row_to_memory(row: sqlite3.Row) -> Memory:
 def process_store(
     request: StoreRequest,
     conn: sqlite3.Connection,
+    *,
+    skip_safety_check: bool = False,
 ) -> StoreResponse:
     """執行完整的 remagraph_store 流程：
 
@@ -215,11 +217,20 @@ def process_store(
     5. INSERT 寫入 + transaction commit
 
     回傳 StoreResponse。
+
+    Args:
+        skip_safety_check: 僅供 maintenance._record_violation 自身記錄違規時
+            使用 —— 略過本函式開頭的 safety_validate_project 呼叫，避免
+            「記錄違規」這個內部自我記錄路徑重新觸發同一個目前正在失敗的
+            安全驗證，造成 safety_validate_project -> _record_violation ->
+            process_store -> safety_validate_project 的無窮遞迴。一般外部
+            呼叫者（CLI、MCP server、或任何帶明確 project_id 的呼叫）不得
+            傳入，維持預設 False 以保留既有的安全閥門強制行為。
     """
     # 安全閥門（PPLX 共識版）：強制 project + state_dir 對映
     from remagraph.maintenance import safety_validate_project
 
-    if request.project_id:
+    if request.project_id and not skip_safety_check:
         safety_validate_project(request.project_id)  # 違規直接 raise SafetyValveError
 
     # 規則 #1, #2, #3, #5: 便宜仲裁
