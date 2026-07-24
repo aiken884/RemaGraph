@@ -7,6 +7,7 @@ Usage:
     remagraph search [--query STR] [--task-id STR] [options]
     remagraph status [options]
     remagraph auto --task-id STR --agent-id STR [--] CMD [ARGS...]
+    remagraph install-hooks [--global] [--force]
 """
 
 from __future__ import annotations
@@ -539,6 +540,38 @@ def build_parser() -> argparse.ArgumentParser:
     p_migrate.add_argument("--dry-run", action="store_true")
     p_migrate.add_argument("--force", action="store_true", help="忽略部分安全檢查")
 
+    # install-hooks
+    p_install_hooks = sub.add_parser(
+        "install-hooks",
+        help="安裝 git post-commit hook，讓 commit 自動把摘要寫回 RemaGraph",
+        description=(
+            "安裝 git post-commit hook，讓 commit 自動把摘要寫回 RemaGraph，"
+            "不需要手動從其他專案複製檔案。預設安裝到目前 repo（自動辨識"
+            "worktree、core.hooksPath），--global 則額外設定 git 原生的 "
+            "init.templateDir，讓『之後』新建立的 repo 自動帶有此 hook —— "
+            "但有兩個限制：(1) 只影響本指令執行後新建立的 repo，既有 repo "
+            "仍須各自執行一次非 --global 的 install-hooks；(2) 不建議在 CI "
+            "環境中使用 --global（CI runner 的 $HOME 可能是暫時性或跨 "
+            "job/repo 共用，尤其自架 runner，有安全疑慮 —— CI pipeline 應"
+            "改為每個 repo、每個 job 各自明確執行一次非 --global 的 "
+            "install-hooks）。"
+        ),
+    )
+    p_install_hooks.add_argument(
+        "--global",
+        dest="global_install",
+        action="store_true",
+        help=(
+            "額外設定 git 原生 init.templateDir，讓之後新建立的 repo 自動帶有此 "
+            "hook（見上方 description 的兩個限制）"
+        ),
+    )
+    p_install_hooks.add_argument(
+        "--force",
+        action="store_true",
+        help="覆蓋既有非 remagraph 管理的 hook 檔案或符號連結（會先備份再覆蓋）",
+    )
+
     return parser
 
 
@@ -588,6 +621,8 @@ def main(argv: list[str] | None = None) -> None:
         cmd_migrate_project(args)
     elif args.command == "link":
         cmd_link(args)
+    elif args.command == "install-hooks":
+        cmd_install_hooks(args)
 
 
 # ---------------------------------------------------------------------------
@@ -731,6 +766,35 @@ def cmd_link(args: argparse.Namespace) -> None:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
     print(f"已宣告關聯：{args.from_project} --{args.relation}--> {args.to_project}")
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: install-hooks
+# ---------------------------------------------------------------------------
+
+
+def cmd_install_hooks(args: argparse.Namespace) -> None:
+    """安裝／升級 git post-commit hook 的薄 wrapper。
+
+    實際邏輯（衝突偵測、symlink 處理、core.hooksPath/init.templateDir 解析）
+    全部放在 remagraph.hooks_installer，這裡只負責：呼叫對應函式、把
+    HooksInstallerError 轉成使用者看得懂的乾淨錯誤訊息（絕不讓原始
+    subprocess stderr 或 Python traceback 外洩）、印出結果。
+    """
+    from remagraph.hooks_installer import HooksInstallerError, install_global, install_local
+
+    try:
+        if args.global_install:
+            outcome = install_global(force=args.force)
+        else:
+            outcome = install_local(cwd=Path.cwd(), force=args.force)
+    except HooksInstallerError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    for message in outcome.messages:
+        print(message)
+    print(f"post-commit hook 安裝路徑：{outcome.path}")
 
 
 if __name__ == "__main__":

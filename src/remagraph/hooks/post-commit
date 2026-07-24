@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# remagraph-managed-hook v1
+# remagraph-fields-schema-version: 1
+# ── RemaGraph post-commit 記憶寫回 hook ─────────────────────────────────────
+# 由 `remagraph install-hooks` 安裝／升級，安裝到本機任一 git repo 的
+# post-commit hook。目的：commit 完成後自動把摘要寫回 RemaGraph，不依賴任何
+# agent 自己記得手動呼叫 `remagraph store`，而是把它嵌進 commit 流程本身，
+# 變成 commit 這個動作自帶的副作用。
+#
+# agent-agnostic：純 shell + git 原生機制，任何底層 agent（Claude Code、
+# OpenCode、Grok、Codex、AGY……）只要執行了 `git commit`，就會觸發，不需要
+# agent 本身認識 RemaGraph。
+#
+# 安全原則（不可違反）：
+#   1. 沒裝 remagraph → 靜默略過，僅印一行提示到 stderr，commit 正常完成。
+#   2. 任何內部錯誤都要被捕捉，不得讓使用者看到 stack trace，也不得讓
+#      commit 失敗（post-commit 本來就無法阻擋 commit，但仍要求乾淨降級）。
+#
+# 相容：bash 3.2+（macOS 內建 bash）、無外部依賴（純 git + coreutils）
+# 安裝／重新安裝／升級此檔案：`remagraph install-hooks [--global] [--force]`
+# （不要手動編輯本檔案 —— 下次 install-hooks 執行時會被覆蓋）
+# ──────────────────────────────────────────────────────────────────────────
+
+set -uo pipefail
+
+# ── 小工具：slugify（符合 RemaGraph project_id/task_id/agent_id 格式）────
+# RemaGraph 規則：^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$；agent_id 另外要求
+# 全小寫、長度 3–64（^[a-z0-9_-]+$）。這裡一律轉小寫、輸出同時滿足兩者。
+_slugify() {
+    local input="$1" fallback="$2" s
+    s=$(printf '%s' "$input" | tr '[:upper:]' '[:lower:]' | LC_ALL=C sed -E 's/[^a-z0-9_-]+/-/g; s/-+/-/g; s/^-+//; s/-+$//')
+    if [[ -z "$s" ]]; then
+        s="$fallback"
+    fi
+    while [[ ${#s} -lt 3 ]]; do
+        s="${s}0"
+    done
+    if [[ ! "$s" =~ ^[a-z0-9] ]]; then
+        s="a${s}"
+    fi
+    printf '%.64s' "$s"
+}
+
+# ── 小工具：JSON 字串 escape（不含前後引號）──────────────────────────────
+_json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\r'/}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
+# ── 小工具：把換行分隔的清單包成 JSON 字串陣列 ───────────────────────────
+_to_json_array() {
+    local line esc json="[" first=1
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        esc=$(_json_escape "$line")
+        if [[ $first -eq 1 ]]; then
+            json="${json}\"${esc}\""
+            first=0
+        else
+            json="${json},\"${esc}\""
+        fi
+    done
+    json="${json}]"
+    printf '%s' "$json"
+}
+
+main() {
+    if ! command -v remagraph >/dev/null 2>&1; then
+        echo "post-commit: 未安裝 remagraph，略過記憶寫回（不影響本次 commit）" >&2
+        return 0
+    fi
+
+    local commit_hash short_hash subject branch
+    commit_hash=$(git rev-parse HEAD 2>/dev/null) || { echo "post-commit: 無法取得 commit hash，略過" >&2; return 0; }
+    short_hash=$(git rev-parse --short HEAD 2>/dev/null) || short_hash="${commit_hash:0:7}"
+    subject=$(git log -1 --format=%s HEAD 2>/dev/null)
+    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || branch="HEAD"
+
+    # ── project_id：從「主 repo」目錄名推導，worktree 安全 ──────────────
+    # git worktree 底下 `git rev-parse --show-toplevel` 回傳的是 worktree
+    # 自己的目錄，不是主 repo 名稱。用 --git-common-dir（所有 worktree 共用
+    # 的 .git）往上一層才能拿到真正的主 repo 目錄名稱。
+    local common_dir project_root project_id
+    common_dir=$(git rev-parse --git-common-dir 2>/dev/null) || { echo "post-commit: 無法取得 git-common-dir，略過" >&2; return 0; }
+    case "$common_dir" in
+        /*) : ;;
+        *) common_dir="$(pwd)/$common_dir" ;;
+    esac
+    common_dir=$(cd "$common_dir" 2>/dev/null && pwd) || { echo "post-commit: 無法解析 git-common-dir，略過" >&2; return 0; }
+    project_root=$(dirname "$common_dir")
+    project_id=$(_slugify "$(basename "$project_root")" "project")
+
+    local task_id
+    task_id=$(_slugify "${project_id}-commit-${short_hash}" "commit-task")
+
+    local agent_id_raw agent_id
+    agent_id_raw="${AGENT_ID:-$(git config user.name 2>/dev/null)}"
+    agent_id=$(_slugify "$agent_id_raw" "git-committer")
+
+    # ── summary：保證 ASCII 基底 > 30 字元，滿足 RemaGraph 仲裁規則 #1 ───
+    # （remagraph store 本身不會像 `remagraph auto` 一樣自動補長度）
+    local summary
+    summary="Commit ${short_hash} (${commit_hash}) on branch ${branch} in ${project_id}: ${subject}"
+
+    # ── learnings：至少一筆非空內容（仲裁規則 #2 對所有 kind 都強制）───
+    # git diff-tree 對兩種常見、完全正常的 commit 預設印不出任何東西：
+    #   1. root commit（沒有 parent）──加 --root 讓它視為對空樹的 diff。
+    #   2. merge commit（多個 parent）──預設不帶任何 diff 表示法旗標時，
+    #      diff-tree 對多 parent 的 commit 什麼都不印。這裡選擇 -m（對每個
+    #      parent 分別產生 diff，逐一列出），而非 --cc/-c（combined diff：
+    #      只列出「和所有 parent 都不同」的檔案）——因為一般、乾淨、無衝突
+    #      的 --no-ff merge，其樹狀態必然完全等於其中一個 parent（沒有實際
+    #      合併衝突要解決），這種情況下 --cc/-c 會判定「沒有值得顯示的差異」
+    #      而一樣印不出東西，等於沒解決問題；-m 則保證只要 merge 相對任一
+    #      parent 有變更，就會被列出，符合本 hook「只要有真正的變更檔案資訊
+    #      就不留白 learnings」的既有原則。-m 對單一 parent 的一般 commit
+    #      沒有作用（維持原行為），對 merge commit 若同一檔案相對兩個
+    #      parent 都不同，可能重複列出，故用 sort -u 去重。
+    local changed_files learnings_json
+    changed_files=$(git diff-tree --no-commit-id --name-only -r --root -m HEAD 2>/dev/null | LC_ALL=C sort -u)
+    if [[ -n "$changed_files" ]]; then
+        learnings_json=$(printf '%s\n' "$changed_files" | _to_json_array)
+    else
+        learnings_json='[]'
+    fi
+    if [[ "$learnings_json" == "[]" ]]; then
+        learnings_json='["auto-captured via git post-commit hook (no file diff)"]'
+    fi
+
+    local handoff_note
+    handoff_note=$(git log -1 --format=%B HEAD 2>/dev/null)
+
+    local store_output store_status
+    store_output=$(remagraph store \
+        --project "$project_id" \
+        --task-id "$task_id" \
+        --agent-id "$agent_id" \
+        --kind status_update \
+        --summary "$summary" \
+        --learnings "$learnings_json" \
+        --handoff-note "$handoff_note" \
+        2>&1)
+    store_status=$?
+
+    if [[ $store_status -ne 0 ]]; then
+        echo "post-commit: remagraph store 失敗（exit ${store_status}），已略過，不影響本次 commit" >&2
+        echo "post-commit: 詳細訊息：${store_output}" >&2
+    fi
+
+    return 0
+}
+
+main
+exit 0
