@@ -207,10 +207,34 @@ def connect(
     max_pages = (MAX_DB_SIZE_MB * 1024 * 1024) // page_size
     conn.execute(f"PRAGMA max_page_count={max_pages}")
 
-    # 執行 schema 初始化
-    _init_schema(conn)
-    # 執行 migration chain
+    # 執行 migration chain（必須先於 _init_schema！）
+    #
+    # 背景（真正的 v1 舊資料庫崩潰 bug）：_init_schema() 的 executescript
+    # 內含 `CREATE TABLE IF NOT EXISTS memories (...)`（對已存在的舊表是
+    # no-op），但同一個 script 稍後又有
+    # `CREATE INDEX IF NOT EXISTS idx_memories_project_id ON memories(project_id)`。
+    # 若對一個貨真價實的 v1 資料庫（project_id 欄位是後來才由
+    # _migrate_v2_to_v3 的 ALTER TABLE 加上）先呼叫 _init_schema()，這條
+    # CREATE INDEX 會直接以 sqlite3.OperationalError: no such column:
+    # project_id 崩潰 —— migration chain 永遠沒有機會把該欄位補上。
+    #
+    # 因此必須先讓 _run_migrations() 把舊資料庫的 memories 表結構（欄位、
+    # CHECK 約束）逐步升到目前的 SCHEMA_VERSION，_init_schema() 之後才接手
+    # 補上 FTS5 虛擬表、triggers、indexes、memory_labels 等 migration chain
+    # 本身不負責的 DDL 物件（全部使用 IF NOT EXISTS，對已是目前版本的資料庫
+    # 或全新資料庫皆為安全的冪等操作）。
+    #
+    # 對全新資料庫（無既有檔案）：_run_migrations() 偵測不到 _meta.schema_
+    # version（尚未存在），走「全新資料庫」分支，只寫入 _meta 欄位、不觸碰
+    # memories 表；隨後 _init_schema() 照常從零建立完整的目前版本 schema ——
+    # 與修復前的行為完全一致，只是兩步驟的呼叫順序對調。
+    # 對已是目前 SCHEMA_VERSION 的資料庫：_run_migrations() 判定版本相符後
+    # 直接 no-op 返回；隨後 _init_schema() 的每一條 IF NOT EXISTS 語句也都
+    # 是 no-op —— 同樣與修復前的行為完全一致。
     _run_migrations(conn)
+    # 執行 schema 初始化（見上方說明：此時 memories 表若曾是舊版，已由
+    # migration chain 補齊必要欄位/約束，以下皆為安全的冪等 IF NOT EXISTS）
+    _init_schema(conn)
 
     # 設定 DB 檔案權限
     try:
@@ -1015,6 +1039,21 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
 def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
     """v3→v4: 加入 fleet_member kind（需重建 CHECK 約束）。
     使用標準 SQLite 重建表方式更新 CHECK。
+
+    重要：`INSERT INTO memories_new (...) SELECT (...) FROM memories` 必須
+    明確列出兩邊的欄位名稱、逐一對應，不可用 `SELECT *`（純位置對應）。
+    原因：_migrate_v2_to_v3 是用 `ALTER TABLE memories ADD COLUMN
+    project_id ...` 加上這個欄位 —— SQLite 的 ALTER TABLE ADD COLUMN 一律
+    把新欄位加在表的**最後面**，而 memories_new 宣告的欄位順序是
+    project_id 緊接在 id 之後（對齊 _init_schema 的宣告順序）。若沿用
+    `SELECT *`，來源資料列會被整組錯位塞進去（例如 kind 的值被塞進
+    project_id 欄位、task_id 的值被塞進 kind 欄位……），對一個真正的
+    v1→v2→v3→v4 資料庫會直接讓 CHECK/NOT NULL 約束炸掉，或更糟：在欄位
+    剛好都是 TEXT 型別、約束又剛好沒違反時，資料被靜默錯位寫入而不拋出
+    任何錯誤。已用獨立重現腳本驗證：`SELECT *` 版本對貨真價實的 v1 資料會
+    以 `sqlite3.IntegrityError: NOT NULL constraint failed:
+    memories_new.status` 崩潰（embedding 的 NULL 值被錯位塞進 status 這個
+    NOT NULL 欄位）。
     """
     # 重建表以更新 CHECK constraint 加入 'fleet_member'
     conn.executescript("""
@@ -1040,7 +1079,14 @@ def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
             created_at  TEXT NOT NULL,
             updated_at  TEXT NOT NULL
         );
-        INSERT INTO memories_new SELECT * FROM memories;
+        INSERT INTO memories_new (
+            id, project_id, kind, task_id, agent_id, timestamp, summary,
+            learnings, handoff_note, tags, status, embedding, created_at, updated_at
+        )
+        SELECT
+            id, project_id, kind, task_id, agent_id, timestamp, summary,
+            learnings, handoff_note, tags, status, embedding, created_at, updated_at
+        FROM memories;
         DROP TABLE memories;
         ALTER TABLE memories_new RENAME TO memories;
 
