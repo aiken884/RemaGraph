@@ -125,6 +125,10 @@ def remagraph_store(
 ) -> dict[str, Any]:
     """agent 寫入記憶。"""
     _check_rate_limit(agent_id)
+    try:
+        conn = _get_conn()
+    except Exception as e:
+        return {"status": "error", "reason": str(e)}
     request = StoreRequest(
         project_id=project_id,
         task_id=task_id,
@@ -136,7 +140,7 @@ def remagraph_store(
         tags=tags or [],
         invalidates=invalidates,
     )
-    response = process_store(request, _get_conn())
+    response = process_store(request, conn)
     result: dict[str, Any] = {
         "status": response.status,
         "superseded": response.superseded,
@@ -169,6 +173,10 @@ def remagraph_search(
 ) -> dict[str, Any]:
     """agent 查詢記憶（FTS5 BM25）。"""
     _check_rate_limit(agent_id or "anonymous")
+    try:
+        conn = _get_conn()
+    except Exception as e:
+        return {"status": "error", "reason": str(e)}
     eff_project = None if all_projects else project_id
     request = SearchRequest(
         query=query,
@@ -180,7 +188,7 @@ def remagraph_search(
         agent_id=agent_id,
         task_id=task_id,
     )
-    response = search_memories(_get_conn(), request)
+    response = search_memories(conn, request)
     return {"results": response.results, "has_more": response.has_more}
 
 
@@ -193,9 +201,13 @@ def remagraph_status(
 ) -> dict[str, Any]:
     """查詢所有 active status_update（依 task_id 去重取最新）。"""
     _check_rate_limit("status")
+    try:
+        conn = _get_conn()
+    except Exception as e:
+        return {"status": "error", "reason": str(e)}
     eff_project = None if all_projects else project_id
     request = StatusRequest(limit=limit, project_id=eff_project)
-    response = get_status(_get_conn(), request)
+    response = get_status(conn, request)
     return {"latest": response.latest}
 
 
