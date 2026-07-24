@@ -160,14 +160,16 @@ agent 寫入記憶，通過五條仲裁規則後寫入 SQLite + FTS5 index。
 
 | 參數 | 型別 | 說明 |
 |------|------|------|
+| `project_id` | `str` | 專案識別碼（格式同 task_id，必填） |
 | `task_id` | `str` | 任務識別碼（格式：英數字 + `-_`，最多 64 字元） |
 | `agent_id` | `str` | agent 識別碼（同 task_id 格式限制） |
 | `kind` | `"task_handoff" \| "status_update" \| "discovered_constraint" \| "fleet_member"` | 記憶類型（fleet_member 由 tower record/recycle） |
 | `summary` | `str` | 一句話摘要（供 FTS5 全文檢索） |
 | `learnings` | `list[str]` | 學到的要點 |
 | `handoff_note` | `str` | 交接備註（`task_handoff` 時必填） |
-| `tags` | `list[str]` | 分類標籤（選填） |
+| `tags` | `list[str]` | 分類標籤（選填，自由格式） |
 | `invalidates` | `list[str]` | 要 invalidate 的 memory id（`discovered_constraint` 時用） |
+| `labels` | `list[str]` | 命名空間化標籤（選填），格式 `namespace:value`（如 `dep:opencode`、`topic:auth`、`kind:bug`），慣例上 namespace 用 `dep:`/`topic:`/`kind:` 等一組小、受控字首；長度上限 64 字元。與 `tags` 是不同概念——`tags` 自由格式，`labels` 是受控詞彙，任一格式不符會整批拒絕（`reason: "invalid_label"`），供 `remagraph_search` 的 `cross_project_label` 精確比對用，詳見 [`DESIGN.md`](./DESIGN.md) 的「跨專案協作」章節 |
 
 四種 `kind` 的行為（PPLX Priority B）：
 - **`task_handoff`**：任務交接記錄，附 `handoff_note`
@@ -186,18 +188,34 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 | `kind` | `str` | 過濾記憶類型（選填） |
 | `status` | `"active" \| "superseded" \| "invalidated"` | 過濾狀態（選填） |
 | `tags` | `list[str]` | 過濾標籤（選填） |
+| `project_id` | `str` | 限定單一專案（選填） |
 | `agent_id` | `str` | 過濾 agent（選填） |
 | `task_id` | `str` | 過濾任務（選填） |
+| `all_projects` | `bool` | 預設 `false`；`true` 時移除「目前這一個資料庫檔案內」的 `project_id` 過濾（每個 project 各自是獨立 SQLite 檔案，此旗標從不開啟其他檔案） |
+| `cross_project_label` | `str` | 選填。提供時完全改走跨專案標籤搜尋路徑：透過共用的 project registry，對「目前專案 + 所有已知專案」各自獨立的資料庫檔案，依 label 精確比對（`query`/`kind`/`tags` 等全文檢索/過濾參數不適用）。與 `all_projects` 是互不相干的兩個維度。fan-out 上限 20 個「其他」已知專案，超過時回應會標記 `cross_project_fanout_capped: true`（見下方回應欄位），不悄悄截斷佯裝完整。詳見 [`DESIGN.md`](./DESIGN.md) 的「跨專案協作」章節 |
 
-短查詢（≤2 字元）回傳空結果不拋錯。
+短查詢（≤2 字元）回傳空結果不拋錯。回應除 `results`/`has_more` 外，恆附加 `cross_project_fanout_capped`（`bool`，僅使用 `cross_project_label` 時有意義；一般查詢恆為 `false`）；使用 `cross_project_label` 時每筆結果另附 `source_project_id` 標示其來源專案。每筆結果涵蓋完整欄位（`id`/`project_id`/`summary`/`agent_id`/`kind`/`task_id`/`timestamp`/`score`/`learnings`/`handoff_note`/`tags`/`status`/`created_at`/`updated_at`，`embedding` 除外）。
 
 ### `remagraph_status` — 查詢專案最新現況
 
-回傳所有 active 的 `status_update` 記憶，以 `task_id` 去重（每 task 只留最新一筆）。
+回傳所有 active 的 `status_update` 記憶，以 `task_id` 去重（每 task 只留最新一筆）。同時附上版本相容性 handshake 資訊，讓呼叫端不必等 `remagraph_store` 寫入失敗才第一次得知是否有版本落差。
 
 | 參數 | 型別 | 說明 |
 |------|------|------|
+| `project_id` | `str` | 限定單一專案（選填） |
 | `limit` | `int` | 回傳筆數上限（預設 20，最大 100） |
+| `all_projects` | `bool` | 預設 `false`；`true` 時移除 `project_id` 過濾 |
+
+回應除既有的 `latest` 陣列外，恆附加下列相容性 handshake 欄位：
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `server_code_version` | `int` | 目前執行中程式碼的 schema 版本 |
+| `db_schema_version` | `int \| null` | 資料庫 `_meta` 表實際存下的 schema 版本（防禦性讀取） |
+| `min_reader_version` | `int \| null` | 資料庫允許被讀取的最舊程式碼版本；資料庫若建立於此機制導入之前則為 `null` |
+| `min_writer_version` | `int \| null` | 資料庫允許被寫入的最舊程式碼版本；同上，缺漏時為 `null` |
+| `upgrade_hint` | `str \| null` | 資料庫內建的升級指引文字；缺漏時為 `null` |
+| `read_only` | `bool` | 目前連線是否處於唯讀降級模式（見下方「治理與安全」） |
 
 ## 治理與安全
 
@@ -207,6 +225,8 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 - **Audit rotation**：`audit-YYYYMM.jsonl` 按月自動分檔
 - **DB 容量**：SQLite `max_page_count` 設定 100MB soft limit
 - **Migration**：內建 schema 版本追蹤與 migration chain
+- **版本相容性降級**：資料庫 schema 版本比目前程式碼還新時，依資料庫內建的 `min_reader_version`/`min_writer_version` 分三層處理——完全相容（正常讀寫）、唯讀降級（拒絕寫入、讀取不受影響）、或完全拒絕開啟；呼叫端可透過 `remagraph_status` 的相容性 handshake 欄位提早得知，不必等寫入失敗。詳見 [`DESIGN.md`](./DESIGN.md) 的「版本相容性」章節
+- **跨專案登記表**：`project_registry` 自動記錄已知 project 及其 state_dir，供 `remagraph_search` 的 `cross_project_label` 跨專案唯讀查詢使用，見 [`DESIGN.md`](./DESIGN.md) 的「跨專案協作」章節
 - **超期清理**：`cleanup_superseded()` 可清理 90 天前的非 active 記錄
 
 ## CLI 子命令（headless agent 用）

@@ -74,6 +74,7 @@ RemaGraph 對外只暴露一個穩定的合約：**Audit Contract**（詳見下�
 - v1 **單 process**（PID 鎖），不支援多實例共用 DB 與 concurrency
 - state 目錄：`~/.local/state/remagraph/`
 - 單一 SQLite 檔案：`~/.local/state/remagraph/remagraph.db`
+  - 此檔案（`DEFAULT_STATE_DIR` 底下那一份）額外承載一張跨專案共用的 `project_registry` 表，與 `"default"` 專案自己的 memories 共用同一份檔案（見下方「跨專案協作」章節）
 - 審計檔案：`~/.local/state/remagraph/audit.jsonl`（0600）
 
 ---
@@ -89,6 +90,7 @@ agent 寫入記憶。觸發五條仲裁規則，通過後寫入 SQLite + 同步 
 **Request：**
 ```json
 {
+  "project_id": "myproject",
   "task_id": "task-2026-07-21-003",
   "agent_id": "oc-dspro",
   "kind": "task_handoff",
@@ -98,9 +100,11 @@ agent 寫入記憶。觸發五條仲裁規則，通過後寫入 SQLite + 同步 
     "acpx 0.12.0 在 child session 生命週期管理上有 race condition"
   ],
   "handoff_note": "接手者：此錯誤與 G1 不同。G1 是 child session 未被註冊；這個新錯誤是 acpx transport 層誤判連線已斷。兩者根因不同。",
-  "tags": ["acpx", "subagent", "deny-all", "bug"]
+  "tags": ["acpx", "subagent", "deny-all", "bug"],
+  "labels": ["dep:acpx", "topic:subagent"]
 }
 ```
+- `labels`（選填）：命名空間化標籤（`namespace:value`），與 `tags` 是兩個獨立概念——`tags` 自由格式、無格式要求；`labels` 是受控詞彙，格式規則與長度上限、以及供 `remagraph_search` 的 `cross_project_label` 精確比對用途，詳見下方「跨專案協作」章節
 
 **Response（成功）：**
 ```json
@@ -119,6 +123,17 @@ agent 寫入記憶。觸發五條仲裁規則，通過後寫入 SQLite + 同步 
 { "status": "rejected", "reason": "summary_too_short", "detail": "需 ≥ 30 字，目前 12 字" }
 ```
 
+**Response（labels 格式不符）：**
+```json
+{ "status": "rejected", "reason": "invalid_label", "detail": "label 'Dep:acpx' 不符合命名空間格式 ..." }
+```
+
+**Response（唯讀降級拒絕）：**
+```json
+{ "status": "rejected", "reason": "read_only_mode", "detail": "此連線目前為唯讀模式（資料庫 schema 已升級到超出本程式碼的寫入相容版本），已拒絕本次寫入。請升級 remagraph 套件後再重試。" }
+```
+- `read_only_mode`：連線因下方「版本相容性」章節所述的三層判斷被標記為唯讀時觸發，且此檢查發生在五條仲裁規則、model2vec 去重之前——完全不會進入 transaction
+
 ### `remagraph_search`
 
 agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
@@ -129,9 +144,13 @@ agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
   "query": "subagent deny-all 連線錯誤",
   "top_k": 20,
   "kind": "task_handoff",
-  "status": "active"
+  "status": "active",
+  "project_id": "myproject"
 }
 ```
+- `project_id`（選填）：限定查詢單一專案；未提供且 `all_projects=true` 時移除此過濾（見下方）
+- `all_projects`（`bool`，選填，預設 `false`）：`true` 時移除「目前這一個資料庫檔案內」的 `project_id` 過濾——但每個 project 本來就是各自獨立的 SQLite 檔案，此旗標從不開啟其他檔案
+- `cross_project_label`（選填）：提供時完全改走跨專案標籤搜尋路徑，`query`/`kind`/`tags` 等全文檢索/過濾參數不適用，只依 label 精確比對；與 `all_projects` 是互不相干的兩個維度，詳見下方「跨專案協作」章節
 
 **Response：**
 ```json
@@ -139,19 +158,32 @@ agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
   "results": [
     {
       "id": "mem-20260721-001",
+      "project_id": "myproject",
       "summary": "嘗試修復 subagent 委派 + deny-all 時的 acpx 連線錯誤",
       "agent_id": "oc-dspro",
+      "kind": "task_handoff",
+      "task_id": "task-2026-07-21-003",
       "timestamp": "2026-07-21T14:30:00Z",
-      "score": 0.87
+      "score": 0.87,
+      "learnings": ["acpx 0.12.0 在 child session 生命週期管理上有 race condition"],
+      "handoff_note": "接手者：此錯誤與 G1 不同……",
+      "tags": ["acpx", "subagent", "deny-all", "bug"],
+      "status": "active",
+      "created_at": "2026-07-21T14:30:00.123Z",
+      "updated_at": "2026-07-21T14:30:00.123Z"
     }
   ],
-  "has_more": false
+  "has_more": false,
+  "cross_project_fanout_capped": false
 }
 ```
 - `top_k` 預設 **20**，最大 **100**
 - `has_more`：`true` 表示還有更多結果（`LIMIT top_k + 1` 取 k+1 筆），agent 可縮小查詢範圍再查；v1 不提供精確 `total_matches`
 - `query=""`（空字串）：回傳空 `results` + `has_more=false`，不拋錯，記錄 warning log
 - FTS5 query 輸入前需在 server 端 sanitize（移除/跳脫特殊字元如 `*`、`"`、`AND`、`OR`、`NOT`），防止非預期語法錯誤
+- 每筆 `results` 項目涵蓋 memories 表完整欄位集合（`embedding` 除外）——`learnings`/`handoff_note`/`tags`/`status`/`created_at`/`updated_at` 皆完整回傳（曾一度被 `_row_to_result()` 遺漏，已修復並補上回歸測試，見 CHANGELOG）
+- `cross_project_fanout_capped`：只在使用 `cross_project_label` 時有意義，其餘查詢恆為 `false`；`true` 表示已知專案數超過 fan-out 上限，本次搜尋未涵蓋全部已知專案，詳見下方「跨專案協作」章節
+- 使用 `cross_project_label` 時，每筆結果額外附加 `source_project_id` 欄位標示其來源專案
 
 ### `remagraph_status`
 
@@ -159,8 +191,9 @@ agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
 
 **Request：**
 ```json
-{ "limit": 20 }
+{ "limit": 20, "project_id": "myproject" }
 ```
+- `project_id`（選填）：限定單一專案；`all_projects=true` 時移除此過濾（語意與 `remagraph_search` 的 `all_projects` 一致）
 
 **Response：**
 ```json
@@ -172,10 +205,23 @@ agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
       "agent_id": "oc-dspro",
       "timestamp": "2026-07-21T14:30:00Z"
     }
-  ]
+  ],
+  "server_code_version": 6,
+  "db_schema_version": 6,
+  "min_reader_version": 1,
+  "min_writer_version": 6,
+  "upgrade_hint": null,
+  "read_only": false
 }
 ```
 - `limit` 預設 **20**，最大 **100**
+- **版本相容性 handshake**（自本項起，`latest` 之外一律附加下列欄位，重用 `db.get_compat_status()`）：讓呼叫端能在真正嘗試寫入、撞牆失敗之前，就先透過 `remagraph_status` 得知自己的相容性等級，不必等 `remagraph_store` 失敗才第一次得知
+  - `server_code_version`：目前執行中程式碼的 `SCHEMA_VERSION`
+  - `db_schema_version`：資料庫 `_meta` 表實際存下的 `schema_version`（防禦性讀取）
+  - `min_reader_version` / `min_writer_version`：資料庫存下的前向相容性欄位（見下方「版本相容性」章節）；若資料庫是該機制導入前建立、尚未跑過對應 migration，一律回傳 `null`，不拋例外
+  - `upgrade_hint`：資料庫內建的升級指引文字，缺漏時為 `null`
+  - `read_only`：目前連線是否處於唯讀降級模式（見下方「版本相容性」章節）
+  - 這些欄位只在成功回應中出現；tier-3（連讀都不安全）情境下 `remagraph_status` 連線都開不起來，仍維持既有行為回傳乾淨的 `{"status": "error", "reason": ...}`，不會混入上述欄位
 
 ---
 
@@ -218,7 +264,7 @@ agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
 
 ## 儲存層：SQLite + FTS5
 
-單一檔案，stdlib 零依賴。
+單一檔案，stdlib 零依賴。目前 `SCHEMA_VERSION = 6`（migration chain v1→v6；v5→v6 新增下方 `memory_labels` 表，v4→v5 新增下方「版本相容性」小節所述的前向相容欄位）。
 
 ### Schema（SQL）
 
@@ -281,7 +327,55 @@ CREATE INDEX IF NOT EXISTS idx_memories_task_id ON memories(task_id);
 CREATE INDEX IF NOT EXISTS idx_memories_agent_id ON memories(agent_id);
 CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
 CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at DESC);
+
+-- 版本追蹤（自 v4→v5 起額外存放前向相容性欄位，見下方「版本相容性」小節）
+CREATE TABLE IF NOT EXISTS _meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+-- 每個記憶可掛上多個命名空間化標籤（schema v5→v6），供跨專案標籤搜尋使用
+-- （見下方「跨專案協作」章節）。標籤格式（namespace:value）由應用層
+-- （arbitration.validate_labels()）驗證，本表不對 label 內容加 CHECK 約束
+-- （與 tags 欄位一致）。
+CREATE TABLE IF NOT EXISTS memory_labels (
+    memory_id TEXT NOT NULL REFERENCES memories(id),
+    label     TEXT NOT NULL,
+    PRIMARY KEY (memory_id, label)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_labels_label ON memory_labels(label);
 ```
+
+### 版本相容性（`_meta` 前向相容欄位 + 三層判斷）
+
+背景：獨立釘版的舊消費端一旦打開一個 `schema_version` 比自己程式碼還新的資料庫，過去只能整個拒絕開啟（`MigrationError`），且錯誤訊息寫死在舊版程式碼裡——之後即使改善訊息文字，舊消費端也永遠讀不到，因為它執行的是自己那份舊 source（已有 MegaNote、Meshtastic 兩個真實案例撞到「schema_version 比程式碼新，無法降級」而放棄寫入）。解法：把升級指引與相容性邊界存進資料庫本身的 `_meta` 表（消費端一定會開、一定會讀到），而不是只寫在程式碼字串常數裡。
+
+**`_meta` 新增欄位**（schema v4→v5 起，`_migrate_v4_to_v5()` 種下；全新資料庫建立時同步寫入，不必等 migration chain 跑到）：
+
+| 欄位 | 說明 |
+|------|------|
+| `min_reader_version` | 這個資料庫允許被「讀取」的最舊程式碼 `SCHEMA_VERSION`。目前預設 `"1"` |
+| `min_writer_version` | 這個資料庫允許被「寫入」的最舊程式碼 `SCHEMA_VERSION`。每次涉及欄位/CHECK 變動的 migration 都會更新為當時的 `SCHEMA_VERSION`（例如 v4→v5 時寫入 `"5"`；v5→v6 純新增 `memory_labels` 表，不修改 `memories` 本身欄位/CHECK，刻意維持 `min_writer_version` 不變） |
+| `upgrade_hint` | 自我完整、不依賴任何程式碼常數的中文升級指引文字，供拒絕/降級訊息附加顯示 |
+
+讀取這三個欄位一律走防禦性讀取（`_read_meta_int_defensively()` / `_read_upgrade_hint_defensively()`）：表不存在、欄位缺漏、型別不符等任何失敗都回傳 `None`，絕不拋出例外中斷既有的拒絕/降級流程。
+
+**`db.connect()` 的三層版本相容性判斷**（`_handle_newer_than_code_schema()`，僅在資料庫 `schema_version` 比程式碼的 `SCHEMA_VERSION` 還新時觸發）：
+
+| 層級 | 條件 | 行為 |
+|------|------|------|
+| Tier 1：完全相容 | `SCHEMA_VERSION >= min_writer_version` | 正常讀寫，與過去 `schema_version <= SCHEMA_VERSION` 完全相同，不做任何事 |
+| Tier 2：唯讀降級 | `min_reader_version <= SCHEMA_VERSION < min_writer_version` | `connect()` **不再拋出例外**，回傳可用連線，但在連線物件上標記唯讀（見下方「唯讀模式對呼叫端的意義」）|
+| Tier 3：完全拒絕 | `SCHEMA_VERSION < min_reader_version` | 維持既有行為：`connect()` 拋出 `MigrationError`（三選項靜態訊息 + 防禦性讀取的 `upgrade_hint`）|
+
+任一版本欄位讀取失敗或缺漏（例如資料庫是此機制導入前建立、尚未跑過 v4→v5 migration），`min_reader_version`/`min_writer_version` 一律視為等於資料庫的 `schema_version` 本身——退回機制導入前的嚴格全有全無行為，絕不套用寬鬆預設值。
+
+**唯讀模式對呼叫端的意義：**
+
+- 唯讀標記掛在連線物件上（`db.READ_ONLY_ATTR` / `db.READ_ONLY_DETAIL_ATTR`），因為原生 `sqlite3.Connection` 是純 C extension 型別、不支援任意屬性賦值；`connect()` 一律以 `_MarkedConnection`（`sqlite3.Connection` 的空子類別）作為 `factory=`，讓連線物件能安全掛標記，同時仍是完整的 `sqlite3.Connection` 實例（既有的 `isinstance` 檢查、型別標註皆不受影響）
+- `remagraph_search` / `remagraph_status`（`search_memories()` / `get_status()`）完全不受影響，唯讀連線上的查詢一律正常執行
+- `remagraph_store`（`process_store()`）在函式最前面（早於安全閥門、早於五條仲裁規則、早於 model2vec 去重）就檢查此標記；若唯讀，直接回傳 `status="rejected"` / `reason="read_only_mode"`，完全不進入 transaction
+- 自動維護（`light_maintenance_on_connect()` → `run_maintenance()`，含 `remagraph_maintain` MCP tool）同樣一取得連線（不論是呼叫端傳入的、還是內部自行另開的連線）就檢查唯讀標記；若唯讀，跳過 WAL checkpoint／prune／FTS optimize／VACUUM／ANALYZE／完整性檢查等**所有**寫入操作，回傳 `stats={"skipped": true, "skip_reason": "read_only_schema_tier"}` 並記一筆 `maintenance_skipped_read_only` audit 事件；此保護對呼叫端要求的 `force=True` 依然生效——唯讀降級要防的是 schema 相容性風險，與呼叫端是否要求強制執行無關
 
 ### 查詢範例
 
@@ -323,6 +417,50 @@ dependencies = [
 [project.optional-dependencies]
 vector = ["sqlite-vec>=0.1.0"]
 ```
+
+---
+
+## 跨專案協作（Cross-Project Collaboration）
+
+RemaGraph 每個 `project_id` 對應完全獨立的 state_dir / SQLite 檔案（見「部署形態」），彼此原本互不知道對方存在，各自是一座孤島。本節描述讓 agent 能在需要時「看見」其他專案存在、並精確查詢其標籤的兩層機制——這是後續 `recall_related` 等跨專案查詢能力的地基，本身不含全文檢索或關聯圖功能。
+
+### 跨專案登記表（`project_registry`）
+
+一個輕量、共用的「登記簿」，記錄哪些 `project_id` 存在、各自的 state_dir 在哪裡：
+
+| 欄位 | 說明 |
+|------|------|
+| `project_id` | 主鍵 |
+| `state_dir` | 該 project 目前解析出的絕對路徑 |
+| `first_seen` / `last_seen` | 首次 / 最近一次被登記的 UTC 時間（ISO 8601，秒精度） |
+
+- 落在 `DEFAULT_STATE_DIR`（`~/.local/state/remagraph/`）的 `remagraph.db`，與 `"default"` 專案自己的 memories 共用同一份檔案——因為這是唯一一個「任何專案、任何時候都不需要額外設定就能解析出來」的位置
+- `CREATE TABLE IF NOT EXISTS`，冪等，刻意獨立於既有的 per-project migration chain（不隨 `SCHEMA_VERSION` 升版走）：該 chain 對**每一個**專案自己的資料庫執行一次，若把 registry 併入其中，會讓每個專案的私有 DB 都多出一張與己無關的表，弄髒既有的「孤島互不相干」設計
+- **自動登記，無需顯式呼叫**：`maintenance.resolve_project_state_dir()`（任何帶 `project_id` 的操作都會呼叫到，含安全閥門 `safety_validate_project()`）每次解析出 state_dir 後，都會呼叫 `db.register_known_project()` 做 best-effort upsert——正常使用就會自動被記錄；任何失敗（目錄無法建立、DB 鎖定、權限不足……）一律吞下，絕不影響呼叫端主流程。`first_seen` 只在該 project 第一次出現時寫入，已存在的列只更新 `state_dir`（若已改變）與 `last_seen`
+- `db.list_known_projects()`：讀出登記表所有列，永遠指向真正的 `DEFAULT_STATE_DIR`，不受呼叫端當下的 `REMAGRAPH_STATE_DIR` / `REMAGRAPH_PROJECT` 環境變數影響；任何讀取失敗一律回傳空清單，不拋例外
+- `db.connect_foreign_project_readonly(project_id)`：對已登記的另一個 project 開一條**真正唯讀**的連線（SQLite URI `file:<path>?mode=ro` + `PRAGMA query_only=1`），完全繞過 `db.connect()` / `get_state_dir()` / `safety_validate_project()` / `light_maintenance_on_connect()`（架構上就不會經過這些路徑，不是靠旗標略過）；未登記的 project、或其 state_dir/db 檔案已不存在（例如已被刪除），一律回傳 `None`，絕不會意外生出一個空白新資料庫——`mode=ro` 讓 SQLite 在檔案不存在時於 `connect()` 呼叫當下就直接拋出 `OperationalError`，取代了「先 `exists()` 預檢查、再一般模式 `connect()`」會留下的 TOCTOU 競態窗口（檔案在檢查之後、連線之前才被刪除，一般模式會悄悄建立一個看似正常、實則空白的新資料庫）
+
+### 標籤（`memory_labels`）與跨專案標籤搜尋
+
+每筆記憶可另外掛上多個「命名空間化」標籤（schema v5→v6 的 `memory_labels` 表，DDL 見上方「儲存層」章節）。這與既有的 `tags` 欄位是兩個獨立概念，刻意不合併：`tags` 是自由格式、無格式要求的既有欄位，供既有的 tag 過濾搜尋使用；`labels` 是新增的受控詞彙，有明確格式要求，專供本節的跨專案精確比對使用。
+
+**標籤格式**：`namespace:value`，例如 `dep:opencode`、`topic:auth`、`kind:bug`。
+
+- 完整規則：`^[a-z]+:[a-zA-Z0-9_-]+$`（見 `arbitration.LABEL_REGEX`；實作上錨點用 `\Z` 而非 `$`，避免 Python regex 的 `$` 對「結尾前恰有一個換行字元」的例外放行，讓帶結尾換行的字串誤判為合法）
+- `namespace` 一律小寫字母；規則本身不限制具體是哪些字首，但慣例上建議使用一組小、受控的字首，例如 `dep:`（依賴）、`topic:`（主題）、`kind:`（分類），目的是避免標籤長期演變成破碎、不一致的自由格式字串
+- `value` 允許大小寫英數字、底線、連字號，與既有 `project_id` / `task_id` / `agent_id` 的字元集慣例一致
+- 長度上限 **64 字元**（整個 `namespace:value` 字串），與既有 `project_id` / `task_id` / `agent_id` 的 64 字元上限慣例一致
+- `remagraph_store` 的 `labels` 參數：任一標籤格式不符（含超長），**整批拒絕**（`StoreResponse(status="rejected", reason="invalid_label")`），不靜默跳過壞的、只留合法的——標籤存在的價值就是「受控詞彙」，靜默跳過只會讓呼叫端永遠不知道自己格式錯了，久了反而助長標籤破碎化
+- labels 與該筆 memory 的 INSERT 在同一個 transaction 內一起寫入，要嘛一起 commit、要嘛一起 rollback；重複標籤自動去重（不會因 `(memory_id, label)` 複合主鍵衝突而報錯）
+
+**`remagraph_search` 的 `cross_project_label` 參數：**
+
+- 提供此參數時，走完全獨立於全文檢索的查詢路徑——只依 label 精確比對，`query` / `kind` / `tags` 等其餘全文檢索/過濾參數不適用；`status` 過濾預設 `active`，可由呼叫端覆蓋
+- 查詢範圍：(a) 目前這個連線自己專案的 `memory_labels`，加上 (b) 透過登記表逐一開啟「其他」已知專案的唯讀連線查詢，合併結果並在每筆結果標註 `source_project_id` 表示其來源專案
+- 與既有的 `all_projects` 旗標是完全獨立的兩個維度，互不取代：`all_projects` 只移除「目前這一個資料庫檔案內」的 `project_id` 過濾（每個 project 各自是獨立檔案，此旗標從不開啟其他檔案）；`cross_project_label` 才會透過登記表真正開啟其他 project 各自獨立的資料庫檔案
+- **Fan-out 上限 20**（`search._CROSS_PROJECT_FANOUT_CAP`）：單次搜尋最多開啟 20 個「其他」已知專案的資料庫（不含目前連線自己所屬的專案，那一個是直接查詢、不計入上限）。已知專案數會隨時間單調增加（目前沒有自動清除機制），若無上限，查詢延遲會隨已知專案數線性增長且使用者往往不會意識到——這呼應 PPLX 研究引用 Azure DevOps 官方文件對「跨專案連結查詢」效能成本的警示。超過上限時**不會**悄悄截斷佯裝已涵蓋全部：`SearchResponse.cross_project_fanout_capped` 標記為 `true` 並記一筆 warning log，讓呼叫端明確知道這次結果可能不完整
+- 已登記但目前不可達的專案（例如目錄已被刪除、或該專案的資料庫尚未升級到含 `memory_labels` 表的 schema 版本）會被優雅跳過，不讓整個搜尋因單一專案失敗
+- 結果依 `(source_project_id, id)` 去重：即使呼叫端未提供 `project_id`（因而無法在 fan-out 迴圈中提前判斷、跳過自己所屬的專案），也保證同一筆記憶不會被回傳兩次
 
 ---
 
