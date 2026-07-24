@@ -117,6 +117,27 @@ class SearchRequest(BaseModel):
     db.list_known_projects() / db.connect_foreign_project_readonly()
     （item 4a 的 registry 機制）真正開啟其他 project 的資料庫檔案來查詢。
     兩者可視為互不相干的兩個維度，不互相取代。"""
+    include_related: bool = False
+    """PPLX 架構改善計畫 item 5：若為 True，在對『目前這個專案』執行正常的
+    FTS 全文查詢之外，額外沿 project_edges（db.recall_related）traversal
+    fan out 到明確宣告為圖形關聯、且在 related_hops 之內的專案。與
+    cross_project_label（對『所有』已知專案無差別 fan-out、依 label 精確
+    比對）、all_projects（只移除目前這一個資料庫檔案內的 project_id 過濾）
+    是三個完全獨立、互不觸發彼此的維度——見
+    search._search_related_projects/_search_cross_project_by_label 的
+    分派邏輯與 tests/test_project_edges_and_recall_related.py 的解耦
+    regression test。
+
+    需要 project_id 才能作為 traversal 起點；project_id 為 None 時視為
+    呼叫端使用錯誤（沒有『我』這個起點可以走），優雅退化為一般搜尋（不
+    展開 related fan-out），記一筆 warning log，不拋出例外。"""
+    related_hops: int = Field(default=1, ge=1, le=5)
+    """include_related=True 時的 BFS traversal 深度上限。預設 1（僅限直接
+    宣告的關聯）。上限 5 是防禦性設計：project_edges 這張表的規模在正常
+    使用情境下遠小於 project_registry（需要人工透過 `remagraph link`
+    顯式宣告，不像 project_registry 是每次 connect 自動登記），但仍設一個
+    保守上限，避免呼叫端不慎傳入過大的 hops 造成不必要的多層 BFS 查詢
+    往返。include_related=False 時此欄位無意義。"""
 
 
 class SearchResponse(BaseModel):

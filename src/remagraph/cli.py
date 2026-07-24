@@ -153,6 +153,8 @@ def cmd_search(args: argparse.Namespace) -> None:
         agent_id=args.agent_id,
         task_id=args.task_id,
         cross_project_label=args.cross_project_label,
+        include_related=args.include_related,
+        related_hops=args.related_hops,
     )
     try:
         conn = _get_conn()
@@ -440,6 +442,24 @@ def build_parser() -> argparse.ArgumentParser:
             "（僅移除目前這個資料庫檔案內的 project 過濾）是完全不同的兩件事"
         ),
     )
+    p_search.add_argument(
+        "--include-related",
+        action="store_true",
+        help=(
+            "額外 fan out 到透過 `remagraph link` 明確宣告為圖形關聯、且在"
+            "--related-hops 之內的 project（見 project_edges/recall_related，"
+            "item 5），與 --cross-project-label（對所有已知 project 無差別"
+            "fan-out）、--all-projects 是三個完全獨立的維度。需要 --project"
+            "（或 REMAGRAPH_PROJECT）作為 traversal 起點，未提供時優雅退化為"
+            "一般搜尋"
+        ),
+    )
+    p_search.add_argument(
+        "--related-hops",
+        type=int,
+        default=1,
+        help="--include-related 的 BFS traversal 深度（預設 1，僅限直接關聯）",
+    )
 
     # status
     p_status = sub.add_parser("status", help="查詢最新現況")
@@ -494,6 +514,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_maintain.add_argument("--project", default=None)
     p_maintain.add_argument("--force", action="store_true", help="強制所有維護操作")
     p_maintain.add_argument("--dry-run", action="store_true", help="只顯示會做什麼，不實際執行")
+
+    # link
+    p_link = sub.add_parser(
+        "link",
+        help="宣告兩個 project 之間的關聯 edge（供 --include-related recall 使用）",
+    )
+    p_link.add_argument("--from", dest="from_project", required=True, help="來源 project_id")
+    p_link.add_argument("--to", dest="to_project", required=True, help="目標 project_id")
+    p_link.add_argument(
+        "--relation",
+        required=True,
+        choices=["depends_on", "sibling", "shares_upstream", "monorepo_member"],
+        help="關聯類型（traversal 時一律視為對稱雙向，見 db.recall_related 說明）",
+    )
 
     # migrate-project
     p_migrate = sub.add_parser(
@@ -552,6 +586,8 @@ def main(argv: list[str] | None = None) -> None:
         cmd_maintain(args)
     elif args.command == "migrate-project":
         cmd_migrate_project(args)
+    elif args.command == "link":
+        cmd_link(args)
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +707,30 @@ def cmd_migrate_project(args: argparse.Namespace) -> None:
     print(f"遷移完成：{migrated} 筆")
     if not args.force:
         print("建議：執行 remagraph maintain --project {to_proj} --force 清理目標 DB")
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: link（PPLX 架構改善計畫 item 5）
+# ---------------------------------------------------------------------------
+
+
+def cmd_link(args: argparse.Namespace) -> None:
+    """宣告兩個 project 之間的關聯 edge，供之後 `search --include-related`
+    使用（見 db.declare_project_edge / db.get_project_edges /
+    db.recall_related）。
+
+    edge 本身落在共用的 DEFAULT_STATE_DIR registry（與 item 4a 的
+    project_registry 同一份檔案），與『目前這個 CLI 呼叫端當下所在的
+    project 情境』無關——因此本子命令刻意不像 store/search/status 那樣走
+    _get_conn()/safety_validate_project，不需要開啟任何一個特定 project
+    自己的記憶資料庫。
+    """
+    try:
+        _db.declare_project_edge(args.from_project, args.to_project, args.relation)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"已宣告關聯：{args.from_project} --{args.relation}--> {args.to_project}")
 
 
 if __name__ == "__main__":
