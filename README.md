@@ -150,6 +150,14 @@ remagraph status --limit 10
 
 **注意**：完整 herdr-org workload 驗證需待組織層開發時進行。目前僅設計藍圖階段。
 
+**如何聯絡其他專案的指揮塔/agent**：跨專案協調（例如回報一個發現於某專案程式碼裡、但屬於該專案自己職責的 bug）建議直接寫入 RemaGraph 記憶，而非跨專案操作對方的檔案。完整的三層溝通管道使用指南已存在 RemaGraph 記憶裡（由 herdr-bridge 指揮塔維護），查詢方式：
+
+```bash
+remagraph search --project herdr-bridge --task-id herdr-bridge-three-channel-usage-guide
+# 或用跨專案標籤查（不需要知道確切 project/task_id）：
+remagraph search --cross-project-label topic:how-to-contact-tower
+```
+
 ## MCP 工具
 
 RemaGraph 透過 MCP（stdio transport）暴露三個 tool，相容 Claude Desktop、Cursor 等主流 MCP 客戶端：
