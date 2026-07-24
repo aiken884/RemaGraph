@@ -346,7 +346,7 @@ RemaGraph 自管 audit，不依賴任何外部系統。herdr-gov（或其他排�
 |------|------|
 | `ts` | ISO 8601 UTC（`Z` 後綴，不支援 local time），與 herdr-bridge audit 格式一致 |
 | `actor_id` | `{agent_id}/{task_id}` 複合形式 |
-| `action` | 固定為 `remagraph_store`，未來可擴展 |
+| `action` | 對 `remagraph_store` 交易固定為 `remagraph_store`（見下方對外公告的 Audit Contract，此值不變）；同一份 audit-YYYYMM.jsonl 另外也由 `append_event` 寫入維護／生命週期事件的 action 值（例如 `safety_violation`、`maintenance_completed`、`maintenance_light_failed`），這些記錄是不同、更簡單的結構（不含 `task_id`、`agent_id`、`kind`、`status`、`mem_id` 等欄位） |
 | `mem_id` | 寫入成功後的 memory id，外部系統比對用 |
 | `task_id` | 明確 index key，外部系統可直接 grep |
 | `status` | `"stored"` 或 `"error"` |
