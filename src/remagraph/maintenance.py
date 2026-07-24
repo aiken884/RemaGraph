@@ -19,13 +19,15 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from remagraph.audit import append_audit
+from remagraph.audit import append_event
 from remagraph.db import (
-    connect as _raw_connect,
-)
-from remagraph.db import (
+    READ_ONLY_ATTR,
     get_state_dir,
     load_project_metadata,
+    register_known_project,
+)
+from remagraph.db import (
+    connect as _raw_connect,
 )
 
 # ---------------------------------------------------------------------------
@@ -36,19 +38,43 @@ from remagraph.db import (
 def resolve_project_state_dir(project_id: str) -> pathlib.Path:
     """從 env / project.json / governance 取得權威 state_dir。
     必須回傳 realpath 解析後的絕對路徑。
+
+    副作用（PPLX 架構改善計畫 item 4a）：每次呼叫都會把解析出的
+    (project_id, state_dir) upsert 進共用 registry
+    （db.register_known_project()，落在 DEFAULT_STATE_DIR 的 remagraph.db，
+    與呼叫端當下的 project_id/state_dir 無關）——這是後續跨專案標籤搜尋
+    與 recall_related 賴以知道「其他專案的 DB 在哪裡」的唯一入口，不需要
+    任何額外的顯式「註冊」呼叫，正常使用就會自動讓專案被登記。
+
+    此登記為 best-effort：任何失敗都被吞掉，絕不影響本函式既有的解析結果
+    與回傳行為（register_known_project 本身已具備防禦性，這裡再包一層
+    try/except 屬於本模組既有的『雙重防禦』慣例，見 _record_violation 對
+    append_event 的呼叫方式）。
+
+    下方解析邏輯與優先順序維持原樣未變動，僅重構為單一回傳點以承載上述
+    登記副作用。
     """
     # 優先使用當前 env（herdr-bridge _ensure 會設定）
     if env_dir := os.environ.get("REMAGRAPH_STATE_DIR"):
-        return pathlib.Path(env_dir).resolve()
+        resolved = pathlib.Path(env_dir).resolve()
+    else:
+        # fallback 從 project metadata
+        meta = load_project_metadata()
+        if meta.get("project_id") == project_id:
+            resolved = get_state_dir().resolve()
+        else:
+            # 預設規則（與 herdr-bridge _ensure 一致）
+            safe = (
+                "".join(c if c.isalnum() or c in "-_" else "-" for c in project_id) or "default"
+            )
+            resolved = (pathlib.Path.home() / ".local" / "state" / f"remagraph-{safe}").resolve()
 
-    # fallback 從 project metadata
-    meta = load_project_metadata()
-    if meta.get("project_id") == project_id:
-        return get_state_dir().resolve()
+    try:
+        register_known_project(project_id, resolved)
+    except Exception:
+        pass
 
-    # 預設規則（與 herdr-bridge _ensure 一致）
-    safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in project_id) or "default"
-    return (pathlib.Path.home() / ".local" / "state" / f"remagraph-{safe}").resolve()
+    return resolved
 
 
 class SafetyValveError(RuntimeError):
@@ -83,11 +109,46 @@ def safety_validate_project(project_id: str, *, require_env_match: bool = True) 
 
 
 def _record_violation(project_id: str, reason: str) -> None:
-    """記錄違規到 audit 與 memory（discovered_constraint）。"""
+    """記錄違規到 audit 與 memory（discovered_constraint）。
+
+    注意：這是「記錄違規已發生」的內部自我記錄路徑 —— 其存在的唯一目的
+    就是記錄 safety_validate_project 剛剛失敗這件事，因此絕不能重新觸發
+    同一個目前正在失敗的安全驗證，否則會形成
+    safety_validate_project -> _record_violation -> process_store ->
+    safety_validate_project 的無窮遞迴（同一個違規原因不會因為重新驗證而
+    改變）。下方對 _raw_connect 與 process_store 的呼叫因此都明確傳入
+    skip_safety_check=True —— 這個略過旗標僅限本函式使用，任何其他呼叫者
+    （CLI、MCP server 或帶明確 project_id 的一般呼叫）都不得傳入，安全閥門
+    對它們維持完整強制。
+
+    目錄解析只做一次：resolve_project_state_dir(project_id) 是「權威、
+    project-aware」的解析器（REMAGRAPH_STATE_DIR 未設定時會 fallback 到
+    project 專屬目錄，而非 audit.py 環境變數導向的共用預設目錄）。若在此
+    直接呼叫 append_event 而不傳入解析結果，append_event 內部的
+    _audit_path() 會各自重新從環境變數推導目錄 —— 對於
+    "missing_remagraph_state_dir" 這類原因（定義上就是 REMAGRAPH_STATE_DIR
+    未設定），兩邊 fallback 邏輯不一致，會導致同一違規事件的 audit 記錄與
+    memory 記錄落在兩個不同目錄。因此這裡先解析一次，再明確傳給
+    append_event(state_dir=...)，確保與下方 memory 記錄使用同一目錄。
+    """
     try:
-        append_audit("safety_violation", {"project_id": project_id, "reason": reason})  # type: ignore[arg-type]
+        state_dir = resolve_project_state_dir(project_id)
+    except Exception:
+        # 解析失敗時退回舊行為：讓 append_event 用它自己的環境變數 fallback。
+        state_dir = None
+
+    try:
+        append_event(
+            "safety_violation",
+            {"project_id": project_id, "reason": reason},
+            state_dir=state_dir,
+        )
     except Exception:
         pass
+
+    if state_dir is None:
+        return
+
     # 盡量寫入 memory（若可用）
     try:
         from remagraph.models import StoreRequest
@@ -102,8 +163,12 @@ def _record_violation(project_id: str, reason: str) -> None:
             project_id=project_id,
             tags=["safety", "violation", reason],
         )
-        conn = _raw_connect(resolve_project_state_dir(project_id))
-        process_store(req, conn)
+        conn = _raw_connect(
+            state_dir,
+            skip_maintenance=True,
+            skip_safety_check=True,
+        )
+        process_store(req, conn, skip_safety_check=True)
         conn.close()
     except Exception:
         pass  # 避免維護本身失敗
@@ -133,11 +198,41 @@ def run_maintenance(
     """執行自動維護。**只接受 project_id**，內部自行建立正確 conn。"""
     state_dir = safety_validate_project(project_id)
     if conn is None:
-        conn = _raw_connect(state_dir)
+        conn = _raw_connect(state_dir, skip_maintenance=True)
     stats: dict[str, Any] = {
         "project_id": project_id,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
+
+    # 三層 schema 相容性的唯讀降級（見 db._handle_newer_than_code_schema /
+    # db.READ_ONLY_ATTR）：獨立對抗式審查發現的缺口 —— 本函式（無論由呼叫端
+    # 傳入既有 conn，或如上一行自行以 _raw_connect 開一條全新、獨立的內部
+    # 連線）從未檢查過連線是否已被標記唯讀，就直接執行 WAL checkpoint、
+    # prune 的 DELETE、VACUUM、ANALYZE 等一整組寫入操作。維護作業本質上就是
+    # 一組寫入操作，對一個「目前執行中的程式碼尚未完全理解其寫入安全性」的
+    # 新 schema 資料庫來說，沒有一項是安全的 —— 這正是唯讀分級存在的理由。
+    #
+    # 這裡自行開啟的 conn 雖是與外部（可能已標記唯讀）連線不同的 Python
+    # 物件，但兩者是對「同一個資料庫檔案」、以「同一份程式碼」執行同一套
+    # _run_migrations -> _handle_newer_than_code_schema 三層判斷，必然得到
+    # 完全相同的唯讀判定結果。因此直接檢查『這條』conn 本身的標記，等同於
+    # 檢查外部連線的標記 —— 不需要（在不修改 db.py 呼叫點的前提下也無法）
+    # 取得外部連線本身的狀態。
+    #
+    # 刻意不受 force=True 影響：force 代表「呼叫端明確要求執行」，但這裡要
+    # 防範的是 schema 相容性風險而非呼叫端意願，兩者是正交的 —— 唯讀降級的
+    # 保護必須無條件生效。
+    if getattr(conn, READ_ONLY_ATTR, False):
+        stats["skipped"] = True
+        stats["skip_reason"] = "read_only_schema_tier"
+        try:
+            append_event(
+                "maintenance_skipped_read_only",
+                {"project_id": project_id, **stats},
+            )
+        finally:
+            conn.close()
+        return stats
 
     try:
         # 1. WAL checkpoint
@@ -173,7 +268,7 @@ def run_maintenance(
                 _record_violation(project_id, "integrity_failed")
                 raise RuntimeError(f"DB integrity failed: {stats['integrity']}")
 
-        append_audit("maintenance_completed", {"project_id": project_id, **stats})
+        append_event("maintenance_completed", {"project_id": project_id, **stats})
         return stats
     finally:
         if conn:
@@ -213,4 +308,4 @@ def light_maintenance_on_connect(project_id: str = "default") -> None:
         run_maintenance(policy, project_id, force=False)
     except Exception as e:
         # 不阻斷啟動，但記錄
-        append_audit("maintenance_light_failed", {"error": str(e), "project_id": project_id})  # type: ignore[arg-type]
+        append_event("maintenance_light_failed", {"error": str(e), "project_id": project_id})

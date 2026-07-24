@@ -36,6 +36,7 @@ class StoreRequest(BaseModel):
     handoff_note: str = ""
     tags: list[str] = Field(default_factory=list)
     invalidates: list[str] | None = None
+    labels: list[str] = Field(default_factory=list)
 
     @field_validator("project_id", "task_id", "agent_id", mode="before")
     @classmethod
@@ -56,6 +57,28 @@ class StoreRequest(BaseModel):
         for i, item in enumerate(v):
             if not isinstance(item, str):
                 raise ValueError(f"tags[{i}] must be str, got {type(item).__name__}")
+        return v
+
+    @field_validator("labels", mode="before")
+    @classmethod
+    def _validate_labels_type(cls, v: object) -> list[str]:
+        """僅驗證型別（list[str]），與既有 tags 驗證器一致。
+
+        刻意不在此處驗證 namespace:value 格式本身 —— labels 與 tags 不同的
+        地方在於 labels 有格式要求（見 D02/PPLX item 4b 設計），但格式驗證
+        刻意延後到 arbitration.run_arbitration_rules_cheap 內的
+        validate_labels()，讓格式不符能走本專案既有的
+        StoreResponse(status="rejected", reason=..., detail=...) 優雅拒絕
+        路徑（與其餘仲裁規則一致），而不是在 pydantic 建構階段就讓
+        ValidationError 直接往外拋、繞過 process_store 的仲裁/稽核流程。
+        """
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            raise ValueError("labels must be a list of strings")
+        for i, item in enumerate(v):
+            if not isinstance(item, str):
+                raise ValueError(f"labels[{i}] must be str, got {type(item).__name__}")
         return v
 
 
@@ -86,6 +109,35 @@ class SearchRequest(BaseModel):
     project_id: str | None = None
     agent_id: str | None = None
     task_id: str | None = None
+    cross_project_label: str | None = None
+    """PPLX 架構改善計畫 item 4b：若提供，走跨專案標籤搜尋路徑（見
+    search.search_memories 內的分支），完全獨立於既有的 all_projects 語意
+    —— all_projects 只是移除『目前這一個資料庫檔案內』的 project_id 過濾，
+    不會開啟其他 project 各自獨立的資料庫檔案；cross_project_label 則會透過
+    db.list_known_projects() / db.connect_foreign_project_readonly()
+    （item 4a 的 registry 機制）真正開啟其他 project 的資料庫檔案來查詢。
+    兩者可視為互不相干的兩個維度，不互相取代。"""
+    include_related: bool = False
+    """PPLX 架構改善計畫 item 5：若為 True，在對『目前這個專案』執行正常的
+    FTS 全文查詢之外，額外沿 project_edges（db.recall_related）traversal
+    fan out 到明確宣告為圖形關聯、且在 related_hops 之內的專案。與
+    cross_project_label（對『所有』已知專案無差別 fan-out、依 label 精確
+    比對）、all_projects（只移除目前這一個資料庫檔案內的 project_id 過濾）
+    是三個完全獨立、互不觸發彼此的維度——見
+    search._search_related_projects/_search_cross_project_by_label 的
+    分派邏輯與 tests/test_project_edges_and_recall_related.py 的解耦
+    regression test。
+
+    需要 project_id 才能作為 traversal 起點；project_id 為 None 時視為
+    呼叫端使用錯誤（沒有『我』這個起點可以走），優雅退化為一般搜尋（不
+    展開 related fan-out），記一筆 warning log，不拋出例外。"""
+    related_hops: int = Field(default=1, ge=1, le=5)
+    """include_related=True 時的 BFS traversal 深度上限。預設 1（僅限直接
+    宣告的關聯）。上限 5 是防禦性設計：project_edges 這張表的規模在正常
+    使用情境下遠小於 project_registry（需要人工透過 `remagraph link`
+    顯式宣告，不像 project_registry 是每次 connect 自動登記），但仍設一個
+    保守上限，避免呼叫端不慎傳入過大的 hops 造成不必要的多層 BFS 查詢
+    往返。include_related=False 時此欄位無意義。"""
 
 
 class SearchResponse(BaseModel):
@@ -93,6 +145,13 @@ class SearchResponse(BaseModel):
 
     results: list[dict[str, Any]]
     has_more: bool
+    cross_project_fanout_capped: bool = False
+    """僅在使用 cross_project_label 時有意義：若已知專案數超過
+    search._CROSS_PROJECT_FANOUT_CAP（PPLX 研究引用 Azure DevOps 對跨專案
+    連結查詢成本的官方警示，見 search.py 模組說明），本次搜尋只會查詢前
+    N 個已知專案並在此標記 True，讓呼叫端知道結果可能不完整，而不是悄悄
+    截斷、佯裝『已涵蓋所有已知專案』。一般搜尋（未使用 cross_project_label）
+    恆為 False，對既有呼叫端而言是完全加法、向後相容的欄位。"""
 
 
 # ---------------------------------------------------------------------------

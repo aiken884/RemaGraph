@@ -13,6 +13,7 @@ from remagraph.arbitration import (
     supersede_status_updates,
     validate_agent_id,
     validate_handoff_note,
+    validate_labels,
     validate_learnings,
     validate_summary_length,
 )
@@ -443,3 +444,63 @@ def test_invalidate_constraints_empty_list(conn):
     result = invalidate_constraints([], conn)
     assert isinstance(result, InvalidateResult)
     assert result.invalidated_count == 0
+
+
+# ---------------------------------------------------------------------------
+# validate_labels — bug 回歸：`$` 錨點的尾端換行縫隙 + label 長度上限
+# ---------------------------------------------------------------------------
+
+
+def test_validate_labels_accepts_well_formed_label():
+    """健全性檢查：正常格式的 label 應通過（作為下方回歸測試的對照組）。"""
+    result = validate_labels(["dep:opencode"])
+    assert result.passed is True
+
+
+def test_validate_labels_rejects_trailing_newline():
+    """Regression（bug 2）：Python re 的 `$` 錨點不只匹配字串結尾，也會匹配
+    『結尾前恰有一個換行字元』的位置——即使該換行字元本身並不在
+    LABEL_REGEX 宣告的 value 字元類別 [a-zA-Z0-9_-] 之內，`dep:foo\\n`
+    仍會被 `^[a-z]+:[a-zA-Z0-9_-]+$`.match() 誤判為通過。
+    修復後必須確實拒絕，reason 仍為 invalid_label。"""
+    result = validate_labels(["dep:foo\n"])
+    assert result.passed is False, (
+        "trailing-newline label 'dep:foo\\n' 不應通過 validate_labels —— "
+        "Python `$` 錨點會匹配『結尾前一個換行字元』的既有陷阱"
+    )
+    assert result.reason == "invalid_label"
+
+
+def test_validate_labels_rejects_embedded_newline_followed_by_more_text():
+    """確認 `$` 的另一個邊界情況維持正確拒絕：換行後面還有更多文字時，
+    非 MULTILINE 模式的 `$` 本來就不會匹配到字串中段，這裡作為對照組
+    確保修復（改用 \\Z 或 fullmatch）沒有意外改變這個既有正確行為。"""
+    result = validate_labels(["dep:foo\nbar:baz"])
+    assert result.passed is False
+    assert result.reason == "invalid_label"
+
+
+def test_validate_labels_rejects_label_exceeding_max_length():
+    """Regression（minor hardening）：目前 LABEL_REGEX 對 value 部分的
+    字元類別沒有數量上限，一個 100KB+ 的字串會被接受。比照 models.py
+    既有 task_id/agent_id 的 64 字元上限慣例，加上長度檢查。"""
+    too_long_value = "x" * 100_000
+    result = validate_labels([f"dep:{too_long_value}"])
+    assert result.passed is False
+    assert result.reason == "invalid_label"
+
+
+def test_validate_labels_boundary_max_length_accepted_one_over_rejected():
+    """邊界測試：剛好等於上限的 label 應通過，超過 1 個字元則被拒絕。"""
+    from remagraph.arbitration import LABEL_MAX_LENGTH
+
+    at_max = "d:" + "x" * (LABEL_MAX_LENGTH - 2)
+    assert len(at_max) == LABEL_MAX_LENGTH
+    result = validate_labels([at_max])
+    assert result.passed is True, f"剛好 {LABEL_MAX_LENGTH} 字元的 label 應通過"
+
+    over_max = at_max + "x"
+    assert len(over_max) == LABEL_MAX_LENGTH + 1
+    result = validate_labels([over_max])
+    assert result.passed is False, f"超過 {LABEL_MAX_LENGTH} 字元的 label 應被拒絕"
+    assert result.reason == "invalid_label"

@@ -26,6 +26,7 @@ from remagraph.arbitration import (
     supersede_for_kind,
 )
 from remagraph.audit import append_audit
+from remagraph.db import READ_ONLY_ATTR, READ_ONLY_DETAIL_ATTR
 from remagraph.dedup import check_duplicate, encode_summary
 from remagraph.models import Memory, MemoryKind, StoreRequest, StoreResponse
 
@@ -205,6 +206,8 @@ def _row_to_memory(row: sqlite3.Row) -> Memory:
 def process_store(
     request: StoreRequest,
     conn: sqlite3.Connection,
+    *,
+    skip_safety_check: bool = False,
 ) -> StoreResponse:
     """執行完整的 remagraph_store 流程：
 
@@ -215,11 +218,41 @@ def process_store(
     5. INSERT 寫入 + transaction commit
 
     回傳 StoreResponse。
+
+    Args:
+        skip_safety_check: 僅供 maintenance._record_violation 自身記錄違規時
+            使用 —— 略過本函式開頭的 safety_validate_project 呼叫，避免
+            「記錄違規」這個內部自我記錄路徑重新觸發同一個目前正在失敗的
+            安全驗證，造成 safety_validate_project -> _record_violation ->
+            process_store -> safety_validate_project 的無窮遞迴。一般外部
+            呼叫者（CLI、MCP server、或任何帶明確 project_id 的呼叫）不得
+            傳入，維持預設 False 以保留既有的安全閥門強制行為。
     """
+    # 唯讀降級檢查（PPLX 架構改善計畫 item 2）：必須是本函式最前面執行的
+    # 檢查 —— 早於安全閥門、早於仲裁規則、早於 model2vec 去重（規則 #4），
+    # 完全不嘗試任何 transaction。db.connect() 在三層版本相容性判斷得出
+    # 「讀相容但寫不安全」（tier 2）結論時，會在連線物件上掛
+    # db.READ_ONLY_ATTR 標記（見 db._handle_newer_than_code_schema）。
+    # 沿用既有的 StoreResponse.status="rejected"（不新增列舉值，避免牽動
+    # audit.append_audit 對 status 的 switch），reason 使用專屬字串
+    # "read_only_mode" 供呼叫端區分。
+    if getattr(conn, READ_ONLY_ATTR, False):
+        detail = getattr(
+            conn,
+            READ_ONLY_DETAIL_ATTR,
+            "此連線目前為唯讀模式（資料庫 schema 已升級到超出本程式碼的寫入"
+            "相容版本），已拒絕本次寫入。請升級 remagraph 套件後再重試。",
+        )
+        return StoreResponse(
+            status="rejected",
+            reason="read_only_mode",
+            detail=detail,
+        )
+
     # 安全閥門（PPLX 共識版）：強制 project + state_dir 對映
     from remagraph.maintenance import safety_validate_project
 
-    if request.project_id:
+    if request.project_id and not skip_safety_check:
         safety_validate_project(request.project_id)  # 違規直接 raise SafetyValveError
 
     # 規則 #1, #2, #3, #5: 便宜仲裁
@@ -311,6 +344,21 @@ def process_store(
 
         # INSERT
         insert_memory(conn, memory, emb_array)
+
+        # 寫入 memory_labels（PPLX 架構改善計畫 item 4b）：與 memory 本身的
+        # INSERT 在同一個 transaction 內，確保 memory 與其 labels 要嘛一起
+        # commit、要嘛一起 rollback，不會出現「memory 寫入成功但 labels
+        # 遺漏」的不一致狀態。此時 request.labels 內每個元素都已保證通過
+        # run_arbitration_rules_cheap 的 validate_labels() 格式檢查（見該
+        # 函式呼叫順序 —— 早於本函式的 transaction 區塊），故此處不再重複
+        # 驗證格式，只做去重（dict.fromkeys 保留原順序）以避免呼叫端傳入
+        # 重複 label 時，撞上 memory_labels 的 (memory_id, label) 複合主鍵
+        # 而拋出 IntegrityError。
+        for label in dict.fromkeys(request.labels):
+            conn.execute(
+                "INSERT INTO memory_labels (memory_id, label) VALUES (?, ?)",
+                (mem_id, label),
+            )
 
         conn.execute("COMMIT")
 

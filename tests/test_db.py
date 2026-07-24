@@ -12,12 +12,19 @@ from remagraph import db as db_mod
 # B1: get_db_path / connect 基本功能
 # ---------------------------------------------------------------------------
 def test_get_db_path_default():
-    """B1: get_db_path() 回傳預設路徑。"""
+    """B1: get_db_path() 在未指定 state_dir/REMAGRAPH_STATE_DIR 時，回傳
+    db_mod.DEFAULT_STATE_DIR 底下的 remagraph.db。
+
+    刻意不對 DEFAULT_STATE_DIR 的實際路徑內容（例如是否含有 ".local"）
+    斷言 —— 那是 production 常數在「真實使用」情境下的值，測試環境下這個
+    常數永遠被 conftest.py 的 autouse fixture monkeypatch 成 tmp_path 底下
+    的隔離路徑（見 tests/conftest.py 的 _isolate_default_state_dir），本測試
+    要驗證的行為契約是「無覆寫時直接沿用 DEFAULT_STATE_DIR」這件事本身，
+    不論該常數目前被綁定成什麼值。
+    """
     path = db_mod.get_db_path()
     assert path.name == "remagraph.db"
-    assert ".local" in str(path)
-    assert "state" in str(path)
-    assert "remagraph" in str(path)
+    assert path == db_mod.DEFAULT_STATE_DIR / "remagraph.db"
 
 
 def test_get_db_path_custom(tmp_path):
