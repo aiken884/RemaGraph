@@ -88,7 +88,12 @@ def validate_project_metadata(
         raise ValueError(f"Project metadata mismatch: expected {expected_project}, found {current}")
 
 
-def connect(state_dir: Path | None = None, project_id: str | None = None) -> sqlite3.Connection:
+def connect(
+    state_dir: Path | None = None,
+    project_id: str | None = None,
+    *,
+    skip_maintenance: bool = False,
+) -> sqlite3.Connection:
     """建立 SQLite 連線並初始化。
 
     1. 展開路徑、建立目錄（若需要）
@@ -99,6 +104,13 @@ def connect(state_dir: Path | None = None, project_id: str | None = None) -> sql
     6. 回傳已就緒的連線
 
     嚴格安全閥門：若提供 project_id，會驗證 state_dir 與 project 對映。
+
+    Args:
+        skip_maintenance: 僅供維護子系統自身開啟連線時使用 —— 略過啟動時
+            自動輕量維護（light_maintenance_on_connect）的呼叫，避免
+            maintenance.py 內部開連線時重新觸發維護，造成無窮遞迴。一般
+            外部呼叫者（CLI、MCP server）不得傳入，維持預設 False 以保留
+            既有行為。
 
     Raises:
         OSError: 目錄無法建立（權限不足）
@@ -150,7 +162,8 @@ def connect(state_dir: Path | None = None, project_id: str | None = None) -> sql
         pass
 
     # 啟動時自動輕量維護（含 integrity + WAL + migration）
-    if project_id:
+    # skip_maintenance 供維護子系統自身開連線時使用，避免重新觸發本身造成遞迴
+    if project_id and not skip_maintenance:
         light_maintenance_on_connect(project_id)
 
     return conn
@@ -293,7 +306,12 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if current_version > SCHEMA_VERSION:
         raise MigrationError(
             f"資料庫 schema_version={current_version} 比程式碼的 "
-            f"SCHEMA_VERSION={SCHEMA_VERSION} 還新，無法降級"
+            f"SCHEMA_VERSION={SCHEMA_VERSION} 還新，無法降級。"
+            "請選擇以下其一處理："
+            "1) 更新已安裝的 remagraph 套件至相容此 schema 版本的版本；"
+            "2) 設定 REMAGRAPH_STATE_DIR 指向另一個獨立目錄，改用全新資料庫；"
+            "3) 若確認可捨棄此資料庫的既有資料，刪除該 state_dir 下的 "
+            f"{DB_FILENAME} 後重新初始化。"
         )
 
 
