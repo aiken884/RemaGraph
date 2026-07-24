@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -266,6 +267,225 @@ def get_compat_status(conn: sqlite3.Connection) -> dict[str, Any]:
         "upgrade_hint": _read_upgrade_hint_defensively(conn),
         "read_only": bool(getattr(conn, READ_ONLY_ATTR, False)),
     }
+
+
+# ---------------------------------------------------------------------------
+# Cross-project registry（PPLX 架構改善計畫 item 4a）
+#
+# 背景：目前每個 project_id 各自對應完全獨立的 state_dir / DB 檔案（見
+# maintenance.resolve_project_state_dir），彼此互不知道對方存在 —— 每個專案
+# 的資料庫是一座孤島。後續項目（4b 跨專案標籤搜尋、5 recall_related）都需要
+# 一個輕量、共用的「登記簿」，記錄哪些 project_id 存在、各自的 state_dir 在
+# 哪裡，才能在需要時開啟「別的」專案的資料庫。本節只落地這個登記簿本身。
+#
+# 設計決策：這張 registry 表落在 DEFAULT_STATE_DIR（~/.local/state/remagraph/）
+# 的 remagraph.db，與 "default" 專案自己的 memories 共用同一份檔案 —— 因為
+# DEFAULT_STATE_DIR 是唯一一個「任何專案、任何時候都不需要額外設定就能解析
+# 出來」的位置（resolve_project_state_dir 對其他 project_id 的解析結果視
+# env/project.json 而定，唯獨 DEFAULT_STATE_DIR 本身是常數）。
+#
+# 刻意選擇「idempotent CREATE TABLE IF NOT EXISTS、獨立於一般 per-project
+# migration chain」，而非替 SCHEMA_VERSION 新增一個 v6 migration 步驟：
+# _run_migrations() 會在**每一個**專案的 connect() 都執行一次（見 connect()
+# 呼叫序）。若把 project_registry 併入該 migration chain，會導致這張表被
+# 建立在**每一個**專案自己的 remagraph.db 裡 —— 但這張表在概念上完全不屬於
+# 任何單一專案自己的記憶 schema，只跟 DEFAULT_STATE_DIR 這個共用位置有關；
+# 把它塞進每個專案自己的資料庫檔案裡，會把「這座孤島跟別的孤島無關」這個
+# 既有隔離設計弄髒。因此改用一個獨立、專屬於 DEFAULT_STATE_DIR 連線路徑的
+# idempotent 建表輔助函式（_connect_default_registry_db），只在真正需要
+# 讀寫 registry 時才確保該表存在，完全不影響、也不出現在任何其他專案自己的
+# 資料庫檔案裡，SCHEMA_VERSION 維持不變。
+# ---------------------------------------------------------------------------
+
+_PROJECT_REGISTRY_DDL = """
+    CREATE TABLE IF NOT EXISTS project_registry (
+        project_id TEXT PRIMARY KEY,
+        state_dir  TEXT NOT NULL,
+        first_seen TEXT NOT NULL,
+        last_seen  TEXT NOT NULL
+    )
+"""
+
+
+def _utcnow_iso() -> str:
+    """回傳目前 UTC 時間的 ISO8601 字串，供 registry first_seen/last_seen 使用。
+
+    獨立成小函式方便測試以 monkeypatch 控制時間（驗證 last_seen 確實更新、
+    first_seen 確實保留），不必真的在測試裡 sleep。
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _connect_default_registry_db() -> sqlite3.Connection:
+    """開啟『真正的』DEFAULT_STATE_DIR 的 remagraph.db 連線，供 registry 讀寫。
+
+    刻意直接使用 DEFAULT_STATE_DIR 模組常數，完全不經過
+    get_state_dir()/resolve_project_state_dir() 的環境變數導向解析 ——
+    REMAGRAPH_STATE_DIR 一旦設定，會整個蓋掉呼叫端想要的目標目錄（見
+    get_state_dir() 的優先序），而 registry 的存在理由正是「不論目前呼叫
+    行程的 project 情境是什麼，都能有同一個、唯一的共用落地位置」。
+
+    僅確保 project_registry 表存在（CREATE TABLE IF NOT EXISTS，冪等），
+    刻意不呼叫 _init_schema()/_run_migrations() —— 那兩者屬於一般
+    per-project 記憶 schema 的初始化路徑，registry 表與其無關，也不需要
+    參與 memories/_meta 的 migration chain（見上方設計決策說明）。
+    """
+    DEFAULT_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    DEFAULT_STATE_DIR.chmod(0o700)
+    db_path = DEFAULT_STATE_DIR / DB_FILENAME
+    conn = sqlite3.connect(
+        str(db_path),
+        isolation_level=None,
+        check_same_thread=False,
+    )
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(_PROJECT_REGISTRY_DDL)
+    try:
+        db_path.chmod(0o600)
+    except OSError:
+        pass
+    return conn
+
+
+def register_known_project(project_id: str, state_dir: Path | str) -> None:
+    """把 (project_id, state_dir) 這對資訊 upsert 進共用 registry。
+
+    Best-effort：任何失敗（目錄無法建立、DB 鎖定、權限不足……）一律吞下，
+    絕不拋出例外 —— 呼叫端（目前是 maintenance.resolve_project_state_dir）
+    依賴這個保證才能安全地在每次正常解析路徑上都呼叫本函式，而不必擔心
+    registry 本身的問題會反過來弄壞主要功能。此慣例與 audit.append_event
+    一致（且呼叫端仍應自行再包一層 try/except，屬於本專案既有的『雙重
+    防禦』慣例，見 maintenance._record_violation 對 append_event 的呼叫
+    方式）。
+
+    first_seen 只在該 project_id 第一次出現時寫入；已存在的列只更新
+    state_dir（若已改變）與 last_seen，不會產生重複列。
+    """
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = _connect_default_registry_db()
+        now = _utcnow_iso()
+        resolved_state_dir = str(Path(state_dir).resolve())
+        conn.execute(
+            """
+            INSERT INTO project_registry (project_id, state_dir, first_seen, last_seen)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(project_id) DO UPDATE SET
+                state_dir = excluded.state_dir,
+                last_seen = excluded.last_seen
+            """,
+            (project_id, resolved_state_dir, now, now),
+        )
+    except Exception:
+        pass
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def list_known_projects() -> list[dict[str, str]]:
+    """回傳 registry 內所有已知專案的 (project_id, state_dir, first_seen,
+    last_seen)。
+
+    永遠讀取 DEFAULT_STATE_DIR（透過 _connect_default_registry_db()），不受
+    呼叫端當下 REMAGRAPH_STATE_DIR/REMAGRAPH_PROJECT 環境變數影響 —— 即使
+    目前行程的 project 情境是別的專案，這裡看到的仍然是同一份共用 registry。
+    任何讀取失敗一律回傳空清單，不拋出例外。
+    """
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = _connect_default_registry_db()
+        rows = conn.execute(
+            "SELECT project_id, state_dir, first_seen, last_seen "
+            "FROM project_registry ORDER BY project_id"
+        ).fetchall()
+        return [
+            {
+                "project_id": str(row["project_id"]),
+                "state_dir": str(row["state_dir"]),
+                "first_seen": str(row["first_seen"]),
+                "last_seen": str(row["last_seen"]),
+            }
+            for row in rows
+        ]
+    except Exception:
+        return []
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def connect_foreign_project_readonly(project_id: str) -> sqlite3.Connection | None:
+    """開啟『另一個』已知專案的資料庫連線，供跨專案唯讀查閱使用。
+
+    這是後續項目（4b 跨專案標籤搜尋、5 recall_related）需要的原語 ——
+    本任務僅落地並測試這個原語本身，不實作實際的跨專案查詢邏輯。
+
+    刻意不透過 connect()：get_state_dir() 對『目前呼叫行程』的
+    REMAGRAPH_STATE_DIR 環境變數有最高優先權，若直接呼叫
+    connect(state_dir=<foreign>) 而目前行程本身已設定 REMAGRAPH_STATE_DIR
+    指向別的（自己的）目錄，get_state_dir() 會整個忽略傳入的 state_dir、
+    逕自沿用 env 裡的目錄 —— 等同悄悄開錯資料庫，且不會拋出任何例外讓呼叫端
+    得知。因此本函式直接組出目標 state_dir 的 db 路徑並自行開連線，完全不
+    經過任何環境變數解析路徑，也完全不呼叫 safety_validate_project（那是
+    保護『目前行程自己主要專案』設計的安全閥，不適用於主動、唯讀查閱『另一
+    個』已知專案）、不觸發該外部專案的 light_maintenance_on_connect（純讀取
+    用途，不該對它觸發維護）。
+
+    連線額外設定 PRAGMA query_only=1，讓這個連線在 SQLite 層級真的無法
+    寫入，落實「readonly」這個名稱的承諾。
+
+    Returns:
+        已就緒、真正唯讀的連線；若 project_id 不在 registry 內、其
+        state_dir/db 檔案已不存在（registry 可能已過期 —— 對應目錄可能已
+        被刪除）、或開啟過程任何原因失敗，一律回傳 None，絕不拋出例外。
+    """
+    conn: sqlite3.Connection | None = None
+    row: sqlite3.Row | None = None
+    try:
+        conn = _connect_default_registry_db()
+        row = conn.execute(
+            "SELECT state_dir FROM project_registry WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+    except Exception:
+        return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    if row is None:
+        return None
+
+    state_dir_str = row["state_dir"]
+    if not state_dir_str:
+        return None
+
+    foreign_db_path = Path(state_dir_str) / DB_FILENAME
+    if not foreign_db_path.exists():
+        return None
+
+    try:
+        foreign_conn = sqlite3.connect(
+            str(foreign_db_path),
+            isolation_level=None,
+            check_same_thread=False,
+        )
+        foreign_conn.row_factory = sqlite3.Row
+        foreign_conn.execute("PRAGMA query_only = 1")
+        return foreign_conn
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------

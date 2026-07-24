@@ -26,6 +26,7 @@ from remagraph.db import (
 from remagraph.db import (
     get_state_dir,
     load_project_metadata,
+    register_known_project,
 )
 
 # ---------------------------------------------------------------------------
@@ -36,19 +37,43 @@ from remagraph.db import (
 def resolve_project_state_dir(project_id: str) -> pathlib.Path:
     """從 env / project.json / governance 取得權威 state_dir。
     必須回傳 realpath 解析後的絕對路徑。
+
+    副作用（PPLX 架構改善計畫 item 4a）：每次呼叫都會把解析出的
+    (project_id, state_dir) upsert 進共用 registry
+    （db.register_known_project()，落在 DEFAULT_STATE_DIR 的 remagraph.db，
+    與呼叫端當下的 project_id/state_dir 無關）——這是後續跨專案標籤搜尋
+    與 recall_related 賴以知道「其他專案的 DB 在哪裡」的唯一入口，不需要
+    任何額外的顯式「註冊」呼叫，正常使用就會自動讓專案被登記。
+
+    此登記為 best-effort：任何失敗都被吞掉，絕不影響本函式既有的解析結果
+    與回傳行為（register_known_project 本身已具備防禦性，這裡再包一層
+    try/except 屬於本模組既有的『雙重防禦』慣例，見 _record_violation 對
+    append_event 的呼叫方式）。
+
+    下方解析邏輯與優先順序維持原樣未變動，僅重構為單一回傳點以承載上述
+    登記副作用。
     """
     # 優先使用當前 env（herdr-bridge _ensure 會設定）
     if env_dir := os.environ.get("REMAGRAPH_STATE_DIR"):
-        return pathlib.Path(env_dir).resolve()
+        resolved = pathlib.Path(env_dir).resolve()
+    else:
+        # fallback 從 project metadata
+        meta = load_project_metadata()
+        if meta.get("project_id") == project_id:
+            resolved = get_state_dir().resolve()
+        else:
+            # 預設規則（與 herdr-bridge _ensure 一致）
+            safe = (
+                "".join(c if c.isalnum() or c in "-_" else "-" for c in project_id) or "default"
+            )
+            resolved = (pathlib.Path.home() / ".local" / "state" / f"remagraph-{safe}").resolve()
 
-    # fallback 從 project metadata
-    meta = load_project_metadata()
-    if meta.get("project_id") == project_id:
-        return get_state_dir().resolve()
+    try:
+        register_known_project(project_id, resolved)
+    except Exception:
+        pass
 
-    # 預設規則（與 herdr-bridge _ensure 一致）
-    safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in project_id) or "default"
-    return (pathlib.Path.home() / ".local" / "state" / f"remagraph-{safe}").resolve()
+    return resolved
 
 
 class SafetyValveError(RuntimeError):
