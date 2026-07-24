@@ -52,14 +52,30 @@ def test_connect_raises_on_newer_schema(tmp_path, monkeypatch):
 
 
 def test_migrate_from_v1_to_current_preserves_data(tmp_path, monkeypatch):
-    """模擬舊版 v1 DB 升級到目前 SCHEMA_VERSION，驗證資料與索引保留。"""
+    """手動建構一個「貨真價實」的 v1 資料庫（project_id 欄位存在之前的原始
+    形狀：memories 表無 project_id 欄位、kind CHECK 約束無 fleet_member），
+    驗證 db.connect() 能完整把它 migrate 到目前的 SCHEMA_VERSION，且原始
+    那筆資料的內容維持不變、project_id 正確回填為 'default'。
+
+    背景（修復前的崩潰行為）：db.connect() 過去無條件先呼叫 _init_schema()
+    才呼叫 _run_migrations()。_init_schema() 的 executescript 內含
+    `CREATE TABLE IF NOT EXISTS memories (...)`（對已存在的舊表是 no-op），
+    但同一個 script 稍後又有
+    `CREATE INDEX IF NOT EXISTS idx_memories_project_id ON memories(project_id)`。
+    對一個真正的 v1 資料庫而言，此時 project_id 欄位根本不存在（要到
+    _migrate_v2_to_v3 的 ALTER TABLE 才會加上），所以這條 CREATE INDEX
+    會直接以 sqlite3.OperationalError: no such column: project_id 崩潰，
+    migration chain 永遠沒有機會執行。"""
     state_dir = tmp_path / "state"
     monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(state_dir))
 
     db_path = db.get_db_path()
     conn = sqlite3.connect(db_path)
 
-    # 建立極簡 v1 schema（無 project_id、舊 kind 約束、無 fleet_member）
+    # 建立極簡、但貨真價實的 v1 schema —— 刻意純手動 DDL，不透過
+    # _init_schema()/db.connect() 建構（那正是本測試要驗證的目標路徑本身）：
+    # 無 project_id 欄位、kind CHECK 無 fleet_member、無 memory_labels
+    # （該表遠遠晚到 v5→v6 才出現）。
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE memories (
@@ -94,9 +110,70 @@ def test_migrate_from_v1_to_current_preserves_data(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
 
-    # 注意：完整舊版到新版的 migration 路徑驗證已手動模擬並記錄於發行前準備。
-    # 核心 migration 函式與版本檢查已在 _run_migrations 中實作，基本測試覆蓋新鮮 DB 與新版拒絕情境。
-    # 真實升級情境（含 herdr-bridge DB）已在開發過程中驗證。
+    # 真正的斷言：db.connect() 對這個貨真價實的 v1 資料庫必須成功（不崩潰），
+    # 且完整跑完 migration chain 到目前的 SCHEMA_VERSION。
+    conn = db.connect()
+
+    def _meta(key):
+        row = conn.execute("SELECT value FROM _meta WHERE key=?", (key,)).fetchone()
+        return row[0] if row is not None else None
+
+    assert _meta("schema_version") == str(db.SCHEMA_VERSION)
+
+    # 原始那筆 v1 資料列必須存活，且 project_id 依 _migrate_v2_to_v3 的
+    # ALTER TABLE ... DEFAULT 'default' 邏輯正確回填，其餘欄位內容不變。
+    row = conn.execute(
+        "SELECT id, project_id, kind, task_id, agent_id, timestamp, summary, "
+        "learnings, handoff_note, tags, status, created_at, updated_at "
+        "FROM memories WHERE id = 'mem-test-001'"
+    ).fetchone()
+    assert row is not None
+    (
+        row_id,
+        project_id,
+        kind,
+        task_id,
+        agent_id,
+        timestamp,
+        summary,
+        learnings,
+        handoff_note,
+        tags,
+        status,
+        created_at,
+        updated_at,
+    ) = row
+    assert row_id == "mem-test-001"
+    assert project_id == "default"
+    assert kind == "task_handoff"
+    assert task_id == "task-001"
+    assert agent_id == "agent-a"
+    assert timestamp == "2026-07-22T00:00:00Z"
+    assert summary == "測試記憶摘要"
+    assert learnings == "[]"
+    assert handoff_note == ""
+    assert tags == "[]"
+    assert status == "active"
+    assert created_at == "2026-07-22T00:00:00Z"
+    assert updated_at == "2026-07-22T00:00:00Z"
+
+    # kind CHECK 約束必須已更新為包含 fleet_member（_migrate_v3_to_v4 的效果）
+    # —— 若舊約束仍殘留，這條 INSERT 會拋出 sqlite3.IntegrityError。
+    conn.execute(
+        "INSERT INTO memories (id, project_id, kind, task_id, agent_id, timestamp, "
+        "summary, learnings, handoff_note, tags, status, created_at, updated_at) "
+        "VALUES ('mem-test-002', 'default', 'fleet_member', 'task-002', 'agent-b', "
+        "'2026-07-22T00:00:00Z', 'fleet_member kind 測試資料列', '[]', '', '[]', "
+        "'active', '2026-07-22T00:00:00Z', '2026-07-22T00:00:00Z')"
+    )
+
+    # memory_labels（v5→v6 新增）必須存在。
+    tables = {
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    assert "memory_labels" in tables
+
+    conn.close()
 
 
 # ---------------------------------------------------------------------------
