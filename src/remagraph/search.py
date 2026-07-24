@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
@@ -99,6 +100,13 @@ def _build_fts5_match(sanitized: str) -> str:
 
 
 def _row_to_result(row: sqlite3.Row, score: float | None = None) -> dict[str, Any]:
+    """將 memories 資料表的 row 轉換為 search/status 回傳用的 result dict。
+
+    涵蓋 memories 表的完整欄位集合（embedding 除外，該欄位為內部向量儲存，
+    不對外回傳）。learnings/tags 依 db.py schema 以 JSON 陣列字串儲存，
+    需 json.loads() 還原為實際的 Python list，做法與 store.py 的
+    _row_to_memory() 一致，維持整個程式庫同一套 JSON encode/decode 慣例。
+    """
     result: dict[str, Any] = {
         "id": row["id"],
         "project_id": row["project_id"],
@@ -108,6 +116,12 @@ def _row_to_result(row: sqlite3.Row, score: float | None = None) -> dict[str, An
         "task_id": row["task_id"],
         "timestamp": row["timestamp"],
         "score": score if score is not None else 0.0,
+        "learnings": json.loads(row["learnings"]),
+        "handoff_note": row["handoff_note"],
+        "tags": json.loads(row["tags"]),
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
     }
     return result
 
@@ -297,19 +311,12 @@ def get_status(
     )
     rows = conn.execute(sql, params).fetchall()
 
-    latest: list[dict[str, Any]] = []
-    for row in rows:
-        latest.append(
-            {
-                "id": row["id"],
-                "project_id": row["project_id"],
-                "task_id": row["task_id"],
-                "agent_id": row["agent_id"],
-                "kind": row["kind"],
-                "summary": row["summary"],
-                "timestamp": row["timestamp"],
-                "status": row["status"],
-            }
-        )
+    # 重用 _row_to_result：與 search_memories 共用同一套欄位對映與
+    # JSON decode 邏輯，避免兩處各自維護一份欄位清單而再次出現本函式
+    # 先前發生過的欄位遺漏（handoff_note/learnings/tags/status）問題。
+    # status_update 沒有 BM25 分數的概念，score 沿用 _row_to_result 的
+    # 預設值 0.0 —— 這與 _list_by_filters()（無全文查詢時的列表模式）
+    # 對「無真實分數」記錄的既有處理方式一致。
+    latest: list[dict[str, Any]] = [_row_to_result(row) for row in rows]
 
     return StatusResponse(latest=latest)
