@@ -310,7 +310,7 @@ def main() -> None:
     """程式入口：自動判斷 CLI 或 MCP 模式。
 
     - `remagraph serve` → MCP stdio server
-    - `remagraph store/search/status/init/auto` → CLI 子命令
+    - `remagraph store/search/status/init/auto/install-hooks` → CLI 子命令
     """
     cli_commands = (
         "store",
@@ -321,6 +321,7 @@ def main() -> None:
         "maintain",
         "migrate-project",
         "link",
+        "install-hooks",
     )
     if len(sys.argv) >= 2 and sys.argv[1] in cli_commands:
         from remagraph.cli import main as cli_main
