@@ -21,12 +21,13 @@ from typing import Any
 
 from remagraph.audit import append_event
 from remagraph.db import (
-    connect as _raw_connect,
-)
-from remagraph.db import (
+    READ_ONLY_ATTR,
     get_state_dir,
     load_project_metadata,
     register_known_project,
+)
+from remagraph.db import (
+    connect as _raw_connect,
 )
 
 # ---------------------------------------------------------------------------
@@ -202,6 +203,36 @@ def run_maintenance(
         "project_id": project_id,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
+
+    # 三層 schema 相容性的唯讀降級（見 db._handle_newer_than_code_schema /
+    # db.READ_ONLY_ATTR）：獨立對抗式審查發現的缺口 —— 本函式（無論由呼叫端
+    # 傳入既有 conn，或如上一行自行以 _raw_connect 開一條全新、獨立的內部
+    # 連線）從未檢查過連線是否已被標記唯讀，就直接執行 WAL checkpoint、
+    # prune 的 DELETE、VACUUM、ANALYZE 等一整組寫入操作。維護作業本質上就是
+    # 一組寫入操作，對一個「目前執行中的程式碼尚未完全理解其寫入安全性」的
+    # 新 schema 資料庫來說，沒有一項是安全的 —— 這正是唯讀分級存在的理由。
+    #
+    # 這裡自行開啟的 conn 雖是與外部（可能已標記唯讀）連線不同的 Python
+    # 物件，但兩者是對「同一個資料庫檔案」、以「同一份程式碼」執行同一套
+    # _run_migrations -> _handle_newer_than_code_schema 三層判斷，必然得到
+    # 完全相同的唯讀判定結果。因此直接檢查『這條』conn 本身的標記，等同於
+    # 檢查外部連線的標記 —— 不需要（在不修改 db.py 呼叫點的前提下也無法）
+    # 取得外部連線本身的狀態。
+    #
+    # 刻意不受 force=True 影響：force 代表「呼叫端明確要求執行」，但這裡要
+    # 防範的是 schema 相容性風險而非呼叫端意願，兩者是正交的 —— 唯讀降級的
+    # 保護必須無條件生效。
+    if getattr(conn, READ_ONLY_ATTR, False):
+        stats["skipped"] = True
+        stats["skip_reason"] = "read_only_schema_tier"
+        try:
+            append_event(
+                "maintenance_skipped_read_only",
+                {"project_id": project_id, **stats},
+            )
+        finally:
+            conn.close()
+        return stats
 
     try:
         # 1. WAL checkpoint
