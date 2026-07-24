@@ -5,7 +5,8 @@
 - FTS5 query sanitization（移除特殊字元、關鍵字跳脫）
 - BM25 全文檢索（trigram tokenizer，支援 CJK）
 - kind/status/tags/agent_id/task_id 過濾
-- 短查詢（≤2 字元）處理：回傳空結果 + warning
+- 空字串 query：視為「列出最近的記憶」，不做全文檢索
+- 短查詢（1–2 字元、非空）處理：回傳空結果 + warning
 - has_more 判定（LIMIT top_k + 1）
 - 最新 status 查詢（active status_update 依 task_id 去重）
 - 跨專案標籤搜尋（PPLX 架構改善計畫 item 4b，見 _search_cross_project_by_label）
@@ -279,6 +280,14 @@ def search_memories(
             )
         else:
             return _search_related_projects(conn, request)
+
+    # 空字串（或僅空白）query：語意上等同「列出最近的記憶」而非全文檢索，
+    # 不論是否帶有 task_id/agent_id/kind/tags 等過濾條件，一律走列表模式。
+    # 這與「query 經 sanitize 後才變空」（如純特殊字元 "**\"\""）不同——
+    # 後者代表使用者確實想搜尋，只是內容不構成有效查詢詞，仍應維持既有的
+    # 短查詢空結果行為（見下方 _trigram_char_len 分支）。
+    if not (request.query or "").strip():
+        return _list_by_filters(conn, request)
 
     sanitized = sanitize_fts5_query(request.query or "")
 
