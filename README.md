@@ -20,7 +20,13 @@
 
 **目前主要用於 Herdr Bridge 真實運作，尚未對外公開發布 PyPI。**
 
-推薦安裝方式（一行指令）：
+推薦安裝方式（一行指令，pin 到目前最新的內部 alpha 版本標記）：
+
+```bash
+uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.3.0-alpha
+```
+
+不指定版本則安裝 `main` 分支目前最新內容：
 
 ```bash
 uv tool install git+https://github.com/aiken884/RemaGraph.git
