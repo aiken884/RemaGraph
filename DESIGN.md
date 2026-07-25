@@ -458,9 +458,21 @@ RemaGraph 每個 `project_id` 對應完全獨立的 state_dir / SQLite 檔案（
 - 提供此參數時，走完全獨立於全文檢索的查詢路徑——只依 label 精確比對，`query` / `kind` / `tags` 等其餘全文檢索/過濾參數不適用；`status` 過濾預設 `active`，可由呼叫端覆蓋
 - 查詢範圍：(a) 目前這個連線自己專案的 `memory_labels`，加上 (b) 透過登記表逐一開啟「其他」已知專案的唯讀連線查詢，合併結果並在每筆結果標註 `source_project_id` 表示其來源專案
 - 與既有的 `all_projects` 旗標是完全獨立的兩個維度，互不取代：`all_projects` 只移除「目前這一個資料庫檔案內」的 `project_id` 過濾（每個 project 各自是獨立檔案，此旗標從不開啟其他檔案）；`cross_project_label` 才會透過登記表真正開啟其他 project 各自獨立的資料庫檔案
-- **Fan-out 上限 20**（`search._CROSS_PROJECT_FANOUT_CAP`）：單次搜尋最多開啟 20 個「其他」已知專案的資料庫（不含目前連線自己所屬的專案，那一個是直接查詢、不計入上限）。已知專案數會隨時間單調增加（目前沒有自動清除機制），若無上限，查詢延遲會隨已知專案數線性增長且使用者往往不會意識到——這呼應 PPLX 研究引用 Azure DevOps 官方文件對「跨專案連結查詢」效能成本的警示。超過上限時**不會**悄悄截斷佯裝已涵蓋全部：`SearchResponse.cross_project_fanout_capped` 標記為 `true` 並記一筆 warning log，讓呼叫端明確知道這次結果可能不完整
+- **Fan-out 上限預設 50、可設定、硬上限 200**（`search._CROSS_PROJECT_FANOUT_CAP`，原為寫死的 20；PPLX 架構審查共識調整）：單次搜尋最多開啟這麼多個「其他」已知專案的資料庫（不含目前連線自己所屬的專案，那一個是直接查詢、不計入上限）。可透過 CLI `--fanout-cap` 或 `REMAGRAPH_FANOUT_CAP` 環境變數覆寫，兩者皆會被夾在硬上限 200（`REMAGRAPH_FANOUT_HARD_CAP` 才可再提高）之內，刻意不提供「無上限」逃生口——已知專案數會隨時間單調增加（目前沒有自動清除機制），若無上限，一次 fan-out 可能觸發過多並行 SQLite 連線，在 CI/容器等資源受限環境有 OOM 風險。超過上限時**不會**悄悄截斷佯裝已涵蓋全部：`SearchResponse.cross_project_fanout_capped` 標記為 `true`，並附上 `candidates_total`/`candidates_searched`/`candidates_skipped` 三個計數（`total == searched + skipped` 恆成立，皆已排除呼叫端自己所屬的專案，避免計入 off-by-one），CLI 於截斷時 exit code 改為 `2`（有別於 `0`=完整、`1`=真正錯誤），讓呼叫端能明確分辨「完整結果」「結果不完整」「工具本身出錯」三種情況，而不是把截斷誤讀成空結果。
 - 已登記但目前不可達的專案（例如目錄已被刪除、或該專案的資料庫尚未升級到含 `memory_labels` 表的 schema 版本）會被優雅跳過，不讓整個搜尋因單一專案失敗
-- 結果依 `(source_project_id, id)` 去重：即使呼叫端未提供 `project_id`（因而無法在 fan-out 迴圈中提前判斷、跳過自己所屬的專案），也保證同一筆記憶不會被回傳兩次
+- 結果依 `(source_project_id, id)` 去重：即使呼叫端未提供 `project_id`（因而無法在 fan-out 迴圈中提前判斷、跳過自己所屬的專案），也保證同一筆記憶不會被回傳兩次。此去重鍵有一個已修復的邊界情況：若呼叫端自己的連線與某個已註冊的候選專案**物理上是同一個 SQLite 檔案**（例如本機的 `default` state dir 恰好與某個已註冊專案指向同一路徑），兩次出現會帶著不同的 `source_project_id` 字串，光靠這個鍵攔不住重複——因此 fan-out 迴圈額外用 `PRAGMA database_list` 取得雙方實際連到的實體檔案絕對路徑比對，物理上相同就跳過，不只依賴 `project_id` 字串比對
+
+### 專案隔離安全閥（`safety_validate_project`）與 `remagraph serve` 的單專案綁定
+
+`project_id` 本身只是資料列上的標籤欄位，**真正決定連到哪個實體 SQLite 檔案的是 `REMAGRAPH_STATE_DIR`/`REMAGRAPH_PROJECT` 環境變數**（或明確傳入 `connect()` 的 `state_dir`）。`db.connect(project_id=...)` 內建 `maintenance.safety_validate_project(project_id)` 這道安全閥：透過 `resolve_project_state_dir(project_id)` 算出這個 `project_id` 應該對應的權威 state_dir，並讀取該目錄下的 `project.json`（`db.validate_project_metadata()`）確認其記錄的 `project_id` 與目前要求的一致——不一致（該目錄先前已合法用於另一個 project）一律 `SafetyValveError`，記一筆 `project_metadata_mismatch` 違規稽核，在任何寫入發生之前就擋下。
+
+這道安全閥門只有在呼叫端把 `project_id` 明確傳進 `connect()` 時才會生效；CLI 各子命令與 `remagraph serve` 現在都會這麼做（2026-07-25 修復前，兩者皆以零參數呼叫 `_db.connect()`，安全閥完全不會被觸發，實際連到哪個檔案純看 process 環境當下剛好是什麼——這正是一次真實生產事故的根因：一個專案的 `serve` process 繼承了另一個專案的環境變數，卻悄悄把資料寫進了後者的真實資料庫）。
+
+`remagraph serve` 的專案綁定模型（PPLX 架構審查共識，見下方待決策記錄）：**單一 serve process 嚴格綁定單一 project，且在啟動時就 fail-fast**，不是「第一次呼叫決定綁定」：
+- 啟動時必須提供 `--project <id>` 或 `REMAGRAPH_PROJECT` 環境變數其中之一，兩者皆缺席直接非零 exit，不進入 MCP stdio 迴圈
+- 綁定成功後印出診斷訊息（實際綁定的 `project_id` 與解析出的 state_dir），若偵測到連線是唯讀降級模式也會提前警告
+- 之後任何 tool call（`remagraph_store`/`search`/`status`）帶入與綁定不同、非 `None` 的 `project_id`，一律回傳結構化錯誤，不悄悄沿用/切換連線
+- **刻意不支援單一 process 動態路由多個 project**（PPLX 明確否決此設計方向）：SQLite WAL 模式下多條長駐連線的 checkpoint 時機會互相干擾；連線 cache 的 eviction/關閉時機管理複雜；且安全閥本身假設「目前 process 環境只對應一個 project_id」，動態路由會讓這個假設不成立，等於要連帶重新設計安全閥語意。需要同時服務多個專案時，應在 MCP host 層為每個專案各自啟動一個 `remagraph serve --project <id>` process，而非讓單一 server 跨專案路由——這也是 MCP 規格本身建議的分工方式
 
 ---
 

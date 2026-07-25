@@ -5,6 +5,14 @@ All notable changes to RemaGraph will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+> 發行前準備階段更新（v0.3.0-alpha 標記之後新增，尚未切下一個版本標記）。
+
+### Fixed
+- **安全性：`project_id` 未真正驅動 state_dir 解析，安全閥從未被觸發**：真實生產事故——herdr-bridge 的真實 project 目錄被其他專案（MegaNote 的 `remagraph serve`）誤連並持續寫入/維護，audit log 累積 24974 次 `maintenance_completed` 但只有 294 次真正的 `remagraph_store`，`memories` 表被清到只剩個位數。根因：CLI 各子命令與 `remagraph serve` 呼叫 `_db.connect()` 時皆未傳入呼叫端實際拿到的 `project_id`，導致內建的 `safety_validate_project()` 安全閥從未被觸發，實際連到哪個實體 SQLite 檔案只看 process 環境當下的 `REMAGRAPH_STATE_DIR`/`REMAGRAPH_PROJECT`，與明確傳入的 `--project`/`project_id` 完全脫鉤。依 PPLX 架構審查共識修復：CLI 補傳 `project_id` 啟用既有安全閥；`remagraph serve` 新增啟動時強制綁定（`--project`/`REMAGRAPH_PROJECT` 二擇一，皆缺席即 fail-fast，不進入 MCP 迴圈），任何 tool call 帶不同 `project_id` 一律拒絕；刻意不支援單一 process 動態多專案路由（PPLX 明確否決，理由見 DESIGN.md）。兩輪獨立對抗式審查發現並修復：安全閥核心比較邏輯原是套套邏輯（`resolve_project_state_dir()` 在 env 已設定時逐字回傳該值，導致比較恆為 False，真實事故情境完全沒被擋下）——已接上既有的 `db.validate_project_metadata()` 讀取 `project.json` 做真正身分比對；`_record_violation` 的 best-effort 違規記錄本身誤寫進受害目錄的問題；liveness check 對「目錄被外部刪除」場景失效的問題（POSIX unlinked-inode 語意）；CLI 頂層既有守衛（`8edb739e`）正確擋下寫入但未留 audit trail 的缺口。
+- **fan-out cap 截斷語意誤讀為空結果**：`cross_project_label`/`include_related` 達到候選專案上限（原寫死 20）時，回應 `results: []` + `cross_project_fanout_capped: true` 但 exit code 仍是 0，容易被只看 `results` 的呼叫端誤判為「查無此記憶」。改為 cap 可設定（`--fanout-cap`/`REMAGRAPH_FANOUT_CAP`，預設提高為 50，硬上限 200，`REMAGRAPH_FANOUT_HARD_CAP` 才可再提高，不提供無上限逃生口），回應新增 `candidates_total`/`candidates_searched`/`candidates_skipped`（`total == searched + skipped` 恆成立），CLI 於截斷時 exit code 改為 2（有別於 0=完整、1=真正錯誤）。修復過程一併發現並修好 `_cross_project_fanout()` 對「呼叫端自己與某個已註冊專案物理上是同一份 SQLite 檔案」時重複回傳結果的 bug（改用 `PRAGMA database_list` 取得實體路徑比對，而非僅比對 `project_id` 字串）。
+
 ## [0.3.0-alpha] — 2026-07-25（內部 Alpha 測試版）
 
 > **注意**：此版本僅供內部使用，尚未對外發布 PyPI。安裝方式見 README「安裝」章節（`uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.3.0-alpha`）。
