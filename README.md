@@ -23,7 +23,7 @@
 推薦安裝方式（一行指令，pin 到目前最新的內部 alpha 版本標記）：
 
 ```bash
-uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.3.0-alpha
+uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.3.1-alpha
 ```
 
 不指定版本則安裝 `main` 分支目前最新內容：
