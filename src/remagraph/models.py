@@ -138,6 +138,15 @@ class SearchRequest(BaseModel):
     顯式宣告，不像 project_registry 是每次 connect 自動登記），但仍設一個
     保守上限，避免呼叫端不慎傳入過大的 hops 造成不必要的多層 BFS 查詢
     往返。include_related=False 時此欄位無意義。"""
+    fanout_cap: int | None = None
+    """跨專案 fan-out（cross_project_label / include_related）單次搜尋最多
+    開幾個『其他』專案資料庫連線的上限覆寫（PPLX 架構審查共識，BUG 2 修復）。
+    None（預設）時由 search.resolve_fanout_cap() 依序改用
+    REMAGRAPH_FANOUT_CAP 環境變數、再退回 search._CROSS_PROJECT_FANOUT_CAP
+    預設值（50）。提供明確數值時（對應 CLI --fanout-cap）優先於環境變數。
+    最終一律 clamp 到硬性上限（預設 200，僅能由 REMAGRAPH_FANOUT_HARD_CAP
+    環境變數明確 opt-in 提高），不允許 0/負數作為「不限」的逃生艙口
+    —— 見 search.resolve_fanout_cap() 完整說明。"""
 
 
 class SearchResponse(BaseModel):
@@ -152,6 +161,17 @@ class SearchResponse(BaseModel):
     N 個已知專案並在此標記 True，讓呼叫端知道結果可能不完整，而不是悄悄
     截斷、佯裝『已涵蓋所有已知專案』。一般搜尋（未使用 cross_project_label）
     恆為 False，對既有呼叫端而言是完全加法、向後相容的欄位。"""
+    candidates_total: int = 0
+    """本次 fan-out（cross_project_label / include_related）考慮的候選『其他』
+    專案總數（BUG 2 修復，PPLX 架構審查共識）。非 fan-out 搜尋恆為 0。"""
+    candidates_searched: int = 0
+    """本次 fan-out 實際開連線查詢的候選專案數（撞到 fanout_cap 前）。非
+    fan-out 搜尋恆為 0。"""
+    candidates_skipped: int = 0
+    """candidates_total - candidates_searched —— 因撞到 fanout_cap 而未查詢
+    的候選專案數。非 fan-out 搜尋恆為 0。單獨看 results 陣列或
+    cross_project_fanout_capped 皆無法得知「差多少」，此欄位讓呼叫端能明確
+    量化搜尋不完整的程度，而不必只能靠 exit code 或布林值猜測。"""
 
 
 # ---------------------------------------------------------------------------

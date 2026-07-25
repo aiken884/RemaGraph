@@ -24,7 +24,12 @@ from pathlib import Path
 from typing import Any
 
 from remagraph import db as _db
-from remagraph.maintenance import MaintenancePolicy, run_maintenance, safety_validate_project
+from remagraph.maintenance import (
+    MaintenancePolicy,
+    _record_violation,
+    run_maintenance,
+    safety_validate_project,
+)
 from remagraph.models import SearchRequest, StatusRequest, StoreRequest
 from remagraph.search import get_status, search_memories
 from remagraph.store import process_store
@@ -34,10 +39,41 @@ from remagraph.store import process_store
 # ---------------------------------------------------------------------------
 
 
-def _get_conn() -> sqlite3.Connection:
-    conn = _db.connect()
+def _get_conn(project_id: str | None = None) -> sqlite3.Connection:
+    """開啟 CLI 子命令使用的連線。
+
+    BUG 1 修復（PPLX 架構審查共識）：_db.connect() 早已內建
+    maintenance.safety_validate_project 這道安全閥門（見該函式），但呼叫端
+    必須明確傳入 project_id 才會觸發——修復前 cli.py 一律以零參數呼叫
+    _db.connect()，導致實際連到哪一個實體 DB 檔案完全只取決於呼叫當下
+    process 環境裡 REMAGRAPH_STATE_DIR/REMAGRAPH_PROJECT 剛好是什麼，與
+    呼叫端明確指定的 --project 值完全脫鉤，安全閥門從未真正被觸發。
+
+    現在由各 cmd_* 子命令透過 _project_id_for_conn() 決定是否傳入
+    project_id（見該函式對『default』回退值的例外說明），本函式單純原樣
+    轉呼叫，不重複判斷。
+    """
+    conn = _db.connect(project_id=project_id)
     atexit.register(_db.close, conn)
     return conn
+
+
+def _project_id_for_conn(project: str | None) -> str | None:
+    """決定要不要把 project 往下傳給 _get_conn()/db.connect() 以觸發
+    safety_validate_project 強制驗證（BUG 1 修復）。
+
+    刻意排除『default』回退值（以及 None，即 --all-projects 等完全未指定
+    project 的情境）——這與 db.connect() 自身既有的 REMAGRAPH_PROJECT
+    env 相容分支語意一致（`os.environ.get("REMAGRAPH_PROJECT", "default")
+    != "default"` 才驗證），也是刻意的設計選擇：若連『沒有指定任何 project、
+    退回 default』這種既有的合法用法都強制觸發安全閥門，會是一次不必要的
+    regression（讓大量現有、從未指定 --project 的既有測試/既有用法無故
+    開始失敗）。只有呼叫端明確指定了一個非 'default' 的 project 時，才
+    真的有『project_id 與目前連線是否對映』這個問題需要驗證。
+    """
+    if project and project != "default":
+        return project
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +137,7 @@ def cmd_store(args: argparse.Namespace) -> None:
         labels=_parse_json_list(args.labels) or [],
     )
     try:
-        conn = _get_conn()
+        conn = _get_conn(_project_id_for_conn(project))
     except Exception as e:
         print(f"ERROR: 無法連線資料庫 - {e}", file=sys.stderr)
         sys.exit(1)
@@ -156,9 +192,10 @@ def cmd_search(args: argparse.Namespace) -> None:
         cross_project_label=args.cross_project_label,
         include_related=args.include_related,
         related_hops=args.related_hops,
+        fanout_cap=args.fanout_cap,
     )
     try:
-        conn = _get_conn()
+        conn = _get_conn(_project_id_for_conn(project))
     except Exception as e:
         print(f"ERROR: 無法連線資料庫 - {e}", file=sys.stderr)
         sys.exit(1)
@@ -168,8 +205,17 @@ def cmd_search(args: argparse.Namespace) -> None:
             "results": response.results,
             "has_more": response.has_more,
             "cross_project_fanout_capped": response.cross_project_fanout_capped,
+            "candidates_total": response.candidates_total,
+            "candidates_searched": response.candidates_searched,
+            "candidates_skipped": response.candidates_skipped,
         }
     )
+    # BUG 2 修復（PPLX 架構審查共識）：cross_project_fanout_capped 時，只看
+    # exit code 的呼叫端也必須能區分「完整結果」(0) 與「結果可能不完整」
+    # (2)，而非誤判為與「真正的執行錯誤」(1) 同一等級，也不是誤判為
+    # 「完全成功」(0)。
+    if response.cross_project_fanout_capped:
+        sys.exit(2)
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +230,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     elif not project:
         project = "default"
     try:
-        conn = _get_conn()
+        conn = _get_conn(_project_id_for_conn(project))
     except Exception as e:
         print(f"ERROR: 無法連線資料庫 - {e}", file=sys.stderr)
         sys.exit(1)
@@ -281,7 +327,7 @@ def cmd_auto(args: argparse.Namespace) -> None:
     # 1. recall
     request = SearchRequest(query="", top_k=top_k, project_id=project, task_id=task_id)
     try:
-        response = search_memories(_get_conn(), request)
+        response = search_memories(_get_conn(_project_id_for_conn(project)), request)
         memories = response.results
     except Exception as exc:  # noqa: BLE001 — 記憶失敗不阻斷主任務
         _log(f"（讀取記憶失敗：{exc}，繼續）")
@@ -350,7 +396,7 @@ def cmd_auto(args: argparse.Namespace) -> None:
             handoff_note=handoff_note,
             tags=_parse_json_list(args.tags) or ["auto"],
         )
-        store_resp = process_store(store_req, _get_conn())
+        store_resp = process_store(store_req, _get_conn(_project_id_for_conn(project)))
         store_out: dict[str, Any] = {
             "status": store_resp.status,
             "id": store_resp.id,
@@ -460,6 +506,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="--include-related 的 BFS traversal 深度（預設 1，僅限直接關聯）",
+    )
+    p_search.add_argument(
+        "--fanout-cap",
+        type=int,
+        default=None,
+        help=(
+            "跨專案 fan-out（--cross-project-label / --include-related）單次"
+            "最多開幾個『其他』專案資料庫連線的上限覆寫（預設 50，可另用 "
+            "REMAGRAPH_FANOUT_CAP 環境變數設定，本旗標優先）。一律 clamp 到"
+            "硬性上限 200（僅能由 REMAGRAPH_FANOUT_HARD_CAP 環境變數明確 "
+            "opt-in 提高），不支援 0 表示不限"
+        ),
     )
 
     # status
@@ -591,7 +649,30 @@ def main(argv: list[str] | None = None) -> None:
             proj = getattr(args, "project", None) or os.environ.get("REMAGRAPH_PROJECT")
             if proj:
                 _db.validate_project_metadata(proj)
-        except Exception as e:
+        except ValueError as e:
+            # 這道頂層守門（8edb739e 引入）搶在任何 cmd_* 子命令被呼叫之前就
+            # 攔截 project.json metadata 不符的情況——這代表它會先於
+            # cmd_store/cmd_search/... 內部透過 _get_conn() ->
+            # db.connect(project_id=...) -> safety_validate_project() 才會
+            # 走到的、已修復的 project_metadata_mismatch 稽核記錄路徑動作，
+            # 導致這個違規完全沒有留下 audit 記錄（獨立對抗式複審發現的缺口：
+            # `remagraph store --project B` 在此情境下正確拒絕寫入，但
+            # audit-*.jsonl 是空的，跟 `remagraph serve` 的同一種違規會寫下
+            # safety_violation/project_metadata_mismatch 稽核記錄不一致）。
+            #
+            # 不能直接刪掉這道守門、改由各 cmd_* 自己的
+            # _get_conn()/safety_validate_project() 頂替：cmd_auto 的
+            # recall（第一次 _get_conn 呼叫）與 store（第二次 _get_conn 呼叫）
+            # 兩處都各自包在會吞掉任意 Exception（含 SafetyValveError）的
+            # try/except 裡（既有設計：記憶讀寫失敗不應阻斷主任務），若拿掉
+            # 這裡的頂層守門，`remagraph auto --project B ...` 在同樣的
+            # mismatch 情境下會變成「照常執行外部指令、只在讀寫記憶時安靜吞掉
+            # 錯誤、且無 sys.exit(1)」——反而是真正的 regression。
+            #
+            # 因此這裡改為額外呼叫與 safety_validate_project() 完全相同的
+            # maintenance._record_violation()，補上稽核記錄，不重複驗證邏輯
+            # 本身（validate_project_metadata 仍只呼叫一次）。
+            _record_violation(proj, "project_metadata_mismatch")
             print(f"ERROR: {e}", file=sys.stderr)
             sys.exit(1)
 

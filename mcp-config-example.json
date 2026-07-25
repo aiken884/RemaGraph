@@ -2,9 +2,9 @@
   "mcpServers": {
     "remagraph": {
       "command": "remagraph",
-      "args": ["serve"],
+      "args": ["serve", "--project", "myproject"],
       "env": {
-        "REMAGRAPH_STATE_DIR": "/Users/aikenlin/.local/state/remagraph"
+        "REMAGRAPH_STATE_DIR": "/Users/aikenlin/.local/state/remagraph-myproject"
       }
     }
   }

@@ -78,6 +78,12 @@ remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
 
 將 RemaGraph 掛到 MCP client 即可。以下為常見 client 設定範例：
 
+**注意（自 BUG 1 修復起）**：`remagraph serve` 現在**必須**在啟動時明確綁定
+單一 project——透過 `--project <id>` 參數，或 `REMAGRAPH_PROJECT` 環境變數
+擇一提供，兩者皆缺席時會快速失敗、不啟動 MCP stdio 迴圈（避免行程在繼承了
+「別的專案」環境變數的情況下悄悄跨專案讀寫）。每個 project 各自對應一個
+獨立的 `remagraph serve` 行程，不支援單一行程動態切換多個 project。
+
 **Claude Desktop**（`claude_desktop_config.json`）：
 
 ```json
@@ -85,9 +91,9 @@ remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
   "mcpServers": {
     "remagraph": {
       "command": "remagraph",
-      "args": ["serve"],
+      "args": ["serve", "--project", "myproject"],
       "env": {
-        "REMAGRAPH_STATE_DIR": "/home/user/.local/state/remagraph"
+        "REMAGRAPH_STATE_DIR": "/home/user/.local/state/remagraph-myproject"
       }
     }
   }
@@ -101,7 +107,10 @@ remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
   "mcpServers": {
     "remagraph": {
       "command": "remagraph",
-      "args": ["serve"]
+      "args": ["serve"],
+      "env": {
+        "REMAGRAPH_PROJECT": "myproject"
+      }
     }
   }
 }
@@ -114,14 +123,17 @@ remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
 | 變數 | 說明 | 預設值 |
 |------|------|--------|
 | `REMAGRAPH_STATE_DIR` | SQLite DB 存放目錄 | `~/.local/state/remagraph/` |
+| `REMAGRAPH_PROJECT` | 目前 project 綁定（`remagraph serve` 啟動時必須提供此環境變數或 `--project` 其中之一） | 無 |
+| `REMAGRAPH_FANOUT_CAP` | `search --cross-project-label`/`--include-related` 單次最多開幾個「其他」專案資料庫連線（`--fanout-cap` 優先於此環境變數） | `50` |
+| `REMAGRAPH_FANOUT_HARD_CAP` | 上述 cap 的硬性上限，僅供明確 opt-in 提高（一般不需調整） | `200` |
 
 目錄不存在時自動建立（權限 0700），DB 檔案權限 0600。路徑已加入安全性檢查（禁止系統目錄）。
 
 ### 3. CLI 入門
 
 ```bash
-# 啟動 stdio MCP server
-remagraph serve
+# 啟動 stdio MCP server（必須以 --project 或 REMAGRAPH_PROJECT 綁定單一 project）
+remagraph serve --project myproject
 
 # 初始化 / 一鍵任務
 remagraph init --project myproject

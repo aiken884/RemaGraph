@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sqlite3
 from pathlib import Path
@@ -63,12 +64,76 @@ logger = logging.getLogger(__name__)
 # 佯裝『已涵蓋所有已知專案』——而是在 SearchResponse.cross_project_fanout_capped
 # 標記 True，並記一筆 warning log，讓呼叫端能明確知道這次的結果可能不完整。
 #
-# 20 這個數字本身是刻意保守、易於之後調整的預留：多數個人/小團隊使用情境下
-# 已知專案數遠低於 20（20 個獨立 SQLite 檔案的循序開啟+查詢，在本地磁碟上的
-# 延遲仍在可接受範圍——實務上每個 connect+query 約數毫秒等級），同時已足以
-# 讓典型使用情境完全不會撞到上限；若之後量測顯示實際延遲可接受更高的數字，
-# 這是一個可以獨立調整、不影響其餘邏輯的常數。
-_CROSS_PROJECT_FANOUT_CAP = 20
+# 50（PPLX 架構審查共識，BUG 2 修復，2026-07）：原本 20 這個數字過於保守——
+# 實務量測顯示真實候選專案數已經常超過 20，導致 fan-out 過早被截斷。50 仍是
+# 刻意保守、易於之後調整的預留，可由呼叫端經 resolve_fanout_cap() 的
+# REMAGRAPH_FANOUT_CAP 環境變數或明確覆寫值（CLI --fanout-cap）調整，唯一律
+# clamp 到硬性上限（見 _FANOUT_HARD_CAP_DEFAULT）——這是刻意的資源保護
+# 上限：呼叫端（agent）對這台機器上實際存在多少個 state_dir 毫無可見度，
+# 不設硬上限會有 OOM／過多並行 SQLite 連線的風險（尤其 CI 容器等資源受限
+# 環境）。因此刻意不提供「0 表示不限」的逃生艙口。
+_CROSS_PROJECT_FANOUT_CAP = 50
+
+# 硬性上限（PPLX 架構審查共識，BUG 2 修復）：不論呼叫端透過 CLI --fanout-cap
+# 或 REMAGRAPH_FANOUT_CAP 環境變數要求多高的 cap，resolve_fanout_cap() 一律
+# clamp 到此值，除非額外、明確地透過 REMAGRAPH_FANOUT_HARD_CAP 環境變數
+# opt-in 提高——這是刻意的兩層設計：一般呼叫端可自由調整「軟」上限以取得更
+# 完整的結果，但「硬」上限的提高需要另一個獨立、更明確的環境變數，避免
+# 隨手調高 --fanout-cap 就意外繞過資源保護。
+_FANOUT_HARD_CAP_DEFAULT = 200
+
+
+def _resolve_fanout_hard_cap() -> int:
+    """解析目前生效的硬性上限。預設 _FANOUT_HARD_CAP_DEFAULT，僅能由
+    REMAGRAPH_FANOUT_HARD_CAP 環境變數明確 opt-in 提高（或降低）；環境變數
+    值無法解析為正整數時，防禦性退回預設值。
+    """
+    raw = os.environ.get("REMAGRAPH_FANOUT_HARD_CAP")
+    if raw:
+        try:
+            parsed = int(raw)
+        except ValueError:
+            return _FANOUT_HARD_CAP_DEFAULT
+        if parsed > 0:
+            return parsed
+    return _FANOUT_HARD_CAP_DEFAULT
+
+
+def resolve_fanout_cap(explicit: int | None = None) -> int:
+    """解析本次跨專案 fan-out 搜尋實際生效的 cap（PPLX 架構審查共識，
+    BUG 2 修復）。
+
+    優先序：
+    1. explicit（呼叫端明確提供的值，對應 CLI `--fanout-cap` 或
+       SearchRequest.fanout_cap）——若提供，優先於環境變數。
+    2. REMAGRAPH_FANOUT_CAP 環境變數（可解析為整數時）。
+    3. _CROSS_PROJECT_FANOUT_CAP 模組預設值（50）。
+
+    0 或負數一律視為無效值、防禦性退回步驟 3 的預設值——刻意不提供
+    「0 表示不限」的逃生艙口（PPLX 共識明確拒絕此設計，理由見上方模組
+    常數說明）。
+
+    最終結果一律 clamp 到 _resolve_fanout_hard_cap() 解析出的硬性上限
+    （預設 200，僅能由 REMAGRAPH_FANOUT_HARD_CAP 環境變數明確 opt-in
+    提高）——即使 explicit 或環境變數要求更高的值，也不會超過硬上限。
+    """
+    if explicit is not None:
+        cap = explicit
+    else:
+        raw = os.environ.get("REMAGRAPH_FANOUT_CAP")
+        if raw:
+            try:
+                cap = int(raw)
+            except ValueError:
+                cap = _CROSS_PROJECT_FANOUT_CAP
+        else:
+            cap = _CROSS_PROJECT_FANOUT_CAP
+
+    if cap <= 0:
+        cap = _CROSS_PROJECT_FANOUT_CAP
+
+    return min(cap, _resolve_fanout_hard_cap())
+
 
 # ---------------------------------------------------------------------------
 # FTS5 query sanitization
@@ -522,15 +587,35 @@ def _cross_project_fanout(
     # 對 list_known_projects() 呼叫次數的明確斷言）。
     own_db_path = _own_connection_db_path(conn)
 
+    # candidate_project_ids 是『所有』已知/相關的 project_id（來源見上方
+    # docstring），本來就包含呼叫端自己的 project_id——db.list_known_projects()
+    # 回傳全量已知專案，其中當然含有呼叫端自己（見 resolve_project_state_dir
+    # 的 best-effort 自動登記副作用）；db.recall_related() 的 BFS 亦保證
+    # 起點 project_id 本身雖不含在回傳的 related 集合中，但呼叫端有時仍會
+    # 傳入含自身的候選清單。因此在計算候選統計『之前』，先過濾掉空字串與
+    # 邏輯上等於 own_project_id 的項目，得到 other_candidate_ids——這才是
+    # 真正『其他』專案的候選清單，同時作為下方迴圈的迭代對象與
+    # candidates_total 的計算基礎。
+    #
+    # 修復真實回歸 bug（BUG 2，獨立對抗式審查發現）：修復前 candidates_total
+    # 直接用 len(candidate_project_ids)（未過濾、含呼叫端自己）計算，但下方
+    # 迴圈卻用『已排除自己』的邏輯在跑，導致即使完全沒有撞到 cap，
+    # candidates_skipped 也會恆為至少 1（把呼叫端自己算成一個「被跳過的候選」
+    # ）——虛報「搜尋不完整」。修復後 candidates_total 與下方迴圈的迭代範圍
+    # 完全一致，因此 candidates_total == candidates_searched + candidates_skipped
+    # 恆成立，且 candidates_skipped 只在真正撞到 cap 時才會 > 0（見下方物理
+    # 別名判斷仍可能造成極少數例外，屬於另一個獨立、罕見的既有邊界情況，
+    # 不在本次修復範圍——見 _own_connection_db_path 的別名 bug 說明）。
+    other_candidate_ids = [
+        pid
+        for pid in candidate_project_ids
+        if pid and not (own_project_id and pid == own_project_id)
+    ]
+
     # (b) 候選的其他專案
     fanout_capped = False
     fanned_out = 0
-    for pid in candidate_project_ids:
-        if not pid:
-            continue
-        if own_project_id and pid == own_project_id:
-            continue  # 快速路徑：邏輯名稱已相同，避免下方路徑解析的額外成本
-
+    for pid in other_candidate_ids:
         if own_db_path is not None:
             candidate_state_dir = db_mod.get_registered_state_dir(pid)
             if candidate_state_dir:
@@ -550,7 +635,7 @@ def _cross_project_fanout(
                 "results may be incomplete",
                 log_label,
                 cap,
-                len(candidate_project_ids),
+                len(other_candidate_ids),
             )
             break
 
@@ -586,10 +671,27 @@ def _cross_project_fanout(
     has_more = len(deduped_results) > request.top_k
     trimmed = deduped_results[: request.top_k]
 
+    # 候選數量統計（PPLX 架構審查共識，BUG 2 修復；獨立對抗式審查發現
+    # off-by-one 後再次修復，見上方 other_candidate_ids 的說明）：讓只看
+    # exit code 或只看 results 陣列的呼叫端，也能從結構化欄位本身明確判斷
+    # 「搜尋不完整」，而非僅能從 cross_project_fanout_capped 這個布林值猜測
+    # 差距有多大。candidates_total 為候選的『其他』專案總數（不含目前這個
+    # 連線自己所屬的專案，計算基礎與下方迴圈的迭代範圍 other_candidate_ids
+    # 完全一致）；candidates_searched 為撞到 cap 前實際開連線查詢的數量；
+    # candidates_skipped 恆為兩者之差——candidates_total ==
+    # candidates_searched + candidates_skipped 恆成立，且未撞到 cap 時
+    # candidates_skipped 恆為 0。
+    candidates_total = len(other_candidate_ids)
+    candidates_searched = fanned_out
+    candidates_skipped = candidates_total - candidates_searched
+
     return SearchResponse(
         results=trimmed,
         has_more=has_more,
         cross_project_fanout_capped=fanout_capped,
+        candidates_total=candidates_total,
+        candidates_searched=candidates_searched,
+        candidates_skipped=candidates_skipped,
     )
 
 
@@ -646,9 +748,7 @@ def _search_cross_project_by_label(
         return _query_labeled_memories(c, label, status, limit)
 
     known_projects = db_mod.list_known_projects()
-    candidate_ids = [
-        pid for p in known_projects if (pid := p.get("project_id"))
-    ]
+    candidate_ids = [pid for p in known_projects if (pid := p.get("project_id"))]
 
     return _cross_project_fanout(
         conn,
@@ -656,7 +756,7 @@ def _search_cross_project_by_label(
         own_project_id=request.project_id,
         candidate_project_ids=candidate_ids,
         query_fn=_query,
-        cap=_CROSS_PROJECT_FANOUT_CAP,
+        cap=resolve_fanout_cap(request.fanout_cap),
         log_label="cross_project_label",
     )
 
@@ -789,7 +889,7 @@ def _search_related_projects(
         own_project_id=own_project_id,
         candidate_project_ids=related_ids,
         query_fn=_query,
-        cap=_CROSS_PROJECT_FANOUT_CAP,
+        cap=resolve_fanout_cap(request.fanout_cap),
         log_label="include_related",
     )
 

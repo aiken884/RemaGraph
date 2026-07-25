@@ -25,6 +25,7 @@ from remagraph.db import (
     get_state_dir,
     load_project_metadata,
     register_known_project,
+    validate_project_metadata,
 )
 from remagraph.db import (
     connect as _raw_connect,
@@ -101,6 +102,32 @@ def safety_validate_project(project_id: str, *, require_env_match: bool = True) 
                 f"REMAGRAPH_STATE_DIR 與 project 不符: {env_dir} != {configured}"
             )
 
+    # project.json metadata 一致性檢查（獨立對抗式審查發現的缺口修復）。
+    #
+    # 背景：上面的 env_dir != configured 比較在 REMAGRAPH_STATE_DIR 有設定時
+    # 恆為 False —— configured 本身就是由 resolve_project_state_dir() 在
+    # env_dir 存在時原樣（逐字）回傳 env_dir 解析出來的，等同拿一個值跟自己
+    # 比較，state_dir_mismatch 這個檢查因此從未真正攔下過「REMAGRAPH_STATE_DIR
+    # 被設成別的 project 目錄」這個情境——這正是真實事故的形狀：某個 serve
+    # process 繼承了另一個 project 的 REMAGRAPH_STATE_DIR，卻帶著自己的
+    # project_id 呼叫 connect()，安全閥門對此完全沒有反應。
+    #
+    # 這裡改用 db.validate_project_metadata()：直接讀取 configured 目錄下
+    # 實際存在的 project.json，若該目錄先前已被合法用於另一個 project_id
+    # （非 DEFAULT_PROJECT_ID 佔位值），且與目前要求的 project_id 不同，則
+    # 視為不合規，快速失敗——在任何寫入發生之前就擋下，而不是依賴一個永遠
+    # 不會觸發的字串比較。目錄從未被使用過（無 project.json，或內容仍是
+    # DEFAULT_PROJECT_ID 佔位值）時，validate_project_metadata() 不會拋出，
+    # 任何 project_id 的『第一次使用』因此不受影響。
+    try:
+        validate_project_metadata(project_id, configured)
+    except ValueError as e:
+        _record_violation(project_id, "project_metadata_mismatch")
+        raise SafetyValveError(
+            f"project.json 記錄的 project_id 與目前要求的 project_id 不符，"
+            f"拒絕使用 state_dir={configured}：{e}"
+        ) from e
+
     if project_id.startswith("herdr-") and configured.name == "remagraph":
         _record_violation(project_id, "herdr_using_default_db")
         raise SafetyValveError("herdr-* 不得使用 default DB，必須用獨立 state_dir")
@@ -148,6 +175,33 @@ def _record_violation(project_id: str, reason: str) -> None:
 
     if state_dir is None:
         return
+
+    # 寫入 memory（若可用）之前，先確認 state_dir 確實「屬於」正在記錄違規的
+    # 這個 project_id，避免把違規記錄本身也寫進別人的資料庫（獨立對抗式審查
+    # 發現）：對 "project_metadata_mismatch" 這個新違規原因而言，
+    # resolve_project_state_dir(project_id) 在 REMAGRAPH_STATE_DIR 有設定時
+    # 一律逐字回傳該 env 值（見該函式說明），完全不受 project_id 影響——這
+    # 正是本次違規的成因：state_dir 實際上是另一個「已合法使用過」的 project
+    # 的目錄，而不是眼前這個失敗的 project_id 自己的目錄。若這裡仍照舊呼叫
+    # process_store 寫入 discovered_constraint，等同讓「安全閥門擋下越權寫入」
+    # 這個修復本身，反過來又在別人的資料庫裡留下一筆標記著錯誤 project_id
+    # 的記錄——與本次修復的目的（絕不越權寫入他人資料庫）直接矛盾。
+    #
+    # 因此改用 validate_project_metadata() 重新檢查一次：若 state_dir 底下
+    # 已有其他 project 的合法 project.json（非 DEFAULT_PROJECT_ID 佔位值、
+    # 且與目前 project_id 不同），視為「這不是我的目錄」，只保留上面已完成
+    # 的 append_event 稽核記錄（寫入 audit-*.jsonl 純文字日誌檔，不是
+    # memories SQLite 資料庫本身），略過下方的 memory 寫入，不觸碰該資料庫。
+    # 其餘既有的兩種違規原因（missing_remagraph_state_dir /
+    # herdr_using_default_db）解析出的 state_dir 在絕大多數情況下要嘛是
+    # project_id 自己專屬的全新目錄、要嘛是尚未被任何其他 project 合法佔用的
+    # 目錄，這裡的檢查對它們是不影響既有行為的 no-op（見本函式呼叫處測試）。
+    try:
+        validate_project_metadata(project_id, state_dir)
+    except ValueError:
+        return
+    except Exception:
+        pass
 
     # 盡量寫入 memory（若可用）
     try:
