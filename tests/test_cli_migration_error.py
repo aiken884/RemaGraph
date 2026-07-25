@@ -46,7 +46,7 @@ _MIGRATION_ERROR_MESSAGE = (
 )
 
 
-def _raise_migration_error() -> None:
+def _raise_migration_error(project_id: str | None = None) -> None:
     raise MigrationError(_MIGRATION_ERROR_MESSAGE)
 
 
