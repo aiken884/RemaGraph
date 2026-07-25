@@ -538,6 +538,49 @@ def list_known_projects() -> list[dict[str, str]]:
                 pass
 
 
+def get_registered_state_dir(project_id: str) -> str | None:
+    """回傳單一 project_id 在 registry 內登記的 state_dir 字串；查無此
+    project_id 或任何讀取失敗一律回傳 None，絕不拋出例外。
+
+    與 list_known_projects() 的差異：list_known_projects() 一次讀出『所有』
+    已知專案，供需要枚舉全量候選清單的呼叫端使用（例如
+    search._search_cross_project_by_label 的 item 4b fan-out 候選來源）；
+    本函式只針對『單一』已知 project_id 查詢其 state_dir，供只需要「這一個
+    project_id 的 state_dir 是什麼」這種窄範圍查詢的呼叫端使用——例如
+    search._cross_project_fanout 的物理路徑別名判斷：它必須對『任何』呼叫端
+    傳入的候選逐一判斷（包括 item 5 include_related 只窄範圍 fan-out 到
+    project_edges 關聯專案的情境），不應該因此連帶讓該呼叫端也枚舉一次
+    全量已知專案清單——見
+    tests/test_project_edges_and_recall_related.py 的
+    test_cross_project_label_include_related_all_projects_are_fully_decoupled
+    對 list_known_projects() 呼叫次數的明確斷言。
+
+    永遠讀取 DEFAULT_STATE_DIR（透過 _connect_default_registry_db()），與
+    list_known_projects()/connect_foreign_project_readonly() 一致。
+    """
+    conn: sqlite3.Connection | None = None
+    row: sqlite3.Row | None = None
+    try:
+        conn = _connect_default_registry_db()
+        row = conn.execute(
+            "SELECT state_dir FROM project_registry WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+    except Exception:
+        return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    if row is None:
+        return None
+    state_dir = row["state_dir"]
+    return str(state_dir) if state_dir else None
+
+
 def connect_foreign_project_readonly(project_id: str) -> sqlite3.Connection | None:
     """開啟『另一個』已知專案的資料庫連線，供跨專案唯讀查閱使用。
 

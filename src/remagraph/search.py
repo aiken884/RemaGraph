@@ -39,6 +39,7 @@ import json
 import logging
 import re
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 from remagraph.models import SearchRequest, SearchResponse, StatusRequest, StatusResponse
@@ -391,6 +392,55 @@ def _optional_score(row: sqlite3.Row) -> float | None:
         return None
 
 
+def _resolve_physical_db_path(file_path: str | Path) -> str | None:
+    """把一個資料庫檔案路徑正規化為絕對路徑字串（.resolve()），供比較兩個
+    路徑是否指向同一個實體檔案使用。任何解析失敗（例如路徑本身不合法）
+    一律回傳 None——呼叫端須將 None 視為『無法判斷是否相同』，因此絕不
+    會因此誤判兩者相同而錯誤跳過候選（見 _cross_project_fanout 呼叫處的
+    比較邏輯，None 一律視為不相等）。
+    """
+    try:
+        return str(Path(file_path).resolve())
+    except (OSError, ValueError):
+        return None
+
+
+def _own_connection_db_path(conn: sqlite3.Connection) -> str | None:
+    """回傳 conn 目前所連接的 SQLite 'main' 資料庫實體檔案的絕對路徑（已
+    正規化），供 _cross_project_fanout() 判斷某個候選 project_id 是否與
+    『目前這個連線』物理上是同一個 SQLite 檔案——而不僅是 project_id
+    字串是否相等。
+
+    背景（真實回歸 bug）：own_project_id 為 None（呼叫端未指定 --project）
+    或與某個已註冊候選專案的邏輯名稱不同，但兩者的 state_dir 實際上解析到
+    同一個實體目錄/檔案（例如本機的 'default' state dir 與已註冊的
+    'RemaGraph' 專案皆指向 ~/.local/state/remagraph/remagraph.db）時，純
+    字串比對 `pid == own_project_id` 從不成立，導致 (b) 對該候選開第二條
+    連線、重新查詢同一個實體檔案，回傳同一筆記憶兩次；且因兩次出現的
+    source_project_id 標籤字串不同（例如 None/'default' vs 'RemaGraph'），
+    最終依 (source_project_id, id) 的去重也攔不住。透過 PRAGMA
+    database_list 取得 conn 實際連到的檔案路徑，可在『不依賴任何
+    project_id 標籤字串』的情況下，直接以實體檔案路徑正確判斷別名關係。
+
+    回傳 None 的情況（in-memory 連線、PRAGMA 執行失敗、查無 'main' 資料庫、
+    路徑無法解析）一律視為『無法判斷是否相同』——維持既有、較保守的行為，
+    不會因此誤跳過任何候選。
+    """
+    try:
+        row = conn.execute("PRAGMA database_list").fetchone()
+    except sqlite3.Error:
+        return None
+    if row is None:
+        return None
+    try:
+        file_path = row["file"]
+    except (IndexError, KeyError):
+        return None
+    if not file_path:
+        return None
+    return _resolve_physical_db_path(file_path)
+
+
 def _cross_project_fanout(
     conn: sqlite3.Connection,
     request: SearchRequest,
@@ -435,6 +485,17 @@ def _cross_project_fanout(
     不論 own_project_id 是否為 None（因而讓下方「跳過候選清單中等於自己的
     那一項」這個提前優化是否有命中），一律在合併後的最終結果集上依
     (source_project_id, id) 去重，正確性不依賴這個提前優化。
+
+    物理路徑別名防線（真實回歸 bug，見 _own_connection_db_path
+    docstring）：上述 (source_project_id, id) 去重鍵仰賴『同一筆記憶在兩次
+    出現時會帶著同一個 source_project_id 字串』，但 own_project_id 為
+    None，或候選 project_id 的登記名稱與目前連線所屬的邏輯名稱不同、卻
+    實際指向同一個 SQLite 實體檔案時（例如 'default' 與已註冊的
+    'RemaGraph' 專案指向同一個 state_dir），(a) 標記的 source_project_id
+    與 (b) 對該候選標記的 source_project_id 是兩個不同字串，去重鍵不同，
+    完全攔不住——因此下方在字串比對之外，額外以 PRAGMA database_list
+    取得的實體檔案路徑判斷候選是否『物理上』就是目前這個連線，是本函式
+    唯一真正堵住這個別名情境的防線，而不是最終的去重步驟。
     """
     from remagraph import db as db_mod
 
@@ -447,6 +508,20 @@ def _cross_project_fanout(
         result["source_project_id"] = own_project_id or row["project_id"]
         all_results.append(result)
 
+    # 目前這個連線實際連到的實體檔案路徑（供下方物理別名比對；解析失敗時為
+    # None，此時一律不跳過任何候選，維持既有的保守行為——見
+    # _own_connection_db_path docstring）。刻意不在此呼叫
+    # db.list_known_projects() 一次性枚舉全量已知專案再建表——那是
+    # _search_cross_project_by_label 自己準備候選清單時才需要的全量枚舉；
+    # 本函式對任何呼叫端（包括只窄範圍 fan-out 到 project_edges 關聯專案的
+    # _search_related_projects）都只需要「這一個候選 project_id 的
+    # state_dir 是什麼」，改用 db.get_registered_state_dir() 逐一查詢單一
+    # project_id，避免讓 include_related 路徑也連帶觸發一次全量 registry
+    # 枚舉（見 tests/test_project_edges_and_recall_related.py 的
+    # test_cross_project_label_include_related_all_projects_are_fully_decoupled
+    # 對 list_known_projects() 呼叫次數的明確斷言）。
+    own_db_path = _own_connection_db_path(conn)
+
     # (b) 候選的其他專案
     fanout_capped = False
     fanned_out = 0
@@ -454,7 +529,19 @@ def _cross_project_fanout(
         if not pid:
             continue
         if own_project_id and pid == own_project_id:
-            continue  # 已經在 (a) 查過，避免重複計入 fan-out 上限、重複結果
+            continue  # 快速路徑：邏輯名稱已相同，避免下方路徑解析的額外成本
+
+        if own_db_path is not None:
+            candidate_state_dir = db_mod.get_registered_state_dir(pid)
+            if candidate_state_dir:
+                candidate_db_path = _resolve_physical_db_path(
+                    Path(candidate_state_dir) / db_mod.DB_FILENAME
+                )
+                if candidate_db_path is not None and candidate_db_path == own_db_path:
+                    # 字串比對沒攔到，但物理上就是目前這個連線已經查過的
+                    # 同一個 SQLite 檔案——跳過，避免重複計入 fan-out 上限、
+                    # 重複結果（見上方模組/函式 docstring 的別名 bug 說明）。
+                    continue
 
         if fanned_out >= cap:
             fanout_capped = True
