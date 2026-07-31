@@ -39,9 +39,9 @@ RemaGraph is a lightweight **MCP** (Model Context Protocol) tool built for AI co
 | **Contributing** | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
 | **Changelog** | [`CHANGELOG.md`](./CHANGELOG.md) |
 
-### Installation (currently powering real-world Herdr Bridge operation)
+### Installation
 
-**Currently used primarily to run live inside Herdr Bridge. The repo is public; the package itself has not yet been published to PyPI — install via the git tag pin below.**
+**The repo is public; the package itself has not yet been published to PyPI — install via the git tag pin below.**
 
 Recommended install — a one-liner pinned to the latest beta tag:
 
@@ -84,7 +84,7 @@ Dependencies: Python ≥3.11, model2vec, mcp (FastMCP), pydantic.
     TASK_ID=fix-login-001 AGENT_ID=my-ai ./remagraph-task.sh python my_agent.py
     ```
 
-**If a command tower just wants to check memory first, with no execution and no writes:**
+**If you just want to check memory first, with no execution and no writes:**
 ```bash
 remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
 ```
@@ -93,7 +93,7 @@ No code required. Full plain-language walkthrough: [`docs/task-memory-convention
 
 New users may also find [`docs/internal/alpha-test-playbook.md`](./docs/internal/alpha-test-playbook.md) useful as an onboarding guide — it includes scenarios and a feedback template.
 
-**Note**: RemaGraph is already running in production inside Herdr Bridge, and this repository is now public. Two separate things are still true, though: this is a pre-1.0 beta (see [`BOUNDARIES.md`](./BOUNDARIES.md) — no frozen public API yet), and the package has not been published to PyPI — install via the git tag pin above.
+**Note**: this repository is now public. Two separate things are still true, though: this is a pre-1.0 beta (see [`BOUNDARIES.md`](./BOUNDARIES.md) — no frozen public API yet), and the package has not been published to PyPI — install via the git tag pin above.
 
 ### MCP Quick Start
 
@@ -164,37 +164,6 @@ remagraph search --query "FastMCP lifecycle" --top-k 5
 remagraph status --limit 10
 ```
 
-### Integrating with herdr Bridge (command-tower dispatch with memory attached)
-
-**Current status**: the tooling layer (herdr-bridge hooks) and the governance layer are done; the organizational layer — formal herdr-org command-tower integration — is still design-only, with implementation to follow. RemaGraph's MemoryDispatcher is ready and waiting for herdr-org to wire in. Cross-project communication runs entirely over ACP.
-
-If you're already using herdr Bridge as a command tower dispatching work to headless agents:
-
-1. In your command-tower code, use the minimal helper we provide:
-   ```bash
-   # download
-   curl -O https://raw.githubusercontent.com/aiken884/RemaGraph/main/examples/herdr-bridge/simple-memory-helper.sh
-   chmod +x simple-memory-helper.sh
-   ```
-
-2. Call it before dispatch to fetch memory context, then fold that into the text you send the agent.
-
-Or, simplest of all: have the agent launch through the `remagraph-task.sh` wrapper shown above, wrapping your agent's own command.
-
-That way the tower only needs to pass a `task_id` to the agent, and the agent records memory automatically.
-
-(See `examples/herdr-bridge/` for full examples.)
-
-**Note**: full herdr-org workload validation has to wait until the organizational layer is actually built. Currently it's design-blueprint stage only.
-
-**Reaching another project's tower or agent**: for cross-project coordination — say, reporting a bug you found in another project's code that belongs to that project's own scope — write it into RemaGraph memory directly rather than reaching across and touching that project's files yourself. A full three-channel communication guide already lives in RemaGraph memory (maintained by the herdr-bridge tower); query it like this:
-
-```bash
-remagraph search --project herdr-bridge --task-id herdr-bridge-three-channel-usage-guide
-# or query by cross-project label, no need to know the exact project/task_id:
-remagraph search --cross-project-label topic:how-to-contact-tower
-```
-
 ### MCP Tools
 
 RemaGraph exposes five tools over MCP (stdio transport), compatible with Claude Desktop, Cursor, and other mainstream MCP clients: `remagraph_store`, `remagraph_search`, `remagraph_status`, `remagraph_maintain`, and `remagraph_migrate_project`.
@@ -208,7 +177,7 @@ An agent writes a memory record; it must pass five arbitration rules before land
 | `project_id` | `str` | Project identifier (same format rules as `task_id`, required) |
 | `task_id` | `str` | Task identifier (alphanumeric plus `-_`, max 64 characters) |
 | `agent_id` | `str` | Agent identifier (same format constraints as `task_id`) |
-| `kind` | `"task_handoff" \| "status_update" \| "discovered_constraint" \| "fleet_member"` | Memory kind (`fleet_member` is recorded/recycled by the tower) |
+| `kind` | `"task_handoff" \| "status_update" \| "discovered_constraint" \| "fleet_member"` | Memory kind (`fleet_member` is recorded/recycled by the dispatching coordinator) |
 | `summary` | `str` | One-line summary (indexed for FTS5 full-text search) |
 | `learnings` | `list[str]` | Key takeaways |
 | `handoff_note` | `str` | Hand-off note (required when `kind` is `task_handoff`) |
@@ -220,7 +189,7 @@ Behavior of the four `kind` values (PPLX Priority B):
 - **`task_handoff`** — a task hand-off record, carries `handoff_note`
 - **`status_update`** — a status update; automatically supersedes the prior record for the same `task_id`
 - **`discovered_constraint`** — a newly discovered constraint; can `invalidates` existing, now-wrong memories
-- **`fleet_member`** — owned by the tower (LightCommander/AcpRouter), records/recycles fleet members (`task_id=fleet` auto-supersedes)
+- **`fleet_member`** — owned by the dispatching coordinator, records/recycles fleet members (`task_id=fleet` auto-supersedes)
 
 #### `remagraph_search` — query memory
 
@@ -294,7 +263,7 @@ Response (success): `{"status": "ok", "stats": {...}}`. Response (failure): `{"s
 
 #### `remagraph_migrate_project` — one-time cross-project migration
 
-One-time migration of memories from a source project to a target project's independent DB (e.g. `default` → `herdr-bridge`), marking the originals `invalidated` in the source. Performs a real migration — this tool and the CLI's `migrate-project` subcommand (`cli.cmd_migrate_project`) both call the same shared core implementation (`store.migrate_project_memories`), so they always produce the same end state for the same inputs.
+One-time migration of memories from a source project to a target project's independent DB (e.g. `default` → `project-a`), marking the originals `invalidated` in the source. Performs a real migration — this tool and the CLI's `migrate-project` subcommand (`cli.cmd_migrate_project`) both call the same shared core implementation (`store.migrate_project_memories`), so they always produce the same end state for the same inputs.
 
 | Parameter | Type | Description |
 |------|------|------|
@@ -303,7 +272,7 @@ One-time migration of memories from a source project to a target project's indep
 | `dry_run` | `bool` | Default `false`; when `true`, only computes and reports how many records *would* be migrated — no writes happen, and the count uses the exact same match query as a real run, so it always agrees with the count a subsequent real run reports |
 
 How it works:
-1. The target project is validated through the same `safety_validate_project(to_project, require_env_match=False)` safety valve used elsewhere (herdr-* rules, `project.json` metadata consistency, etc).
+1. The target project is validated through the same `safety_validate_project(to_project, require_env_match=False)` safety valve used elsewhere (project-id naming-convention rules, `project.json` metadata consistency, etc).
 2. The source project's `state_dir` is resolved via the shared project registry (`db.get_registered_state_dir(from_project)`) — **not** a hardcoded path. If `from_project` has never been registered (no prior `remagraph` command has resolved a state_dir for it), the call fails with a clear error rather than silently treating it as zero migratable records. `from_project == "default"` is the one exception: it resolves via the ambient `REMAGRAPH_STATE_DIR`/`REMAGRAPH_HOME` the same way any other "default"-project usage does, since `"default"` is deliberately never registered in the normal course of things.
 3. Records that heuristically look like they belong to `to_project` (a `LIKE` match against `task_id`/`tags`/`agent_id`/`summary`) are copied into the target project's own DB with `project_id` forced to `to_project`, and the originals are marked `status='invalidated'` in the source with a `migrated-to:<to_project>` breadcrumb appended to `learnings`.
 4. If either the source or target database is currently in the read-only degraded schema-compatibility tier (see "Version Compatibility" below), the migration is rejected with a clear error instead of failing silently or partially.
@@ -404,9 +373,9 @@ RemaGraph 是一套輕量的 MCP（Model Context Protocol）工具，設計給�
 | **貢獻指南** | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
 | **變更日誌** | [`CHANGELOG.md`](./CHANGELOG.md) |
 
-### 安裝（目前主要用於 Herdr Bridge 真實運作）
+### 安裝
 
-**目前主要用於 Herdr Bridge 真實運作。repo 本身已公開，但套件尚未發布到 PyPI——請透過下方的 git tag pin 安裝。**
+**repo 本身已公開，但套件尚未發布到 PyPI——請透過下方的 git tag pin 安裝。**
 
 推薦安裝方式（一行指令，pin 到目前最新的 beta 版本標記）：
 
@@ -449,7 +418,7 @@ uv pip install -e .
     TASK_ID=fix-login-001 AGENT_ID=my-ai ./remagraph-task.sh python my_agent.py
     ```
 
-**指揮塔想先只查記憶（不執行、不寫入）**：
+**如果您想先只查記憶（不執行、不寫入）**：
 ```bash
 remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
 ```
@@ -458,7 +427,7 @@ remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
 
 新使用者可參考 [`docs/internal/alpha-test-playbook.md`](./docs/internal/alpha-test-playbook.md) 作為上手指南（含場景與回饋模板）。
 
-**注意**：目前已在 Herdr Bridge 真實運作中使用，這個 repo 現在也已經對外公開。但有兩件事仍然分開成立：這是 pre-1.0 beta（詳見 [`BOUNDARIES.md`](./BOUNDARIES.md)——尚無凍結的公開 API），而套件本身尚未發布到 PyPI，請透過上方的 git tag pin 安裝。
+**注意**：這個 repo 現在已經對外公開。但有兩件事仍然分開成立：這是 pre-1.0 beta（詳見 [`BOUNDARIES.md`](./BOUNDARIES.md)——尚無凍結的公開 API），而套件本身尚未發布到 PyPI，請透過上方的 git tag pin 安裝。
 
 ### MCP 快速開始
 
@@ -529,37 +498,6 @@ remagraph search --query "FastMCP 生命週期" --top-k 5
 remagraph status --limit 10
 ```
 
-### 與 herdr Bridge 整合（指揮塔派工自動帶記憶）
-
-**目前狀態**：工具層（herdr-bridge hooks）+ 治理層已完成；組織層（herdr-org 指揮塔正式接入）僅設計階段，開發稍後進行。RemaGraph 的 MemoryDispatcher 已就緒，準備 herdr-org 對接。跨專案溝通全程使用 ACP。
-
-如果您已經用 herdr Bridge 當指揮塔，派工給 headless agent：
-
-1. 在您的指揮塔程式中，使用我們提供的極簡幫手：
-   ```bash
-   # 下載
-   curl -O https://raw.githubusercontent.com/aiken884/RemaGraph/main/examples/herdr-bridge/simple-memory-helper.sh
-   chmod +x simple-memory-helper.sh
-   ```
-
-2. 派工前先呼叫它取得記憶上下文，再塞進送給 agent 的文字裡。
-
-或者最簡單的做法：讓 agent 啟動時直接用上面的 `remagraph-task.sh` 包裝您的 agent 指令。
-
-這樣一來，指揮塔只需要傳 `task_id` 給 agent，agent 就會自動記錄。
-
-（詳細範例見 `examples/herdr-bridge/`。）
-
-**注意**：完整的 herdr-org workload 驗證，需等組織層真正開發時才能進行。目前僅止於設計藍圖階段。
-
-**如何聯絡其他專案的指揮塔/agent**：跨專案協調（例如回報一個發現於某專案程式碼裡、但屬於該專案自己職責的 bug）建議直接寫入 RemaGraph 記憶，而不是跨專案動手改對方的檔案。完整的三層溝通管道使用指南已存在 RemaGraph 記憶裡（由 herdr-bridge 指揮塔維護），查詢方式如下：
-
-```bash
-remagraph search --project herdr-bridge --task-id herdr-bridge-three-channel-usage-guide
-# 或用跨專案標籤查（不需要知道確切 project/task_id）：
-remagraph search --cross-project-label topic:how-to-contact-tower
-```
-
 ### MCP 工具
 
 RemaGraph 透過 MCP（stdio transport）暴露五個 tool，相容 Claude Desktop、Cursor 等主流 MCP 客戶端：`remagraph_store`、`remagraph_search`、`remagraph_status`、`remagraph_maintain`、`remagraph_migrate_project`。
@@ -573,7 +511,7 @@ agent 寫入記憶，通過五條仲裁規則後才會寫入 SQLite + FTS5 index
 | `project_id` | `str` | 專案識別碼（格式同 task_id，必填） |
 | `task_id` | `str` | 任務識別碼（格式：英數字 + `-_`，最多 64 字元） |
 | `agent_id` | `str` | agent 識別碼（同 task_id 格式限制） |
-| `kind` | `"task_handoff" \| "status_update" \| "discovered_constraint" \| "fleet_member"` | 記憶類型（fleet_member 由 tower record/recycle） |
+| `kind` | `"task_handoff" \| "status_update" \| "discovered_constraint" \| "fleet_member"` | 記憶類型（fleet_member 由派工協調端 record/recycle） |
 | `summary` | `str` | 一句話摘要（供 FTS5 全文檢索） |
 | `learnings` | `list[str]` | 學到的要點 |
 | `handoff_note` | `str` | 交接備註（`task_handoff` 時必填） |
@@ -585,7 +523,7 @@ agent 寫入記憶，通過五條仲裁規則後才會寫入 SQLite + FTS5 index
 - **`task_handoff`**：任務交接記錄，附 `handoff_note`
 - **`status_update`**：狀態更新，同 `task_id` 自動 supersede 舊記錄
 - **`discovered_constraint`**：發現的限制，可 `invalidates` 既有的錯誤記憶
-- **`fleet_member`**：由 tower（LightCommander/AcpRouter）擁有，record/recycle 艦隊成員（task_id=fleet 自動 supersede）
+- **`fleet_member`**：由派工協調端擁有，record/recycle 艦隊成員（task_id=fleet 自動 supersede）
 
 #### `remagraph_search` — 查詢記憶
 
@@ -659,7 +597,7 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 
 #### `remagraph_migrate_project` — 一次性跨專案遷移
 
-把記憶從來源 project 一次性遷移到目標 project 的獨立 DB（例如 `default` → `herdr-bridge`），並在來源標記 `invalidated`。這是真正會搬移資料的實作——此 tool 與 CLI 的 `migrate-project` 子指令（`cli.cmd_migrate_project`）共用同一個核心函式（`store.migrate_project_memories`），對同一組輸入必然產生一致的最終結果。
+把記憶從來源 project 一次性遷移到目標 project 的獨立 DB（例如 `default` → `project-a`），並在來源標記 `invalidated`。這是真正會搬移資料的實作——此 tool 與 CLI 的 `migrate-project` 子指令（`cli.cmd_migrate_project`）共用同一個核心函式（`store.migrate_project_memories`），對同一組輸入必然產生一致的最終結果。
 
 | 參數 | 型別 | 說明 |
 |------|------|------|
@@ -668,7 +606,7 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 | `dry_run` | `bool` | 預設 `false`；`true` 時只計算並回報「會遷移幾筆」，不做任何寫入——使用與實際執行完全相同的比對 SQL，因此回報的筆數必然與之後真的執行時一致 |
 
 運作方式：
-1. 目標專案透過與其他地方相同的 `safety_validate_project(to_project, require_env_match=False)` 安全閥門驗證（herdr-* 規則、`project.json` metadata 一致性等）。
+1. 目標專案透過與其他地方相同的 `safety_validate_project(to_project, require_env_match=False)` 安全閥門驗證（專案命名慣例規則、`project.json` metadata 一致性等）。
 2. 來源專案的 `state_dir` 透過共用的 project registry 解析（`db.get_registered_state_dir(from_project)`）——**不是**寫死的路徑。若 `from_project` 從未被登記過（沒有任何 `remagraph` 指令曾經對它解析出 state_dir），呼叫會以清楚的錯誤失敗，而不是靜默當作 0 筆可遷移記錄。`from_project == "default"` 是唯一的例外：它比照一般「default」用法，透過目前環境的 `REMAGRAPH_STATE_DIR`/`REMAGRAPH_HOME` 解析，因為 `"default"` 在正常使用情境下本來就刻意不會被登記進 registry。
 3. 依 `task_id`/`tags`/`agent_id`/`summary` 啟發式比對出「看起來屬於」`to_project` 的記錄，複製到目標專案自己的 DB（強制 `project_id` 為 `to_project`），並在來源標記 `status='invalidated'`，於 `learnings` 附加一筆 `migrated-to:<to_project>` 軌跡。
 4. 若來源或目標資料庫目前處於唯讀降級的 schema 相容性分級（見下方「版本相容性」），遷移會以清楚的錯誤被拒絕，而不是靜默失敗或只搬移一半。
