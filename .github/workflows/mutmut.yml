@@ -2,12 +2,14 @@ name: mutmut
 
 # 非 blocking：不 gate PR merge，供開發者參考 mutation score。
 # 本地執行：uv run mutmut run
+#
+# 故意不掛在 push/pull_request 上：mutation testing 本身要重跑測試套件
+# 一次每個 mutant，成本遠高於一般 CI job，加上這本來就是 non-blocking、
+# 純參考用的指標，沒有必要每次 commit 都跑一次。改成每週跑一次 + 手動觸發。
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    # 資訊參考用，不強制通過
+  schedule:
+    - cron: "0 18 * * 0" # 每週日 UTC 18:00(台北時間週一 02:00)
   workflow_dispatch:
 
 jobs:

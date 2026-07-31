@@ -13,6 +13,14 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python-version: ["3.11", "3.12", "3.13"]
+        # macOS runner-minutes are billed at a 10x multiplier vs Linux, so we
+        # only exercise macOS on one Python version per push to keep CI cost
+        # sane; full macOS x Python coverage still runs, just not 3x per push.
+        exclude:
+          - os: macos-latest
+            python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.13"
 
     runs-on: ${{ matrix.os }}
 
@@ -102,6 +110,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python-version: ["3.11", "3.12", "3.13"]
+        # Same macOS-cost rationale as the smoke job above.
+        exclude:
+          - os: macos-latest
+            python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.13"
 
     runs-on: ${{ matrix.os }}
 
