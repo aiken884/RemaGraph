@@ -62,4 +62,8 @@ def _isolate_default_state_dir(tmp_path, monkeypatch):
     fake_default = tmp_path / "isolated-default-state-dir"
     monkeypatch.setattr(db_mod, "DEFAULT_STATE_DIR", fake_default)
     monkeypatch.delenv("REMAGRAPH_HOME", raising=False)
+    # An ambient REMAGRAPH_RESTRICTED_PREFIXES in a developer's shell could
+    # otherwise make safety_validate_project()'s restricted-prefix check
+    # fire unexpectedly for tests whose project_id happens to match it.
+    monkeypatch.delenv("REMAGRAPH_RESTRICTED_PREFIXES", raising=False)
     return fake_default
