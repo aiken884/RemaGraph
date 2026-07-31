@@ -53,7 +53,7 @@ def _get_model() -> "StaticModel":
 
             _model = StaticModel.from_pretrained(MODEL_NAME)
         except Exception as e:
-            raise ModelLoadError(f"無法載入 model2vec 模型 '{MODEL_NAME}'：{e}") from e
+            raise ModelLoadError(f"Failed to load model2vec model '{MODEL_NAME}': {e}") from e
     return _model
 
 
@@ -153,7 +153,10 @@ def check_duplicate(
         return ArbitrationResult(
             passed=False,
             reason="duplicate_content",
-            detail=(f"與既有記憶高度相似（similarity={best_sim:.2f}），最接近的記憶：{best_id}"),
+            detail=(
+                f"Highly similar to an existing memory (similarity={best_sim:.2f}); "
+                f"closest memory: {best_id}"
+            ),
             closest_memory_id=best_id,
             closest_similarity=best_sim,
         )

@@ -279,7 +279,7 @@ def test_install_local_managed_hook_without_schema_version_marker_reports_upgrad
 
     assert outcome.action == "upgraded"
     joined = " ".join(outcome.messages)
-    assert "未帶欄位 schema 版本標記" in joined
+    assert "no fields-schema-version marker" in joined
     assert f"fields-schema-version={CURRENT_FIELDS_SCHEMA_VERSION}" in joined
 
 
@@ -438,8 +438,8 @@ def test_install_global_no_prior_template_dir_sets_config_and_installs(isolated_
 
     # 兩條 --global 模式限制說明訊息必須都出現，讓使用者清楚知道範圍與限制。
     joined = " ".join(outcome.messages)
-    assert "限制 1" in joined
-    assert "限制 2" in joined
+    assert "Limitation 1" in joined
+    assert "Limitation 2" in joined
 
 
 def test_install_global_with_existing_template_dir_preserves_other_content(isolated_home):
@@ -475,7 +475,7 @@ def test_install_global_with_existing_template_dir_preserves_other_content(isola
     assert hook_path.exists()
     assert MANAGED_HOOK_MARKER in hook_path.read_text()
     joined = " ".join(outcome.messages)
-    assert "偵測到既有的 git config --global init.templateDir 設定" in joined
+    assert "Detected an existing git config --global init.templateDir setting" in joined
 
 
 def test_install_global_reinstall_is_idempotent_upgrade(isolated_home):

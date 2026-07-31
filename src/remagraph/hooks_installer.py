@@ -45,13 +45,15 @@ _FIELDS_SCHEMA_VERSION_RE = re.compile(
 _DEFAULT_GLOBAL_TEMPLATE_DIR = Path.home() / ".local" / "share" / "remagraph" / "git-template"
 
 _GLOBAL_MODE_LIMITATIONS = (
-    "限制 1：--global 只會影響本指令執行「之後」才新建立（git init / git clone）的"
-    "repo；已經存在的 repo 仍須各自在其目錄下執行一次非 --global 的 "
-    "`remagraph install-hooks`。",
-    "限制 2：不建議在 CI 環境中執行 --global —— CI runner 的 $HOME 可能是暫時性、"
-    "或跨 job/repo 共用（尤其自架 self-hosted runner 有可能持續存在到下一個不相關"
-    "的 job/repo），有實質的安全疑慮。CI pipeline 應改為對每個 repo、每個 job 各自"
-    "明確執行一次非 --global 的 `remagraph install-hooks`。",
+    "Limitation 1: --global only affects repos created (via git init / git "
+    "clone) AFTER this command runs; existing repos still need to run a "
+    "non-global `remagraph install-hooks` in each of their own directories.",
+    "Limitation 2: running --global in CI is not recommended -- a CI "
+    "runner's $HOME may be ephemeral or shared across jobs/repos (a "
+    "self-hosted runner in particular may persist into an unrelated later "
+    "job/repo), which is a real security concern. CI pipelines should "
+    "instead explicitly run a non-global `remagraph install-hooks` once "
+    "per repo, per job.",
 )
 
 
@@ -95,7 +97,8 @@ def _git_common_dir(cwd: Path) -> Path:
     result = _run_git(["rev-parse", "--git-common-dir"], cwd)
     if result.returncode != 0:
         raise HooksInstallerError(
-            "目前目錄不在任何 git repo 內，請在 git repo 的根目錄下執行"
+            "Current directory is not inside a git repo; run this from the "
+            "root of a git repo."
         )
     raw = result.stdout.strip()
     common_dir = Path(raw)
@@ -104,14 +107,15 @@ def _git_common_dir(cwd: Path) -> Path:
     try:
         return common_dir.resolve()
     except OSError as exc:  # pragma: no cover - 極端環境（權限/符號連結壞掉）
-        raise HooksInstallerError(f"無法解析 git-common-dir：{exc}") from exc
+        raise HooksInstallerError(f"Failed to resolve git-common-dir: {exc}") from exc
 
 
 def _show_toplevel(cwd: Path) -> Path:
     result = _run_git(["rev-parse", "--show-toplevel"], cwd)
     if result.returncode != 0:
         raise HooksInstallerError(
-            "目前目錄不在任何 git repo 內，請在 git repo 的根目錄下執行"
+            "Current directory is not inside a git repo; run this from the "
+            "root of a git repo."
         )
     return Path(result.stdout.strip()).resolve()
 
@@ -172,17 +176,20 @@ def _write_hook_into(target_dir: Path, *, force: bool) -> tuple[str, int | None]
     if target.is_symlink():
         if not force:
             raise HooksInstallerError(
-                f"偵測到 {target} 是符號連結（symlink），可能是其他工具刻意"
-                "用來在多個 repo 間共用 hook 檔案。為避免破壞該工具的設定，"
-                "預設不會處理，也不會 follow 這個連結去改動它指向的檔案。"
-                "若確認要讓 remagraph 接管，請加上 --force"
-                "（會先備份這個符號連結本身，而非它指向的內容）。"
+                f"Detected that {target} is a symlink, possibly created "
+                "intentionally by another tool to share a hook file across "
+                "multiple repos. To avoid breaking that tool's setup, this "
+                "is left untouched by default, and the link is not "
+                "followed to modify whatever it points to. To let "
+                "remagraph take over, pass --force (this backs up the "
+                "symlink itself, not the content it points to)."
             )
         backup = target_dir / (HOOK_FILENAME + BACKUP_SUFFIX)
         if backup.exists() or backup.is_symlink():
             raise HooksInstallerError(
-                f"備份檔案 {backup} 已存在，為避免覆蓋僅存的先前備份，"
-                "請手動確認/處理該備份後再重試。"
+                f"Backup file {backup} already exists; to avoid "
+                "overwriting the only previous backup, please manually "
+                "check/handle it and retry."
             )
         # os.replace 對符號連結做的是「搬移連結本身」，不會 follow 連結去
         # 複製其指向的內容——備份下來的仍然是一個符號連結。
@@ -206,17 +213,20 @@ def _write_hook_into(target_dir: Path, *, force: bool) -> tuple[str, int | None]
 
     if not force:
         raise HooksInstallerError(
-            f"{target} 已存在，且不是由 remagraph 安裝（找不到管理 marker），"
-            "可能是其他工具或使用者自行撰寫的 hook。為避免覆蓋，預設不會處理。"
-            "請手動確認內容後自行合併/移除，或加上 --force 讓 remagraph 先"
-            f"備份成 {target.name}{BACKUP_SUFFIX} 再覆蓋。"
+            f"{target} already exists and was not installed by remagraph "
+            "(no managed marker found); it may be a hook written by "
+            "another tool or by hand. To avoid overwriting it, this is "
+            "left untouched by default. Please review the content and "
+            "merge/remove it manually, or pass --force to let remagraph "
+            f"back it up as {target.name}{BACKUP_SUFFIX} before overwriting."
         )
 
     backup = target_dir / (HOOK_FILENAME + BACKUP_SUFFIX)
     if backup.exists() or backup.is_symlink():
         raise HooksInstallerError(
-            f"備份檔案 {backup} 已存在，為避免覆蓋僅存的先前備份，"
-            "請手動確認/處理該備份後再重試。"
+            f"Backup file {backup} already exists; to avoid overwriting "
+            "the only previous backup, please manually check/handle it "
+            "and retry."
         )
     os.replace(target, backup)
     target.write_text(content, encoding="utf-8")
@@ -229,14 +239,16 @@ def _version_upgrade_message(action: str, old_version: int | None) -> str | None
         return None
     if old_version is None:
         return (
-            "偵測到既有的 remagraph-managed hook 未帶欄位 schema 版本標記，"
-            f"已升級為目前版本（fields-schema-version={CURRENT_FIELDS_SCHEMA_VERSION}）。"
+            "Detected an existing remagraph-managed hook with no "
+            "fields-schema-version marker; upgraded to the current "
+            f"version (fields-schema-version={CURRENT_FIELDS_SCHEMA_VERSION})."
         )
     if old_version < CURRENT_FIELDS_SCHEMA_VERSION:
         return (
-            f"偵測到既有 hook 的欄位推導邏輯版本較舊"
-            f"（fields-schema-version={old_version}），"
-            f"已升級為目前版本（fields-schema-version={CURRENT_FIELDS_SCHEMA_VERSION}）。"
+            "Detected that the existing hook's field-derivation logic "
+            f"version is older (fields-schema-version={old_version}); "
+            "upgraded to the current version "
+            f"(fields-schema-version={CURRENT_FIELDS_SCHEMA_VERSION})."
         )
     return None
 
@@ -268,13 +280,18 @@ def install_local(cwd: Path | None = None, *, force: bool = False) -> InstallOut
             configured = configured.resolve()
         if not configured.is_dir():
             raise HooksInstallerError(
-                f"git config core.hooksPath 目前設定為 {configured}，"
-                "但該目錄不存在。為避免掩蓋設定錯誤（例如移除某個 hook 管理"
-                "工具後留下的孤兒設定），不會自動建立此目錄，請確認設定是否"
-                "正確後再重試。"
+                f"git config core.hooksPath is currently set to "
+                f"{configured}, but that directory does not exist. To "
+                "avoid masking a configuration error (e.g. an orphaned "
+                "setting left behind after removing some hook-management "
+                "tool), this directory is not created automatically; "
+                "please confirm the setting is correct and retry."
             )
         target_dir = configured
-        messages.append(f"偵測到 git config core.hooksPath 已設定為 {target_dir}，將安裝於此。")
+        messages.append(
+            f"Detected that git config core.hooksPath is set to "
+            f"{target_dir}; installing there."
+        )
     else:
         target_dir = common_dir / "hooks"
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -311,8 +328,9 @@ def install_global(*, force: bool = False) -> InstallOutcome:
         if not template_dir.is_absolute():
             template_dir = template_dir.resolve()
         messages.append(
-            f"偵測到既有的 git config --global init.templateDir 設定：{template_dir}，"
-            "將沿用、不覆蓋此設定，只在其 hooks/ 子目錄內加入 remagraph 的 hook。"
+            f"Detected an existing git config --global init.templateDir "
+            f"setting: {template_dir}; reusing it without overwriting, "
+            "only adding remagraph's hook under its hooks/ subdirectory."
         )
     else:
         template_dir = _DEFAULT_GLOBAL_TEMPLATE_DIR
@@ -322,9 +340,12 @@ def install_global(*, force: bool = False) -> InstallOutcome:
         )
         if set_result.returncode != 0:
             raise HooksInstallerError(
-                f"設定 git config --global init.templateDir 失敗：{set_result.stderr.strip()}"
+                "Failed to set git config --global init.templateDir: "
+                f"{set_result.stderr.strip()}"
             )
-        messages.append(f"未偵測到既有 init.templateDir，已設定為：{template_dir}")
+        messages.append(
+            f"No existing init.templateDir detected; set it to: {template_dir}"
+        )
 
     hooks_dir = template_dir / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
