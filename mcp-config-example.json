@@ -4,7 +4,7 @@
       "command": "remagraph",
       "args": ["serve", "--project", "myproject"],
       "env": {
-        "REMAGRAPH_STATE_DIR": "/Users/aikenlin/.local/state/remagraph-myproject"
+        "REMAGRAPH_STATE_DIR": "/home/user/.local/state/remagraph-myproject"
       }
     }
   }

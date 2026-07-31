@@ -1,6 +1,6 @@
 version = 1
 SPDX-PackageName = "remagraph"
-SPDX-PackageSupplier = "The RemaGraph Authors"
+SPDX-PackageSupplier = "Aiken Lin"
 SPDX-PackageDownloadLocation = "https://github.com/aiken884/RemaGraph"
 
 [[annotations]]
@@ -23,7 +23,7 @@ path = [
     "docs/**/*.html",
 ]
 precedence = "override"
-SPDX-FileCopyrightText = "The RemaGraph Authors"
+SPDX-FileCopyrightText = "Aiken Lin"
 SPDX-License-Identifier = "Apache-2.0"
 
 [[annotations]]
@@ -33,7 +33,7 @@ path = [
     ".github/dependabot.yml",
 ]
 precedence = "override"
-SPDX-FileCopyrightText = "The RemaGraph Authors"
+SPDX-FileCopyrightText = "Aiken Lin"
 SPDX-License-Identifier = "Apache-2.0"
 
 [[annotations]]
@@ -47,7 +47,7 @@ path = [
     "mcp-config-example.json",
 ]
 precedence = "override"
-SPDX-FileCopyrightText = "The RemaGraph Authors"
+SPDX-FileCopyrightText = "Aiken Lin"
 SPDX-License-Identifier = "Apache-2.0"
 
 [[annotations]]
@@ -58,5 +58,5 @@ path = [
     "ci/**/*",
 ]
 precedence = "override"
-SPDX-FileCopyrightText = "The RemaGraph Authors"
+SPDX-FileCopyrightText = "Aiken Lin"
 SPDX-License-Identifier = "Apache-2.0"
