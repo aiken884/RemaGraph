@@ -18,10 +18,10 @@ This document exists in two full, structurally-parallel versions: [English](#eng
 | **Etymology** | Remanent — the external force is gone, the trace remains |
 | **Positioning** | Independent open-source MCP server, one tool in an agent's toolbox |
 | **Owner** | Aiken Lin's personal side project |
-| **GitHub** | Personal account (private `aiken884/RemaGraph`) |
+| **GitHub** | Public — [`aiken884/RemaGraph`](https://github.com/aiken884/RemaGraph) |
 | **License** | Apache-2.0 (same as CodeGraph) |
-| **PyPI** | Target `pip install remagraph`; **v1 not yet published** (currently `pip install -e .` / install from source) |
-| **Package version** | `0.3.1` (see `pyproject.toml`); implementation closeout tracked in [`docs/reviews/v1-closeout-status.md`](docs/reviews/v1-closeout-status.md) |
+| **PyPI** | Published — [`pip install remagraph`](https://pypi.org/project/remagraph/) / `uv tool install remagraph` |
+| **Package version** | `0.4.0` (see `pyproject.toml`); implementation closeout tracked in [`docs/reviews/v1-closeout-status.md`](docs/reviews/v1-closeout-status.md) |
 | **Python** | 3.11+, dependencies managed with uv |
 | **Relationship to external projects** | Fully independent (no code coupling), and fully usable standalone by any AI coding agent today. It also exposes one stable external contract (the Audit Contract, see "External Boundaries" below) so that a higher-level orchestration or scheduling system covering multiple agents/projects can integrate with it without RemaGraph needing any project-specific knowledge; an example integration is provided under `examples/` for reference. |
 
@@ -726,10 +726,10 @@ Each stage's trigger is actual usage and user feedback, not pre-planning.
 | **詞源** | Remanent（殘磁）——外部力量走了，痕跡還在 |
 | **定位** | 獨立開源 MCP server，agent 工具箱裡的一把工具 |
 | **擁有者** | Aiken Lin 個人 side project |
-| **GitHub** | 個人帳號（private `aiken884/RemaGraph`） |
+| **GitHub** | 公開——[`aiken884/RemaGraph`](https://github.com/aiken884/RemaGraph) |
 | **授權** | Apache-2.0（與 CodeGraph 相同） |
-| **PyPI** | 目標 `pip install remagraph`；**v1 尚未 publish**（目前 `pip install -e .`／原始碼安裝） |
-| **套件版本** | `0.3.1`（見 `pyproject.toml`）；實作收斂 [`docs/reviews/v1-closeout-status.md`](docs/reviews/v1-closeout-status.md) |
+| **PyPI** | 已上架——[`pip install remagraph`](https://pypi.org/project/remagraph/) / `uv tool install remagraph` |
+| **套件版本** | `0.4.0`（見 `pyproject.toml`）；實作收斂 [`docs/reviews/v1-closeout-status.md`](docs/reviews/v1-closeout-status.md) |
 | **Python** | 3.11+，uv 管理依賴 |
 | **與外部專案的關係** | 完全獨立（無程式碼耦合），今天就能被任何 AI coding agent 直接、獨立使用。同時對外暴露一個穩定合約（Audit Contract，見下方「對外邊界」），讓涵蓋多個 agent／專案的上層協調或排程系統可以與它整合，而不需要 RemaGraph 具備任何特定專案的知識；範例整合見 `examples/` |
 

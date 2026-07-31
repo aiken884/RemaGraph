@@ -22,14 +22,14 @@ the public surface is frozen at 1.0.
 
 - Current version: `0.4.x` (see `pyproject.toml`), tagged as `-alpha` or
   `-beta` releases depending on maturity (e.g. `v0.3.1-alpha`, `v0.4.0-beta`).
-- **Not yet published to PyPI.** Installation today is via a git-pinned tag:
+- **Published on [PyPI](https://pypi.org/project/remagraph/)** as of `v0.4.0-beta`
+  (first successful publish verified 2026-07-31). Recommended install:
+  `uv tool install remagraph` / `pip install remagraph`. A git-pinned tag
+  install remains available for a specific release or for tracking `main`:
   ```bash
-  uv tool install git+https://github.com/aiken884/RemaGraph.git@vX.Y.Z-alpha
-  # or, once tagged as beta:
   uv tool install git+https://github.com/aiken884/RemaGraph.git@vX.Y.Z-beta
   ```
-  See the "Installation" section of [`README.md`](README.md) for the current
-  recommended tag.
+  See the "Installation" section of [`README.md`](README.md) for details.
 
 ## Cutting a release
 
@@ -46,14 +46,15 @@ the public surface is frozen at 1.0.
 
 ### About `.github/workflows/publish.yml`
 
-A `publish.yml` workflow already exists, triggered on `v*` tag pushes, intended
-to build and publish to PyPI via OIDC Trusted Publishing. **This path has not
-yet been verified end-to-end** — earlier attempts were blocked by an
-account-level GitHub Actions quota limit; the quota has since been raised, but
-no tag push has yet produced a confirmed, successful PyPI publish. Treat this
-as "configured but unproven," not as a working automated release pipeline.
-Until it's verified, cutting a release means steps 1-5 above (git tag only);
-publishing to PyPI is a separate, not-yet-exercised step.
+The `publish.yml` workflow, triggered on `v*` tag pushes, builds and publishes
+to PyPI via OIDC Trusted Publishing (a PyPI "trusted publisher" is registered
+for this repo/workflow — see [pypi.org/manage/account/publishing](https://pypi.org/manage/account/publishing/)
+if it ever needs to be re-configured, e.g. after a repo rename). **This path
+is now verified working**: earlier attempts had been blocked by an
+account-level GitHub Actions quota limit, and the quota has since been raised;
+the first confirmed, successful PyPI publish landed 2026-07-31 for
+`v0.4.0-beta`. Pushing a `v*` tag now both cuts a GitHub Release and publishes
+to PyPI automatically — step 4 above is the only manual trigger needed.
 
 ## Security releases
 
@@ -87,13 +88,14 @@ RemaGraph 採用 [Semantic Versioning](https://semver.org/)，但目前處於
 
 - 目前版本：`0.4.x`（見 `pyproject.toml`），依成熟度以 `-alpha` 或 `-beta`
   標籤打 tag（例如 `v0.3.1-alpha`、`v0.4.0-beta`）。
-- **尚未正式發布到 PyPI。** 目前的安裝方式是透過 git 釘住特定 tag：
+- **已上架 [PyPI](https://pypi.org/project/remagraph/)**（自 `v0.4.0-beta` 起，
+  首次成功發布已於 2026-07-31 驗證通過）。推薦安裝方式：
+  `uv tool install remagraph` / `pip install remagraph`。如果需要釘住特定版本
+  或追蹤 `main` 分支，git tag 安裝方式仍然可用：
   ```bash
-  uv tool install git+https://github.com/aiken884/RemaGraph.git@vX.Y.Z-alpha
-  # 若已打 beta tag：
   uv tool install git+https://github.com/aiken884/RemaGraph.git@vX.Y.Z-beta
   ```
-  目前建議釘的 tag 版本見 [`README.md`](README.md)「安裝」章節。
+  詳見 [`README.md`](README.md)「安裝」章節。
 
 ## 切版本流程
 
@@ -110,12 +112,14 @@ RemaGraph 採用 [Semantic Versioning](https://semver.org/)，但目前處於
 
 ### 關於 `.github/workflows/publish.yml`
 
-repo 中已經有一份 `publish.yml`，觸發條件是 push `v*` tag，設計上會 build 並透
-過 OIDC Trusted Publishing 發布到 PyPI。**但這條路徑尚未被真正跑通驗證過**——先
-前曾因帳號層級的 GitHub Actions 額度限制被卡住；額度目前已提升，但截至目前為止
-還沒有任何一次 tag push 產出過確認成功的 PyPI 發布紀錄。請把它當作「已設定、但
-尚未驗證有效」，不要當成已經在運作的自動發布流程。在驗證之前，切版本實務上就
-是走上面 1-5 步（僅止於打 tag）；發布到 PyPI 是另一個尚未真正跑通過的獨立步驟。
+`publish.yml` 觸發條件是 push `v*` tag，會 build 並透過 OIDC Trusted
+Publishing 發布到 PyPI（PyPI 那邊已經替這個 repo/workflow 註冊好
+trusted publisher，如果之後 repo 改名等情況需要重新設定，見
+[pypi.org/manage/account/publishing](https://pypi.org/manage/account/publishing/)）。
+**這條路徑現在已經驗證真的能跑通**：先前曾因帳號層級的 GitHub Actions 額度限制
+被卡住，額度提升後，第一次確認成功的 PyPI 發布已於 2026-07-31、`v0.4.0-beta`
+這個 tag 上驗證通過。現在 push 一個 `v*` tag 會同時建立 GitHub Release 並自動
+發布到 PyPI——上面第 4 步就是唯一需要手動觸發的步驟。
 
 ## 安全性發布
 
