@@ -42,3 +42,7 @@ coverage.xml
 .command-tower/
 .omo/
 *.bak
+
+# Local, machine-specific agent tooling config (personal automation hooks,
+# scratch bug-report notes) — must never ship in the public repo.
+.claude/
