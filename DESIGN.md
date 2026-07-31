@@ -283,7 +283,7 @@ Runs automatic DB maintenance (WAL checkpoint, prune superseded/invalidated memo
 
 #### `remagraph_migrate_project`
 
-One-time migration of memories from a source project to a target project's independent DB (e.g. `default` → `herdr-bridge`), marking the originals `invalidated` in the source.
+One-time migration of memories from a source project to a target project's independent DB (e.g. `default` → `herdr-bridge`), marking the originals `invalidated` in the source. This tool and the CLI's `migrate-project` subcommand (`cli.cmd_migrate_project`) both call the same shared core implementation — `store.migrate_project_memories(from_project, to_project, dry_run=...)` — so the two entry points always produce the same end state for the same inputs; neither has its own separate copy of the migration logic.
 
 **Request:**
 ```json
@@ -296,17 +296,25 @@ One-time migration of memories from a source project to a target project's indep
   "status": "ok",
   "from": "default",
   "to": "herdr-bridge",
-  "message": "Migration logic has been triggered (see CLI migrate-project for details)"
+  "dry_run": false,
+  "migrated_count": 3,
+  "skipped_ids": []
 }
 ```
 
-**This tool's implementation is intentionally a thin stub, not a full migration** — this is a real, currently-existing gap between the MCP surface and the CLI, documented here rather than papered over. `remagraph_migrate_project` only calls `safety_validate_project(to_project, require_env_match=False)` to validate the target project, then returns the acknowledgment above; it never opens the source DB, never copies a single row, and never marks anything `invalidated`. The actual migration — reading `from_project`'s rows out of the default DB with a heuristic match on `task_id`/`tags`/`agent_id`/`summary` containing the target project name, `INSERT OR IGNORE`-ing them into the target project's own DB with `project_id` forced to `to_project`, and marking the originals `invalidated` (with a `migrated-to:<to_project>` breadcrumb appended to `learnings`) — is implemented only in the CLI's `migrate-project` subcommand (`cli.cmd_migrate_project`). Callers must not treat this MCP tool's `status: "ok"`/`"dry-run"` as evidence that data was actually migrated; to perform a real migration, invoke `remagraph migrate-project --from <from_project> --to <to_project>` (optionally `--dry-run`/`--force`) via the CLI.
+**What it actually does:**
+1. Validates the target project via `safety_validate_project(to_project, require_env_match=False)` — the same safety valve used everywhere else (herdr-* rules, `project.json` metadata consistency, etc).
+2. Resolves the *source* project's `state_dir` through the shared project registry, `db.get_registered_state_dir(from_project)` — not a hardcoded path. If `from_project` has never been registered (no prior `remagraph` invocation ever resolved a state_dir for it), the call raises `store.ProjectNotRegisteredError` rather than silently treating it as zero migratable records — this closes the historical bug where `from_project` was implicitly assumed to always be `"default"`. `from_project == "default"` is the one deliberate exception: it resolves via `db.get_state_dir()` (respecting the ambient `REMAGRAPH_STATE_DIR`/`REMAGRAPH_HOME`), because `"default"` is, by design, never registered during normal use (see `cli._project_id_for_conn`).
+3. Reads `from_project`'s rows with a heuristic match on `task_id`/`tags`/`agent_id`/`summary` containing the target project name, `INSERT OR IGNORE`-ing matches into the target project's own DB with `project_id` forced to `to_project`, and marks the originals `invalidated` in the source (with a `migrated-to:<to_project>` breadcrumb appended to `learnings`). Both connections are opened via `db.connect_at_state_dir()`, which bypasses `REMAGRAPH_STATE_DIR` environment-variable resolution entirely and operates on the already-resolved, explicit paths — necessary because a long-lived MCP server process is bound to its own project's `state_dir` (see `server._bind_project`), and going through the ordinary env-var-driven `connect()` path here would silently open the *server's own* project DB instead of the actual migration source/target.
+4. `dry_run=True` runs the exact same match query used by a real migration and reports the resulting count in `migrated_count` without writing anything — so a dry run and a subsequent real run always agree on the count, for the same underlying data.
+5. If either the source or target database is currently in the read-only degraded schema-compatibility tier (see "Version Compatibility" below — its schema is newer than this code's write-compatible version), the migration raises `store.MigrationReadOnlyError` and is rejected cleanly rather than failing partway through or silently doing nothing.
+6. If `from_project` and `to_project` happen to resolve to the *same physical directory* (e.g. because the caller's ambient `REMAGRAPH_STATE_DIR` coincidentally matches both), the call raises `ValueError` rather than opening two conflicting write transactions against the same database file.
 
 **Response (error):**
 ```json
 { "status": "error", "reason": "..." }
 ```
-- Raised when `safety_validate_project()` rejects the target project
+- Raised when `safety_validate_project()` rejects the target project, when `from_project` was never registered, when the source database file doesn't exist, or when either side is read-only degraded.
 
 ---
 
@@ -984,7 +992,7 @@ agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
 
 #### `remagraph_migrate_project`
 
-把記憶從來源 project 一次性遷移到目標 project 的獨立 DB（例如 `default` → `herdr-bridge`），並在來源標記 `invalidated`。
+把記憶從來源 project 一次性遷移到目標 project 的獨立 DB（例如 `default` → `herdr-bridge`），並在來源標記 `invalidated`。此 tool 與 CLI 的 `migrate-project` 子指令（`cli.cmd_migrate_project`）共用同一個核心實作——`store.migrate_project_memories(from_project, to_project, dry_run=...)`——因此兩個入口對同一組輸入必然產生一致的最終結果，彼此都沒有各自獨立的一份遷移邏輯。
 
 **Request：**
 ```json
@@ -997,17 +1005,25 @@ agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
   "status": "ok",
   "from": "default",
   "to": "herdr-bridge",
-  "message": "Migration logic has been triggered (see CLI migrate-project for details)"
+  "dry_run": false,
+  "migrated_count": 3,
+  "skipped_ids": []
 }
 ```
 
-**這個 tool 的實作刻意是個簡化 stub，不是完整遷移**——這是 MCP 介面與 CLI 之間目前真實存在的落差，這裡如實記錄而不是掩蓋。`remagraph_migrate_project` 只呼叫 `safety_validate_project(to_project, require_env_match=False)` 驗證目標專案，接著回傳上方的確認訊息；它從不開啟來源 DB、不複製任何一筆記錄、也不會標記任何東西為 `invalidated`。實際的遷移——從 default DB 依 `task_id`/`tags`/`agent_id`/`summary` 是否包含目標專案名稱做啟發式比對，取出 `from_project` 的記錄、以 `INSERT OR IGNORE` 強制 `project_id` 為 `to_project` 寫入目標專案自己的 DB、並在來源標記 `invalidated`（在 `learnings` 附加一筆 `migrated-to:<to_project>` 軌跡）——只在 CLI 的 `migrate-project` 子指令（`cli.cmd_migrate_project`）裡實作。呼叫端不應把這個 MCP tool 回傳的 `status: "ok"`/`"dry-run"` 當作資料已實際遷移的證據；要真正執行遷移，請透過 CLI 呼叫 `remagraph migrate-project --from <from_project> --to <to_project>`（可搭配 `--dry-run`/`--force`）。
+**實際運作方式：**
+1. 透過 `safety_validate_project(to_project, require_env_match=False)` 驗證目標專案——與其他地方使用的是同一個安全閥門（herdr-* 規則、`project.json` metadata 一致性等）。
+2. 透過共用的 project registry——`db.get_registered_state_dir(from_project)`——解析**來源**專案的 `state_dir`，而不是寫死的路徑。若 `from_project` 從未被登記過（沒有任何一次 `remagraph` 呼叫曾對它解析出 state_dir），會拋出 `store.ProjectNotRegisteredError`，而不是靜默當作 0 筆可遷移記錄——這正是修復了「隱含假設 `from_project` 永遠是 `"default"`」這個歷史 bug。`from_project == "default"` 是唯一刻意保留的例外：改用 `db.get_state_dir()`（尊重目前環境的 `REMAGRAPH_STATE_DIR`/`REMAGRAPH_HOME`）解析，因為 `"default"` 在正常使用情境下本來就刻意不會被登記進 registry（見 `cli._project_id_for_conn`）。
+3. 依 `task_id`/`tags`/`agent_id`/`summary` 是否包含目標專案名稱做啟發式比對，取出 `from_project` 的記錄，以 `INSERT OR IGNORE` 強制 `project_id` 為 `to_project` 寫入目標專案自己的 DB，並在來源標記 `invalidated`（在 `learnings` 附加一筆 `migrated-to:<to_project>` 軌跡）。兩邊連線都透過 `db.connect_at_state_dir()` 開啟，完全繞過 `REMAGRAPH_STATE_DIR` 環境變數解析，直接對已經解析好的明確路徑操作——這是必要的，因為長駐的 MCP server 行程會綁定自己專案的 `state_dir`（見 `server._bind_project`），若這裡沿用一般、走環境變數的 `connect()` 路徑，會悄悄打開「server 自己的專案資料庫」，而不是真正的遷移來源/目標。
+4. `dry_run=True` 會執行與真正遷移完全相同的比對查詢，把結果筆數放進 `migrated_count`、不寫入任何資料——因此在資料未變動的前提下，dry run 與之後真的執行時的筆數必然一致。
+5. 若來源或目標資料庫目前處於唯讀降級的 schema 相容性分級（見下方「版本相容性」——其 schema 版本比目前程式碼的可寫相容版本新），會拋出 `store.MigrationReadOnlyError`，乾淨地拒絕遷移，而不是搬到一半失敗或悄悄什麼都沒做。
+6. 若 `from_project` 與 `to_project`剛好解析到**同一個物理目錄**（例如呼叫端目前的 `REMAGRAPH_STATE_DIR` 剛好同時符合兩者的解析結果），會拋出 `ValueError`，而不是對同一份資料庫檔案開兩條互相衝突的寫入 transaction。
 
 **Response（錯誤）：**
 ```json
 { "status": "error", "reason": "..." }
 ```
-- `safety_validate_project()` 拒絕目標專案時觸發
+- `safety_validate_project()` 拒絕目標專案、`from_project` 從未被登記過、來源資料庫檔案不存在，或任一方處於唯讀降級狀態時觸發
 
 ---
 

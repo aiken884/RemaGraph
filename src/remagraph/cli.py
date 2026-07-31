@@ -26,13 +26,19 @@ from typing import Any
 from remagraph import db as _db
 from remagraph.maintenance import (
     MaintenancePolicy,
+    SafetyValveError,
     _record_violation,
     run_maintenance,
     safety_validate_project,
 )
 from remagraph.models import SearchRequest, StatusRequest, StoreRequest
 from remagraph.search import get_status, search_memories
-from remagraph.store import process_store
+from remagraph.store import (
+    MigrationReadOnlyError,
+    ProjectNotRegisteredError,
+    migrate_project_memories,
+    process_store,
+)
 
 # ---------------------------------------------------------------------------
 # DB 連線管理（CLI 專用，每次命令獨立連線）
@@ -803,6 +809,13 @@ def cmd_maintain(args: argparse.Namespace) -> None:
 
 
 def cmd_migrate_project(args: argparse.Namespace) -> None:
+    """CLI 端薄 wrapper：把 store.migrate_project_memories() 的結構化結果
+    轉換成既有的 print()/sys.exit(1) 使用者體驗。
+
+    真正的遷移邏輯（來源/目標 state_dir 解析、啟發式比對、逐筆搬移、唯讀
+    降級檢查）全部在 store.migrate_project_memories() 裡，供本函式與 MCP
+    的 server.remagraph_migrate_project 共用，不在此重複實作。
+    """
     from_proj = args.from_project
     to_proj = args.to_project
     print(f"=== RemaGraph migrate-project: {from_proj} → {to_proj} ===")
@@ -811,75 +824,34 @@ def cmd_migrate_project(args: argparse.Namespace) -> None:
         print("ERROR: --from and --to cannot be the same", file=sys.stderr)
         sys.exit(1)
 
-    # Validate the target project's state_dir
     try:
-        to_state = safety_validate_project(to_proj, require_env_match=False)
-        os.environ["REMAGRAPH_STATE_DIR"] = str(to_state)
-        os.environ["REMAGRAPH_PROJECT"] = to_proj
-    except Exception as e:
+        result = migrate_project_memories(from_proj, to_proj, dry_run=args.dry_run)
+    except SafetyValveError as e:
         print(f"ERROR: target project validation failed - {e}", file=sys.stderr)
         sys.exit(1)
-
-    if args.dry_run:
-        print(f"[dry-run] migrating from {from_proj} to {to_proj} (target: {to_state})")
-        return
-
-    # 實際遷移邏輯（簡化版，使用 sqlite 直接操作）
-    default_db = Path.home() / ".local/state/remagraph/remagraph.db"
-    target_db = to_state / "remagraph.db"
-
-    if not default_db.exists():
-        print("ERROR: default DB does not exist", file=sys.stderr)
+    except ProjectNotRegisteredError as e:
+        print(f"ERROR: source project validation failed - {e}", file=sys.stderr)
+        sys.exit(1)
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+    except MigrationReadOnlyError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
-    conn_src = sqlite3.connect(str(default_db))
-    conn_src.row_factory = sqlite3.Row
-    conn_tgt = sqlite3.connect(str(target_db))
-    conn_tgt.row_factory = sqlite3.Row
+    if result.dry_run:
+        print(
+            f"[dry-run] migrating from {from_proj} to {to_proj}: "
+            f"{result.migrated_count} record(s) would be migrated"
+        )
+        return
 
-    # 找屬於 to_proj 的記錄（用 task_id / tags / agent_id 啟發式）
-    rows = conn_src.execute(
-        """
-        SELECT * FROM memories
-        WHERE (task_id LIKE ? OR tags LIKE ? OR agent_id LIKE ? OR summary LIKE ?)
-          AND status != 'invalidated'
-        """,
-        (f"%{to_proj}%", f"%{to_proj}%", f"%{to_proj}%", f"%{to_proj}%"),
-    ).fetchall()
+    total_attempted = result.migrated_count + len(result.skipped_ids)
+    print(f"Found {total_attempted} record(s) to migrate")
+    for skip_id in result.skipped_ids:
+        print(f"  skip {skip_id}")
 
-    print(f"Found {len(rows)} record(s) to migrate")
-
-    migrated = 0
-    for row in rows:
-        try:
-            # 複製到目標（強制 project_id）
-            cols = [k for k in row.keys() if k != "project_id"]
-            vals = [row[k] for k in cols]
-            placeholders = ",".join("?" for _ in cols)
-            cols_str = ",".join(cols)
-            sql = (
-                f"INSERT OR IGNORE INTO memories "
-                f"(project_id, {cols_str}) VALUES (?, {placeholders})"
-            )
-            conn_tgt.execute(sql, [to_proj] + vals)
-
-            # 在來源 invalidat e
-            learn = json.loads(row["learnings"] or "[]")
-            learn.append(f"migrated-to:{to_proj} at {datetime.now(timezone.utc).isoformat()}")
-            conn_src.execute(
-                "UPDATE memories SET status='invalidated', learnings=? WHERE id=?",
-                (json.dumps(learn, ensure_ascii=False), row["id"]),
-            )
-            migrated += 1
-        except Exception as e:
-            print(f"  skip {row['id']}: {e}")
-
-    conn_tgt.commit()
-    conn_src.commit()
-    conn_tgt.close()
-    conn_src.close()
-
-    print(f"Migration complete: {migrated} record(s)")
+    print(f"Migration complete: {result.migrated_count} record(s)")
     if not args.force:
         print(
             f"Suggestion: run 'remagraph maintain --project {to_proj} --force' "

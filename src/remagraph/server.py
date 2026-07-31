@@ -25,7 +25,7 @@ from remagraph import maintenance
 from remagraph.maintenance import MaintenancePolicy, run_maintenance, safety_validate_project
 from remagraph.models import SearchRequest, StatusRequest, StoreRequest
 from remagraph.search import get_status, search_memories
-from remagraph.store import process_store
+from remagraph.store import migrate_project_memories, process_store
 
 # ---------------------------------------------------------------------------
 # Rate limiter（簡易記憶體 token bucket, per agent_id）
@@ -589,7 +589,14 @@ def remagraph_maintain(
     description=(
         "Migrate memories from a source project to a target project's "
         "separate DB, and mark them invalidated in the source. For one-time "
-        "migrations only (e.g. default -> herdr-bridge)."
+        "migrations only (e.g. default -> herdr-bridge). Performs a real "
+        "migration (not a stub): reads from_project's registered state_dir "
+        "(resolved via the shared project registry), heuristically matches "
+        "records that look like they belong to to_project, copies them into "
+        "to_project's own DB, and marks the originals invalidated in the "
+        "source. dry_run=True reports the exact count that would be "
+        "migrated (using the same match query as a real run) without "
+        "writing anything."
     ),
 )
 def remagraph_migrate_project(
@@ -597,17 +604,23 @@ def remagraph_migrate_project(
     to_project: str,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """project 記憶遷移工具。"""
+    """project 記憶遷移工具。
+
+    真正的遷移邏輯（來源/目標 state_dir 解析、啟發式比對、逐筆搬移、唯讀
+    降級檢查）全部在 store.migrate_project_memories() 裡，供本 tool 與 CLI
+    的 cmd_migrate_project 共用，這裡只負責把結構化結果轉成 MCP tool 該有
+    的 dict 回應。
+    """
     _check_rate_limit("migrate")
     try:
-        safety_validate_project(to_project, require_env_match=False)
-        # 簡化實作：直接呼叫 CLI 邏輯或內部 migrate（這裡用簡化版）
-        # 實際應複用 cli 中的 migrate 邏輯
+        result = migrate_project_memories(from_project, to_project, dry_run=dry_run)
         return {
-            "status": "ok" if not dry_run else "dry-run",
-            "from": from_project,
-            "to": to_project,
-            "message": "Migration logic has been triggered (see CLI migrate-project for details)",
+            "status": "dry-run" if result.dry_run else "ok",
+            "from": result.from_project,
+            "to": result.to_project,
+            "dry_run": result.dry_run,
+            "migrated_count": result.migrated_count,
+            "skipped_ids": result.skipped_ids,
         }
     except Exception as e:
         return {"status": "error", "reason": str(e)}

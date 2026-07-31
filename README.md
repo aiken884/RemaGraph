@@ -284,19 +284,23 @@ Response (success): `{"status": "ok", "stats": {...}}`. Response (failure): `{"s
 | `skipped` | `bool` | `true` when the connection was already downgraded to the read-only schema tier (see "Version Compatibility" in [`DESIGN.md`](./DESIGN.md)); every write step above is skipped entirely |
 | `skip_reason` | `str` | `"read_only_schema_tier"` when `skipped` is `true` |
 
-#### `remagraph_migrate_project` — one-time cross-project migration trigger
+#### `remagraph_migrate_project` — one-time cross-project migration
 
-One-time migration of memories from a source project to a target project's independent DB (e.g. `default` → `herdr-bridge`), marking the originals `invalidated` in the source.
+One-time migration of memories from a source project to a target project's independent DB (e.g. `default` → `herdr-bridge`), marking the originals `invalidated` in the source. Performs a real migration — this tool and the CLI's `migrate-project` subcommand (`cli.cmd_migrate_project`) both call the same shared core implementation (`store.migrate_project_memories`), so they always produce the same end state for the same inputs.
 
 | Parameter | Type | Description |
 |------|------|------|
 | `from_project` | `str` | Source project (required) |
 | `to_project` | `str` | Target project (required) |
-| `dry_run` | `bool` | Default `false`; when `true`, only validates the target project without migrating |
+| `dry_run` | `bool` | Default `false`; when `true`, only computes and reports how many records *would* be migrated — no writes happen, and the count uses the exact same match query as a real run, so it always agrees with the count a subsequent real run reports |
 
-Response (success): `{"status": "ok" | "dry-run", "from": "...", "to": "...", "message": "..."}`. Response (failure): `{"status": "error", "reason": "..."}`.
+How it works:
+1. The target project is validated through the same `safety_validate_project(to_project, require_env_match=False)` safety valve used elsewhere (herdr-* rules, `project.json` metadata consistency, etc).
+2. The source project's `state_dir` is resolved via the shared project registry (`db.get_registered_state_dir(from_project)`) — **not** a hardcoded path. If `from_project` has never been registered (no prior `remagraph` command has resolved a state_dir for it), the call fails with a clear error rather than silently treating it as zero migratable records. `from_project == "default"` is the one exception: it resolves via the ambient `REMAGRAPH_STATE_DIR`/`REMAGRAPH_HOME` the same way any other "default"-project usage does, since `"default"` is deliberately never registered in the normal course of things.
+3. Records that heuristically look like they belong to `to_project` (a `LIKE` match against `task_id`/`tags`/`agent_id`/`summary`) are copied into the target project's own DB with `project_id` forced to `to_project`, and the originals are marked `status='invalidated'` in the source with a `migrated-to:<to_project>` breadcrumb appended to `learnings`.
+4. If either the source or target database is currently in the read-only degraded schema-compatibility tier (see "Version Compatibility" below), the migration is rejected with a clear error instead of failing silently or partially.
 
-**Important**: this MCP tool only validates the target project (via the same `safety_validate_project` safety valve as the CLI) and returns an acknowledgment (`"Migration logic has been triggered (see CLI migrate-project for details)"`) — it does **not** itself copy any rows or mark any source memories `invalidated`. The full migration logic (heuristic row matching on `task_id`/`tags`/`agent_id`/`summary`, copying into the target DB, and marking originals `invalidated` in the source) lives only in the CLI's `migrate-project` subcommand (`cli.cmd_migrate_project`). Treat a `status: "ok"` response from this MCP tool as "target validated" rather than "migration completed" — to actually migrate data, run `remagraph migrate-project --from <from_project> --to <to_project>` from the CLI.
+Response (success): `{"status": "ok" | "dry-run", "from": "...", "to": "...", "dry_run": true|false, "migrated_count": N, "skipped_ids": [...]}`. Response (failure): `{"status": "error", "reason": "..."}`.
 
 ### Governance & Security
 
@@ -645,19 +649,23 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 | `skipped` | `bool` | 連線若已被降級為唯讀 schema tier（見 [`DESIGN.md`](./DESIGN.md) 的「版本相容性」）則為 `true`；此時上述所有寫入步驟一律跳過 |
 | `skip_reason` | `str` | `skipped` 為 `true` 時為 `"read_only_schema_tier"` |
 
-#### `remagraph_migrate_project` — 一次性跨專案遷移觸發器
+#### `remagraph_migrate_project` — 一次性跨專案遷移
 
-把記憶從來源 project 一次性遷移到目標 project 的獨立 DB（例如 `default` → `herdr-bridge`），並在來源標記 `invalidated`。
+把記憶從來源 project 一次性遷移到目標 project 的獨立 DB（例如 `default` → `herdr-bridge`），並在來源標記 `invalidated`。這是真正會搬移資料的實作——此 tool 與 CLI 的 `migrate-project` 子指令（`cli.cmd_migrate_project`）共用同一個核心函式（`store.migrate_project_memories`），對同一組輸入必然產生一致的最終結果。
 
 | 參數 | 型別 | 說明 |
 |------|------|------|
 | `from_project` | `str` | 來源專案（必填） |
 | `to_project` | `str` | 目標專案（必填） |
-| `dry_run` | `bool` | 預設 `false`；`true` 時只驗證目標專案，不執行遷移 |
+| `dry_run` | `bool` | 預設 `false`；`true` 時只計算並回報「會遷移幾筆」，不做任何寫入——使用與實際執行完全相同的比對 SQL，因此回報的筆數必然與之後真的執行時一致 |
 
-回應（成功）：`{"status": "ok" | "dry-run", "from": "...", "to": "...", "message": "..."}`。回應（失敗）：`{"status": "error", "reason": "..."}`。
+運作方式：
+1. 目標專案透過與其他地方相同的 `safety_validate_project(to_project, require_env_match=False)` 安全閥門驗證（herdr-* 規則、`project.json` metadata 一致性等）。
+2. 來源專案的 `state_dir` 透過共用的 project registry 解析（`db.get_registered_state_dir(from_project)`）——**不是**寫死的路徑。若 `from_project` 從未被登記過（沒有任何 `remagraph` 指令曾經對它解析出 state_dir），呼叫會以清楚的錯誤失敗，而不是靜默當作 0 筆可遷移記錄。`from_project == "default"` 是唯一的例外：它比照一般「default」用法，透過目前環境的 `REMAGRAPH_STATE_DIR`/`REMAGRAPH_HOME` 解析，因為 `"default"` 在正常使用情境下本來就刻意不會被登記進 registry。
+3. 依 `task_id`/`tags`/`agent_id`/`summary` 啟發式比對出「看起來屬於」`to_project` 的記錄，複製到目標專案自己的 DB（強制 `project_id` 為 `to_project`），並在來源標記 `status='invalidated'`，於 `learnings` 附加一筆 `migrated-to:<to_project>` 軌跡。
+4. 若來源或目標資料庫目前處於唯讀降級的 schema 相容性分級（見下方「版本相容性」），遷移會以清楚的錯誤被拒絕，而不是靜默失敗或只搬移一半。
 
-**重要**：此 MCP tool 只驗證目標專案（透過與 CLI 相同的 `safety_validate_project` 安全閥門），並回傳一則確認訊息（`"Migration logic has been triggered (see CLI migrate-project for details)"`）——它本身**不會**複製任何記錄，也不會在來源標記任何記憶為 `invalidated`。完整的遷移邏輯（依 `task_id`/`tags`/`agent_id`/`summary` 啟發式比對記錄、複製到目標 DB、並在來源標記 `invalidated`）只存在於 CLI 的 `migrate-project` 子指令（`cli.cmd_migrate_project`）裡。請把此 MCP tool 回傳的 `status: "ok"` 理解為「目標已驗證」，而非「遷移已完成」——要真正遷移資料，請從 CLI 執行 `remagraph migrate-project --from <from_project> --to <to_project>`。
+回應（成功）：`{"status": "ok" | "dry-run", "from": "...", "to": "...", "dry_run": true|false, "migrated_count": N, "skipped_ids": [...]}`。回應（失敗）：`{"status": "error", "reason": "..."}`。
 
 ### 治理與安全
 

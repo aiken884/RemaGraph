@@ -299,6 +299,81 @@ def connect(
     return conn
 
 
+def connect_at_state_dir(state_dir: Path) -> sqlite3.Connection:
+    """在明確、呼叫端已完成合法性驗證的 state_dir 開啟一個可讀寫連線。
+
+    背景（PPLX 架構改善計畫 —— migrate-project 真實實作缺口修復）：
+    store.migrate_project_memories() 需要分別開啟『來源專案』與『目標專案』
+    兩個各自明確的 state_dir 的連線 —— 但這兩個 state_dir 都是呼叫端（透過
+    db.get_registered_state_dir()/maintenance.safety_validate_project() 或
+    from_project == DEFAULT_PROJECT_ID 的特例）主動解析出來的權威路徑，與
+    目前這個行程 REMAGRAPH_STATE_DIR/REMAGRAPH_PROJECT 環境變數剛好是什麼
+    完全無關。
+
+    若改用一般的 connect(state_dir=...)：get_state_dir() 對 REMAGRAPH_
+    STATE_DIR 環境變數有最高優先權，一旦目前行程已設定該變數（例如 MCP
+    server 長駐行程啟動時透過 server._bind_project 綁定了自己主要專案的
+    state_dir——見 server.py），傳入的 state_dir 參數會被整個忽略，實際打開
+    的其實是行程自己主要專案的資料庫，而不是呼叫端真正要求的遷移來源/目標
+    ——等同悄悄操作錯的 DB 檔案，且不會拋出任何例外讓呼叫端得知。
+
+    因此本函式完全比照 connect_foreign_project_readonly() 的既有設計哲學
+    （見該函式 docstring）：直接對明確路徑開連線，完全不經過
+    get_state_dir()/get_db_path() 的環境變數解析路徑。與
+    connect_foreign_project_readonly() 的差異：本函式開的是一般可讀寫連線
+    （不強制 PRAGMA query_only），並且會執行與 connect() 完全相同的
+    _run_migrations()/_init_schema() 步驟（讓一個從未被開過的全新目標
+    專案目錄，也能像 connect() 一樣自動補齊完整 schema，而不是像修復前的
+    CLI migrate-project 那樣，對一個尚未存在 memories 表的全新目標 DB 直接
+    INSERT 而崩潰）——因此若來源/目標的 schema 版本比目前程式碼新，回傳的
+    連線一樣會被 _run_migrations() 掛上 db.READ_ONLY_ATTR 唯讀降級標記，供
+    呼叫端在真正寫入前檢查、清楚拒絕。
+
+    刻意不呼叫 safety_validate_project()（那是「驗證 project_id 是否有權
+    使用某個 state_dir」的業務規則，呼叫端必須在拿到 state_dir 之前、自行
+    決定是否需要那層驗證——本函式只負責『對已經決定好的路徑開連線』這一件
+    事）、不觸發 light_maintenance_on_connect（呼叫端未必是以某個
+    project_id 的身份操作這個連線，觸發該專案自己的維護排程並不恰當）。
+
+    Args:
+        state_dir: 已解析、呼叫端保證合法的目標目錄（可能尚不存在，會被
+            自動建立）。
+
+    Returns:
+        已完成 migration/schema 初始化的連線。若該資料庫的 schema 版本比
+        目前程式碼新，回傳的連線會被標記 READ_ONLY_ATTR = True。
+    """
+    resolved = Path(state_dir).resolve()
+    resolved.mkdir(parents=True, exist_ok=True)
+    resolved.chmod(0o700)
+    db_path = resolved / DB_FILENAME
+
+    conn = sqlite3.connect(
+        str(db_path),
+        isolation_level=None,
+        check_same_thread=False,
+        factory=_MarkedConnection,
+    )
+    conn.row_factory = sqlite3.Row
+
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+
+    page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+    max_pages = (MAX_DB_SIZE_MB * 1024 * 1024) // page_size
+    conn.execute(f"PRAGMA max_page_count={max_pages}")
+
+    _run_migrations(conn)
+    _init_schema(conn)
+
+    try:
+        db_path.chmod(0o600)
+    except OSError:
+        pass
+
+    return conn
+
+
 def close(conn: sqlite3.Connection) -> None:
     """安全關閉 SQLite 連線。"""
     try:

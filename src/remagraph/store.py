@@ -6,8 +6,11 @@
 - 記憶的 INSERT / UPDATE（supersede / invalidate）
 - 查詢（單筆、embedding 批次、最新 status）
 - process_store：完整 store 流程（仲裁 → dedup → 寫入）
+- migrate_project_memories：跨專案記憶遷移的共用核心邏輯（CLI
+  `migrate-project` 子指令與 MCP `remagraph_migrate_project` tool 共用）
 
-注意：本模組不自行管理 transaction 邊界。process_store 內部使用單一 transaction。
+注意：本模組不自行管理 transaction 邊界（migrate_project_memories 內部
+自行管理來源/目標各自的 transaction，process_store 內部使用單一 transaction）。
 """
 
 from __future__ import annotations
@@ -15,10 +18,13 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 
+from remagraph import db as _db
 from remagraph.arbitration import (
     ArbitrationResult,
     invalidate_constraints,
@@ -28,6 +34,7 @@ from remagraph.arbitration import (
 from remagraph.audit import append_audit
 from remagraph.db import READ_ONLY_ATTR, READ_ONLY_DETAIL_ATTR
 from remagraph.dedup import check_duplicate, encode_summary
+from remagraph.maintenance import safety_validate_project
 from remagraph.models import Memory, MemoryKind, StoreRequest, StoreResponse
 
 # ---------------------------------------------------------------------------
@@ -382,3 +389,271 @@ def process_store(
         )
         append_audit(response, request)
         return response
+
+
+# ---------------------------------------------------------------------------
+# migrate_project_memories：跨專案記憶遷移共用核心邏輯
+#
+# 背景（真實功能缺口修復）：修復前，CLI 的 cmd_migrate_project 是唯一存在
+# 的實作，且把來源資料庫路徑寫死為 Path.home() / ".local/state/remagraph/
+# remagraph.db"（等同假設 from_project 永遠是 'default'），MCP tool
+# remagraph_migrate_project 則完全是空殼，只驗證 to_project 就回傳一則寫死
+# 的假訊息，從未真正搬移任何資料。
+#
+# 本函式是兩邊（cli.cmd_migrate_project / server.remagraph_migrate_project）
+# 共用的唯一核心實作：
+# - 來源 state_dir 解析改用 db.get_registered_state_dir(from_project) 查詢
+#   registry 內實際登記的路徑（而不是寫死 default 路徑），對從未登記過的
+#   from_project 明確拋出 ProjectNotRegisteredError，而不是靜默當作 0 筆。
+#   'default' 是唯一例外：一般 CLI 用法中，project_id == 'default' 這個
+#   回退值本來就刻意不觸發 safety_validate_project/resolve_project_state_dir
+#   （見 cli._project_id_for_conn 的既有設計），因此幾乎不會出現在
+#   registry 裡——這不代表『default』專案不存在，而是它就是『目前環境沒有
+#   REMAGRAPH_STATE_DIR/REMAGRAPH_PROJECT 覆寫時，ambient 的預設位置』這個
+#   語意本身，所以改用 db.get_state_dir() 直接解析（尊重目前 process 的
+#   REMAGRAPH_STATE_DIR/REMAGRAPH_HOME 覆寫，而不是像修復前一樣寫死絕對
+#   路徑）。
+# - 不透過 db.connect()/get_state_dir() 開連線（那條路徑對 REMAGRAPH_
+#   STATE_DIR 環境變數有最高優先權，長駐的 MCP server 行程一旦綁定了自己
+#   主要專案的 state_dir，會讓傳入的來源/目標路徑被整個忽略、悄悄操作錯的
+#   DB 檔案），改用 db.connect_at_state_dir()：對明確、已解析出來的路徑
+#   開連線，完全不受呼叫端目前 project 情境影響。
+# - 不呼叫 print()/sys.exit()：所有錯誤一律以例外拋出，呼叫端（CLI/MCP
+#   server）各自決定如何呈現。
+# - dry_run 模式與實際執行共用同一段 SQL 比對邏輯（_MIGRATE_MATCH_WHERE），
+#   保證「dry-run 預估筆數」與「之後真正執行時的實際遷移筆數」在資料未變動
+#   的前提下必然一致。
+# - 唯讀降級偵測：db.connect_at_state_dir() 內部執行與一般 connect() 相同
+#   的 _run_migrations()，若來源或目標的 schema 版本比目前程式碼新，連線
+#   會被標記 db.READ_ONLY_ATTR；本函式在真正嘗試寫入前明確檢查並拋出
+#   MigrationReadOnlyError，而不是讓底層 sqlite3 寫入操作本身失敗、拋出
+#   難以理解的原始例外。
+# ---------------------------------------------------------------------------
+
+
+class ProjectNotRegisteredError(RuntimeError):
+    """from_project 從未被登記過（未曾有任何
+    maintenance.resolve_project_state_dir()/db.connect(project_id=...) 呼叫
+    對它發生過），因此找不到其 state_dir，無法安全解析遷移來源。
+
+    刻意不靜默視為『0 筆記錄可遷移』——那會讓使用者誤以為遷移已完成，實際
+    上只是來源路徑根本解析錯誤（例如 project_id 打錯字）。
+    """
+
+
+class MigrationReadOnlyError(RuntimeError):
+    """來源或目標專案的資料庫目前處於唯讀降級狀態（schema 版本比目前程式碼
+    新，見 db.READ_ONLY_ATTR），遷移所需的寫入操作（INSERT 進目標 / 標記
+    來源 invalidated）被拒絕。"""
+
+
+@dataclass
+class MigrationResult:
+    """migrate_project_memories() 的結構化回傳結果。"""
+
+    from_project: str
+    to_project: str
+    dry_run: bool
+    migrated_count: int
+    skipped_ids: list[str] = field(default_factory=list)
+
+
+# 來源資料庫內「這筆記錄是否屬於 to_project」的啟發式比對條件：來源資料庫
+# 裡的舊記錄可能還沒有正確的 project_id（本來就是要被遷移過去的舊資料），
+# 因此不能單純用 `WHERE project_id = ?` 精確過濾，改用 task_id/tags/
+# agent_id/summary 四個欄位是否包含目標專案名稱做啟發式比對（沿用修復前
+# CLI 實作既有的設計，非本次修復重點）。dry-run 估算與實際遷移共用同一段
+# SQL，保證兩者對同一份未變動資料的計算結果必然一致。
+_MIGRATE_MATCH_WHERE = (
+    "(task_id LIKE ? OR tags LIKE ? OR agent_id LIKE ? OR summary LIKE ?) "
+    "AND status != 'invalidated'"
+)
+
+
+def _resolve_migration_source_state_dir(from_project: str) -> Path:
+    """解析遷移『來源』專案實際登記的 state_dir。
+
+    'default' 是唯一特例：一般合法用法中，project_id == 'default' 這個
+    回退值本來就刻意不觸發 registry 登記（見 cli._project_id_for_conn 的
+    既有設計說明），因此改用 db.get_state_dir()（尊重目前行程的
+    REMAGRAPH_STATE_DIR/REMAGRAPH_HOME 覆寫）直接解析，而不查 registry。
+
+    其餘任何 project_id 一律查 db.get_registered_state_dir()；查無登記時
+    明確拋出 ProjectNotRegisteredError，絕不靜默回傳一個猜測的路徑。
+    """
+    if from_project == _db.DEFAULT_PROJECT_ID:
+        return _db.get_state_dir()
+
+    registered = _db.get_registered_state_dir(from_project)
+    if registered is None:
+        raise ProjectNotRegisteredError(
+            f"Source project {from_project!r} has never been registered "
+            "(no remagraph command has resolved a state_dir for it yet, "
+            "so its location is unknown); refusing to silently treat this "
+            "as 0 migratable records. Run any `remagraph` command against "
+            f"{from_project!r} at least once first (which registers it), "
+            "or double-check the --from/from_project value for typos."
+        )
+    return Path(registered)
+
+
+def migrate_project_memories(
+    from_project: str,
+    to_project: str,
+    *,
+    dry_run: bool = False,
+) -> MigrationResult:
+    """把 from_project 資料庫裡「看起來屬於」to_project 的記錄遷移過去。
+
+    核心邏輯（CLI `migrate-project` 子指令與 MCP `remagraph_migrate_project`
+    tool 共用的唯一實作，見本節模組頂端註解說明設計理由）：
+    1. 驗證 to_project 合法（沿用既有安全閥門 safety_validate_project，
+       require_env_match=False——這是『主動遷移進某個已知合法專案』的情境，
+       不要求呼叫端目前的 REMAGRAPH_STATE_DIR 剛好已經等於該專案目錄）。
+    2. 解析 from_project 實際登記的 state_dir（見
+       _resolve_migration_source_state_dir）。
+    3. 用 task_id/tags/agent_id/summary 啟發式比對，找出來源資料庫裡「看起
+       來屬於」to_project 的記錄。
+    4. dry_run=True：只回傳預估筆數，不開啟目標連線、不做任何寫入。
+    5. dry_run=False：逐筆 INSERT OR IGNORE 進目標資料庫（強制 project_id
+       為 to_project），並在來源標記 status='invalidated'、於 learnings
+       附加遷移軌跡；單筆失敗只記錄該筆 id 到 skipped_ids，不中斷其餘筆。
+
+    不呼叫 print()/sys.exit()：所有失敗一律以例外拋出，呼叫端（CLI/MCP
+    server）各自決定如何呈現給使用者。
+
+    Raises:
+        ValueError: from_project 與 to_project 相同。
+        remagraph.maintenance.SafetyValveError: to_project 未通過既有安全
+            閥門驗證（herdr-* 規則、project.json metadata 不一致等）。
+        ProjectNotRegisteredError: from_project 從未被登記過，找不到其
+            state_dir。
+        FileNotFoundError: from_project 的 state_dir 已解析出來，但底下
+            並沒有實際的 remagraph.db 檔案。
+        MigrationReadOnlyError: 來源或目標資料庫目前處於唯讀降級狀態。
+    """
+    if from_project == to_project:
+        raise ValueError("from_project and to_project must not be the same")
+
+    # 步驟 1：驗證目標合法性（不要求呼叫端目前環境已經切換過去）。
+    to_state = safety_validate_project(to_project, require_env_match=False)
+
+    # 步驟 2：解析來源 state_dir。
+    from_state = _resolve_migration_source_state_dir(from_project)
+
+    # 別名防護：from_project != to_project（上面已檢查過字面上的
+    # project_id 不同），但兩者各自解析出來的 state_dir 仍有可能是『物理上
+    # 同一個目錄』——例如目前行程的 REMAGRAPH_STATE_DIR 剛好同時是兩者的
+    # 解析結果（resolve_project_state_dir 對已設定的 REMAGRAPH_STATE_DIR
+    # 有最高優先權，與 project_id 本身無關；'default' 特例走
+    # db.get_state_dir() 也一樣受同一個環境變數影響）。若不擋下，會對同一份
+    # remagraph.db 檔案同時開兩條各自 BEGIN 寫入 transaction 的連線，輕則
+    # 自我碰撞造成 SQLITE_BUSY、重則把一筆記錄同時當成『來源』又當成
+    # 『目標』寫出矛盾狀態。與近期修復的『跨專案 fan-out 對物理上同一份
+    # 資料庫的別名專案』問題同一類根因，這裡採用同樣的思路：比較 resolve()
+    # 後的絕對路徑而非原始字串/project_id。
+    if from_state.resolve() == to_state.resolve():
+        raise ValueError(
+            f"from_project {from_project!r} and to_project {to_project!r} "
+            f"resolve to the same physical database directory "
+            f"({from_state.resolve()}); refusing to migrate a project into "
+            "itself under a different name. This usually means "
+            "REMAGRAPH_STATE_DIR is currently pointing at a directory that "
+            "coincidentally matches both projects' resolution -- check the "
+            "ambient environment before retrying."
+        )
+
+    from_db_path = from_state / _db.DB_FILENAME
+    if not from_db_path.exists():
+        raise FileNotFoundError(
+            f"Source project {from_project!r} database does not exist at "
+            f"{from_db_path}"
+        )
+
+    conn_src = _db.connect_at_state_dir(from_state)
+    try:
+        # 步驟 3：啟發式比對出「看起來屬於」to_project 的來源記錄。
+        match_params = (f"%{to_project}%",) * 4
+        rows = conn_src.execute(
+            f"SELECT * FROM memories WHERE {_MIGRATE_MATCH_WHERE}",
+            match_params,
+        ).fetchall()
+
+        if dry_run:
+            return MigrationResult(
+                from_project=from_project,
+                to_project=to_project,
+                dry_run=True,
+                migrated_count=len(rows),
+            )
+
+        if getattr(conn_src, READ_ONLY_ATTR, False):
+            raise MigrationReadOnlyError(
+                f"Source project {from_project!r} database is currently in "
+                "read-only degraded mode (its schema is newer than this "
+                "code's write-compatible version); refusing to mark "
+                "records invalidated. Upgrade the remagraph package and "
+                "retry."
+            )
+
+        conn_tgt = _db.connect_at_state_dir(to_state)
+        try:
+            if getattr(conn_tgt, READ_ONLY_ATTR, False):
+                raise MigrationReadOnlyError(
+                    f"Target project {to_project!r} database is currently "
+                    "in read-only degraded mode (its schema is newer than "
+                    "this code's write-compatible version); refusing to "
+                    "migrate data into it. Upgrade the remagraph package "
+                    "and retry."
+                )
+
+            migrated = 0
+            skipped_ids: list[str] = []
+
+            conn_tgt.execute("BEGIN")
+            conn_src.execute("BEGIN")
+            try:
+                for row in rows:
+                    try:
+                        cols = [k for k in row.keys() if k != "project_id"]
+                        vals = [row[k] for k in cols]
+                        placeholders = ",".join("?" for _ in cols)
+                        cols_str = ",".join(cols)
+                        sql = (
+                            f"INSERT OR IGNORE INTO memories (project_id, {cols_str}) "
+                            f"VALUES (?, {placeholders})"
+                        )
+                        conn_tgt.execute(sql, [to_project] + vals)
+
+                        learn = json.loads(row["learnings"] or "[]")
+                        learn.append(
+                            f"migrated-to:{to_project} at "
+                            f"{datetime.now(timezone.utc).isoformat()}"
+                        )
+                        conn_src.execute(
+                            "UPDATE memories SET status='invalidated', "
+                            "learnings=? WHERE id=?",
+                            (json.dumps(learn, ensure_ascii=False), row["id"]),
+                        )
+                        migrated += 1
+                    except Exception:
+                        skipped_ids.append(row["id"])
+
+                conn_tgt.execute("COMMIT")
+                conn_src.execute("COMMIT")
+            except Exception:
+                conn_tgt.execute("ROLLBACK")
+                conn_src.execute("ROLLBACK")
+                raise
+        finally:
+            conn_tgt.close()
+
+        return MigrationResult(
+            from_project=from_project,
+            to_project=to_project,
+            dry_run=False,
+            migrated_count=migrated,
+            skipped_ids=skipped_ids,
+        )
+    finally:
+        conn_src.close()
