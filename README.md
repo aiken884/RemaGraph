@@ -27,7 +27,7 @@ RemaGraph is a lightweight **MCP** (Model Context Protocol) tool built for AI co
 
 | Item | Status |
 |------|--------|
-| **Version** | `0.4.0-beta` (pre-1.0 beta; published on [PyPI](https://pypi.org/project/remagraph/) — `uv tool install remagraph` / `pip install remagraph`) |
+| **Version** | `0.5.0-beta` (pre-1.0 beta; published on [PyPI](https://pypi.org/project/remagraph/) — `uv tool install remagraph` / `pip install remagraph`) |
 | **Status** | v2: security / governance / reliability + cross-project collaboration + CLI (init/auto/store/search/status/maintain/link/migrate-project/install-hooks/serve) |
 | **Task memory convention** | [`docs/task-memory-convention.md`](./docs/task-memory-convention.md) |
 | **Release prep** | [`docs/reviews/v2-release-prep.md`](./docs/reviews/v2-release-prep.md) |
@@ -57,7 +57,7 @@ Prefer a specific tag, or want the bleeding edge from `main`? Install straight f
 
 ```bash
 # Pinned to a specific release tag
-uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.4.0-beta
+uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.5.0-beta
 
 # Whatever is currently on main
 uv tool install git+https://github.com/aiken884/RemaGraph.git
@@ -370,7 +370,7 @@ RemaGraph 是一套輕量的 MCP（Model Context Protocol）工具，設計給�
 
 | 項目 | 現況 |
 |------|------|
-| **版本** | `0.4.0-beta`(pre-1.0 beta 階段;已上架 [PyPI](https://pypi.org/project/remagraph/)——`uv tool install remagraph` / `pip install remagraph`) |
+| **版本** | `0.5.0-beta`(pre-1.0 beta 階段;已上架 [PyPI](https://pypi.org/project/remagraph/)——`uv tool install remagraph` / `pip install remagraph`) |
 | **狀態** | v2:安全 / 治理 / 可靠度 + 跨專案協作 + CLI(init/auto/store/search/status/maintain/link/migrate-project/install-hooks/serve) |
 | **任務記憶慣例** | [`docs/task-memory-convention.md`](./docs/task-memory-convention.md) |
 | **發行準備** | [`docs/reviews/v2-release-prep.md`](./docs/reviews/v2-release-prep.md) |
@@ -400,7 +400,7 @@ pip install remagraph
 
 ```bash
 # 釘住特定發行版本
-uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.4.0-beta
+uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.5.0-beta
 
 # main 分支目前最新內容
 uv tool install git+https://github.com/aiken884/RemaGraph.git

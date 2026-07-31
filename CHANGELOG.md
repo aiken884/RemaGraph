@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [Unreleased]
 
+### [0.5.0-beta] - 2026-07-31
+
 #### Added
 - **RemaGraph is now published on PyPI**: `pip install remagraph` / `uv tool install remagraph`. The `publish.yml` OIDC Trusted Publishing pipeline, previously configured but never verified end-to-end, produced its first confirmed successful publish. Installation docs now recommend the PyPI install; the git-tag-pinned install remains available for pinning a specific release or tracking `main`.
 
@@ -136,7 +138,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Apache-2.0** license and SPDX headers on `src/remagraph/*.py`.
 - **Test suite**: unit tests for models, DB, arbitration, dedup, store, search, audit, server; smoke tests under `tests/smoke/` with isolated temp state.
 
-[Unreleased]: https://github.com/aiken884/RemaGraph/compare/v0.4.0-beta...HEAD
+[Unreleased]: https://github.com/aiken884/RemaGraph/compare/v0.5.0-beta...HEAD
+[0.5.0-beta]: https://github.com/aiken884/RemaGraph/compare/v0.4.0-beta...v0.5.0-beta
 [0.4.0-beta]: https://github.com/aiken884/RemaGraph/compare/v0.3.1-alpha...v0.4.0-beta
 [0.3.1-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.3.0-alpha...v0.3.1-alpha
 [0.3.0-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.2.0-alpha...v0.3.0-alpha
@@ -151,6 +154,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 版本號依循 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
 
 ### [Unreleased]
+
+### [0.5.0-beta] — 2026-07-31
 
 #### Added
 - **RemaGraph 已正式上架 PyPI**：`pip install remagraph` / `uv tool install remagraph`。`publish.yml` 的 OIDC Trusted Publishing 發布流程先前已設定但從未真正驗證跑通過，這次第一次確認成功發布。安裝文件已改為推薦 PyPI 安裝方式；git tag pin 安裝方式仍保留，供釘住特定版本或追蹤 `main` 分支使用。
@@ -279,7 +284,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Apache-2.0** 授權與 `src/remagraph/*.py` 的 SPDX headers。
 - **測試套件**：models、DB、arbitration、dedup、store、search、audit、server 的單元測試；`tests/smoke/` 下的獨立 temp state smoke tests。
 
-[Unreleased]: https://github.com/aiken884/RemaGraph/compare/v0.4.0-beta...HEAD
+[Unreleased]: https://github.com/aiken884/RemaGraph/compare/v0.5.0-beta...HEAD
+[0.5.0-beta]: https://github.com/aiken884/RemaGraph/compare/v0.4.0-beta...v0.5.0-beta
 [0.4.0-beta]: https://github.com/aiken884/RemaGraph/compare/v0.3.1-alpha...v0.4.0-beta
 [0.3.1-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.3.0-alpha...v0.3.1-alpha
 [0.3.0-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.2.0-alpha...v0.3.0-alpha
