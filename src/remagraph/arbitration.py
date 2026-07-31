@@ -104,7 +104,7 @@ def validate_summary_length(summary: str) -> ArbitrationResult:
         return ArbitrationResult(
             passed=False,
             reason="summary_too_short",
-            detail=f"summary 需 ≥ 30 字，目前 {length} 字",
+            detail=f"summary must be >= 30 characters, currently {length}",
         )
     return ArbitrationResult(passed=True)
 
@@ -121,7 +121,7 @@ def validate_learnings(learnings: list[str]) -> ArbitrationResult:
         return ArbitrationResult(
             passed=False,
             reason="learnings_empty",
-            detail="learnings 至少需要一筆非空內容",
+            detail="learnings requires at least one non-empty entry",
         )
     return ArbitrationResult(passed=True)
 
@@ -141,7 +141,7 @@ def validate_handoff_note(kind: MemoryKind, handoff_note: str) -> ArbitrationRes
         return ArbitrationResult(
             passed=False,
             reason="handoff_note_too_short",
-            detail=f"handoff_note 需 ≥ 20 字，目前 {length} 字",
+            detail=f"handoff_note must be >= 20 characters, currently {length}",
         )
     return ArbitrationResult(passed=True)
 
@@ -157,14 +157,17 @@ def validate_agent_id(agent_id: str) -> ArbitrationResult:
         return ArbitrationResult(
             passed=False,
             reason="invalid_agent_id",
-            detail=f"agent_id 長度需在 3–64 之間，目前 {len(agent_id)}",
+            detail=f"agent_id length must be between 3 and 64, currently {len(agent_id)}",
         )
 
     if not AGENT_ID_REGEX.match(agent_id):
         return ArbitrationResult(
             passed=False,
             reason="invalid_agent_id",
-            detail="agent_id 格式不符，僅允許小寫英數字元、底線、連字號：^[a-z0-9_-]+$",
+            detail=(
+                "agent_id format is invalid; only lowercase alphanumeric "
+                "characters, underscores, and hyphens are allowed: ^[a-z0-9_-]+$"
+            ),
         )
 
     return ArbitrationResult(passed=True)
@@ -215,8 +218,8 @@ def validate_labels(labels: list[str]) -> ArbitrationResult:
                 passed=False,
                 reason="invalid_label",
                 detail=(
-                    f"label 長度需 ≤ {LABEL_MAX_LENGTH} 字元，"
-                    f"目前 {len(label)} 字元：{label[:80]!r}..."
+                    f"label length must be <= {LABEL_MAX_LENGTH} characters, "
+                    f"currently {len(label)} characters: {label[:80]!r}..."
                 ),
             )
         if not LABEL_REGEX.match(label):
@@ -224,8 +227,9 @@ def validate_labels(labels: list[str]) -> ArbitrationResult:
                 passed=False,
                 reason="invalid_label",
                 detail=(
-                    f"label {label!r} 不符合命名空間格式 {LABEL_REGEX.pattern}"
-                    "（例如 'dep:opencode'、'topic:auth'、'kind:bug'）"
+                    f"label {label!r} does not match the namespace format "
+                    f"{LABEL_REGEX.pattern} (e.g. 'dep:opencode', 'topic:auth', "
+                    "'kind:bug')"
                 ),
             )
     return ArbitrationResult(passed=True)
@@ -332,7 +336,7 @@ def invalidate_constraints(
             return ArbitrationResult(
                 passed=False,
                 reason="invalidates_not_found",
-                detail=f"invalidates 指定的記憶不存在：{mid}",
+                detail=f"the memory specified by invalidates does not exist: {mid}",
             )
 
     # 驗證 kind 都是 discovered_constraint
@@ -342,8 +346,8 @@ def invalidate_constraints(
                 passed=False,
                 reason="invalidates_kind_mismatch",
                 detail=(
-                    f"只能 invalidate discovered_constraint 類型的記憶，"
-                    f"{r['id']} 的 kind 是 {r['kind']}"
+                    "only memories of kind discovered_constraint can be "
+                    f"invalidated; {r['id']} has kind {r['kind']}"
                 ),
             )
 

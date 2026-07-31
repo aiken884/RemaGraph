@@ -96,11 +96,13 @@ def safety_validate_project(project_id: str, *, require_env_match: bool = True) 
     if require_env_match:
         if not env_dir:
             _record_violation(project_id, "missing_remagraph_state_dir")
-            raise SafetyValveError("REMAGRAPH_STATE_DIR 未設定；herdr-* 必須設定正確 state_dir")
+            raise SafetyValveError(
+                "REMAGRAPH_STATE_DIR is not set; herdr-* projects must set a correct state_dir"
+            )
         if env_dir != configured:
             _record_violation(project_id, "state_dir_mismatch")
             raise SafetyValveError(
-                f"REMAGRAPH_STATE_DIR 與 project 不符: {env_dir} != {configured}"
+                f"REMAGRAPH_STATE_DIR does not match project: {env_dir} != {configured}"
             )
 
     # project.json metadata 一致性檢查（獨立對抗式審查發現的缺口修復）。
@@ -125,13 +127,16 @@ def safety_validate_project(project_id: str, *, require_env_match: bool = True) 
     except ValueError as e:
         _record_violation(project_id, "project_metadata_mismatch")
         raise SafetyValveError(
-            f"project.json 記錄的 project_id 與目前要求的 project_id 不符，"
-            f"拒絕使用 state_dir={configured}：{e}"
+            f"project.json records a project_id that does not match the "
+            f"currently requested project_id; refusing to use "
+            f"state_dir={configured}: {e}"
         ) from e
 
     if project_id.startswith("herdr-") and configured.name == "remagraph":
         _record_violation(project_id, "herdr_using_default_db")
-        raise SafetyValveError("herdr-* 不得使用 default DB，必須用獨立 state_dir")
+        raise SafetyValveError(
+            "herdr-* projects must not use the default DB; a separate state_dir is required"
+        )
 
     return configured
 

@@ -67,7 +67,10 @@ def _check_rate_limit(key: str) -> None:
 
 mcp = FastMCP(
     "RemaGraph",
-    instructions="RemaGraph — 凡走過必留下痕跡。記錄 AI coding agent 處理任務時留下的痕跡。",
+    instructions=(
+        "RemaGraph — leave a trace wherever you go. Records the traces AI coding "
+        "agents leave behind while working on tasks."
+    ),
 )
 
 # ---------------------------------------------------------------------------
@@ -170,18 +173,20 @@ def _get_conn() -> sqlite3.Connection:
         _conn.execute("SELECT 1")
     except Exception as e:
         raise RuntimeError(
-            "RemaGraph 資料庫連線已失效（資料庫檔案可能已被移除或搬移），"
-            f"請重新啟動 remagraph serve（restart the serve process）：{e}"
+            "RemaGraph database connection is no longer valid (the database file "
+            "may have been removed or moved). Please restart `remagraph serve`: "
+            f"{e}"
         ) from e
 
     if _bound_db_path is not None and not _bound_db_path.exists():
         raise RuntimeError(
-            "RemaGraph 資料庫檔案已不存在於原本路徑"
-            f"（{_bound_db_path}），可能已被移除或搬移到別處——目前這個 "
-            "連線可能仍對著一個已被作業系統 unlink 的孤兒 inode 繼續運作"
-            "（POSIX 語意），SELECT 1 存活檢查偵測不到這個情境，因此讀寫仍"
-            "可能悄悄『成功』但寫入一個已經找不到的檔案。請重新啟動 "
-            "remagraph serve（restart the serve process）。"
+            "RemaGraph database file no longer exists at its original path "
+            f"({_bound_db_path}); it may have been removed or moved elsewhere. "
+            "This connection may still be operating on an orphaned inode that "
+            "was unlinked by the OS (POSIX semantics), which the SELECT 1 "
+            "liveness check cannot detect — so reads/writes may silently "
+            "\"succeed\" while writing to a file that can no longer be found. "
+            "Please restart `remagraph serve`."
         )
 
     return _conn
@@ -344,12 +349,14 @@ def _run_serve(argv: list[str]) -> None:
     project_id = _determine_serve_project_id(argv)
     if not project_id:
         print(
-            "ERROR: remagraph serve 需要明確的 project 綁定 —— 請提供 "
-            "--project <id>，或設定 REMAGRAPH_PROJECT 環境變數。這是刻意"
-            "的設計（PPLX 架構審查共識）：每個 serve 行程只綁定單一 "
-            "project，避免多專案動態路由帶來的 SQLite 鎖定/連線快取複雜度"
-            "與安全閥門失效風險；不同 project 請另外啟動獨立的 "
-            "`remagraph serve --project <id>` 行程。",
+            "ERROR: remagraph serve requires an explicit project binding — "
+            "provide --project <id> or set the REMAGRAPH_PROJECT environment "
+            "variable. This is intentional (per PPLX architecture review "
+            "consensus): each serve process binds to exactly one project, to "
+            "avoid the SQLite locking / connection-cache complexity and "
+            "safety-valve bypass risk that dynamic multi-project routing "
+            "within a single process would introduce. Start a separate "
+            "`remagraph serve --project <id>` process per project.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -357,7 +364,7 @@ def _run_serve(argv: list[str]) -> None:
     try:
         _bind_project(project_id)
     except Exception as e:
-        print(f"ERROR: remagraph serve 啟動失敗 - {e}", file=sys.stderr)
+        print(f"ERROR: remagraph serve failed to start - {e}", file=sys.stderr)
         sys.exit(1)
 
     mcp.run(transport="stdio")
@@ -370,8 +377,11 @@ def _run_serve(argv: list[str]) -> None:
 
 @mcp.tool(
     name="remagraph_store",
-    description="寫入記憶。通過五條仲裁規則後寫入 SQLite + FTS5 index。"
-    "支援 fleet_member（由 tower 擁有 record/recycle）。",
+    description=(
+        "Store a memory. Written to SQLite + FTS5 index after passing five "
+        "arbitration rules. Supports fleet_member (record/recycle owned by "
+        "the tower)."
+    ),
 )
 def remagraph_store(
     project_id: str,
@@ -412,8 +422,10 @@ def remagraph_store(
         detail = getattr(
             conn,
             _db.READ_ONLY_DETAIL_ATTR,
-            "此連線目前為唯讀模式（資料庫 schema 已升級到超出本程式碼的寫入"
-            "相容版本），已拒絕本次寫入。請升級 remagraph 套件後再重試。",
+            "This connection is currently in read-only mode (the database "
+            "schema has been upgraded beyond this code's write-compatible "
+            "version); this write has been rejected. Please upgrade the "
+            "remagraph package and retry.",
         )
         return {"status": "rejected", "reason": "read_only_mode", "detail": detail}
     request = StoreRequest(
@@ -445,8 +457,11 @@ def remagraph_store(
 
 @mcp.tool(
     name="remagraph_search",
-    description="查詢記憶。FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）"
-    "+ tag/kind/agent_id/task_id 過濾。短查詢（≤2 字元）回傳空結果不拋錯。",
+    description=(
+        "Search memories. FTS5 BM25 full-text search (trigram tokenizer, "
+        "CJK-capable) plus tag/kind/agent_id/task_id filters. Short queries "
+        "(<=2 characters) return an empty result instead of raising an error."
+    ),
 )
 def remagraph_search(
     query: str,
@@ -518,9 +533,13 @@ def remagraph_search(
 
 @mcp.tool(
     name="remagraph_status",
-    description="查詢最新現況（預設限 project）。同時回傳版本相容性 handshake 資訊"
-    "（server_code_version/db_schema_version/min_reader_version/min_writer_version/"
-    "upgrade_hint/read_only），讓呼叫端能提早掌握是否存在版本落差，不必等寫入失敗。",
+    description=(
+        "Query the latest status (scoped to a project by default). Also "
+        "returns version-compatibility handshake info "
+        "(server_code_version/db_schema_version/min_reader_version/"
+        "min_writer_version/upgrade_hint/read_only) so the caller can detect a "
+        "version gap early, without waiting for a write to fail."
+    ),
 )
 def remagraph_status(
     project_id: str | None = None, limit: int = 20, all_projects: bool = False
@@ -545,7 +564,10 @@ def remagraph_status(
 
 @mcp.tool(
     name="remagraph_maintain",
-    description=("執行 DB 自動維護（WAL/FTS/prune/vacuum/integrity）。 必須提供 project_id。"),
+    description=(
+        "Run automatic DB maintenance (WAL/FTS/prune/vacuum/integrity). "
+        "project_id is required."
+    ),
 )
 def remagraph_maintain(
     project_id: str,
@@ -564,8 +586,11 @@ def remagraph_maintain(
 
 @mcp.tool(
     name="remagraph_migrate_project",
-    description="將記憶從來源 project 遷移到目標 project 的獨立 DB，並在來源標記 invalidated。"
-    "僅用於一次性遷移（如 default → herdr-bridge）。",
+    description=(
+        "Migrate memories from a source project to a target project's "
+        "separate DB, and mark them invalidated in the source. For one-time "
+        "migrations only (e.g. default -> herdr-bridge)."
+    ),
 )
 def remagraph_migrate_project(
     from_project: str,
@@ -582,7 +607,7 @@ def remagraph_migrate_project(
             "status": "ok" if not dry_run else "dry-run",
             "from": from_project,
             "to": to_project,
-            "message": "遷移邏輯已觸發（詳細見 CLI migrate-project）",
+            "message": "Migration logic has been triggered (see CLI migrate-project for details)",
         }
     except Exception as e:
         return {"status": "error", "reason": str(e)}

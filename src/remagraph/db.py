@@ -42,12 +42,16 @@ DEFAULT_PROJECT_ID = "default"
 _MIN_READER_VERSION_DEFAULT = "1"
 
 _UPGRADE_HINT_TEXT = (
-    "此資料庫的 schema 版本比目前執行的 remagraph 程式碼更新，程式碼為避免資料損毀"
-    "已拒絕開啟。請選擇以下其一處理："
-    "1) 將已安裝的 remagraph 套件升級到與此資料庫 schema 相容的版本；"
-    "2) 設定環境變數 REMAGRAPH_STATE_DIR 指向另一個全新、獨立的目錄，改用全新資料庫；"
-    "3) 若確認可捨棄此資料庫的既有資料，找到並刪除該 state_dir 目錄下的 "
-    "remagraph.db 檔案後重新初始化。"
+    "This database's schema version is newer than the currently running "
+    "remagraph code; to avoid data corruption, the code has refused to open "
+    "it. Please choose one of the following: "
+    "1) Upgrade the installed remagraph package to a version compatible with "
+    "this database's schema; "
+    "2) Set the REMAGRAPH_STATE_DIR environment variable to point to a new, "
+    "separate directory and use a fresh database; "
+    "3) If you are certain you can discard this database's existing data, "
+    "find and delete the remagraph.db file under that state_dir and "
+    "reinitialize."
 )
 
 
@@ -1049,31 +1053,35 @@ def _handle_newer_than_code_schema(conn: sqlite3.Connection, current_version: in
         # Tier 2：讀相容、寫不安全 —— 不 raise，只標記唯讀，交給
         # store.process_store() 在寫入路徑擋下。
         detail = (
-            f"此資料庫已升級至 schema_version={current_version}，其要求的最低"
-            f"寫入相容版本 min_writer_version={min_writer} 高於目前執行的程式碼"
-            f"版本 SCHEMA_VERSION={SCHEMA_VERSION}。為避免資料損毀，此連線已切換"
-            "為唯讀模式（remagraph_search / remagraph_status 可正常使用），已"
-            "拒絕本次寫入。請將已安裝的 remagraph 套件升級到與此資料庫相容的"
-            "版本後再重試寫入。"
+            f"This database has been upgraded to schema_version={current_version}, "
+            f"whose required minimum write-compatible version "
+            f"min_writer_version={min_writer} is higher than the currently "
+            f"running code's version SCHEMA_VERSION={SCHEMA_VERSION}. To avoid "
+            "data corruption, this connection has switched to read-only mode "
+            "(remagraph_search / remagraph_status remain usable); this write "
+            "has been rejected. Please upgrade the installed remagraph package "
+            "to a version compatible with this database before retrying the write."
         )
         if stored_hint:
-            detail += f" [資料庫內建升級提示] {stored_hint}"
+            detail += f" [database-embedded upgrade hint] {stored_hint}"
         setattr(conn, READ_ONLY_ATTR, True)
         setattr(conn, READ_ONLY_DETAIL_ATTR, detail)
         return
 
     # Tier 3：連讀都不安全 —— 維持 item 1 既有的強制拒絕行為不變。
     message = (
-        f"資料庫 schema_version={current_version} 比程式碼的 "
-        f"SCHEMA_VERSION={SCHEMA_VERSION} 還新，無法降級。"
-        "請選擇以下其一處理："
-        "1) 更新已安裝的 remagraph 套件至相容此 schema 版本的版本；"
-        "2) 設定 REMAGRAPH_STATE_DIR 指向另一個獨立目錄，改用全新資料庫；"
-        "3) 若確認可捨棄此資料庫的既有資料，刪除該 state_dir 下的 "
-        f"{DB_FILENAME} 後重新初始化。"
+        f"Database schema_version={current_version} is newer than the code's "
+        f"SCHEMA_VERSION={SCHEMA_VERSION}; cannot downgrade. "
+        "Please choose one of the following: "
+        "1) Update the installed remagraph package to a version compatible "
+        "with this schema version; "
+        "2) Set REMAGRAPH_STATE_DIR to point to a separate directory and use "
+        "a fresh database; "
+        "3) If you are certain you can discard this database's existing "
+        f"data, delete {DB_FILENAME} under that state_dir and reinitialize."
     )
     if stored_hint:
-        message += f" [資料庫內建升級提示] {stored_hint}"
+        message += f" [database-embedded upgrade hint] {stored_hint}"
     raise MigrationError(message)
 
 

@@ -296,12 +296,14 @@ def test_newer_schema_error_without_upgrade_hint_falls_back_to_static_message(tm
 
     message = str(exc_info.value)
     expected_static_message = (
-        f"資料庫 schema_version={db.SCHEMA_VERSION + 1} 比程式碼的 "
-        f"SCHEMA_VERSION={db.SCHEMA_VERSION} 還新，無法降級。"
-        "請選擇以下其一處理："
-        "1) 更新已安裝的 remagraph 套件至相容此 schema 版本的版本；"
-        "2) 設定 REMAGRAPH_STATE_DIR 指向另一個獨立目錄，改用全新資料庫；"
-        "3) 若確認可捨棄此資料庫的既有資料，刪除該 state_dir 下的 "
-        f"{db.DB_FILENAME} 後重新初始化。"
+        f"Database schema_version={db.SCHEMA_VERSION + 1} is newer than the "
+        f"code's SCHEMA_VERSION={db.SCHEMA_VERSION}; cannot downgrade. "
+        "Please choose one of the following: "
+        "1) Update the installed remagraph package to a version compatible "
+        "with this schema version; "
+        "2) Set REMAGRAPH_STATE_DIR to point to a separate directory and use "
+        "a fresh database; "
+        "3) If you are certain you can discard this database's existing "
+        f"data, delete {db.DB_FILENAME} under that state_dir and reinitialize."
     )
     assert message == expected_static_message
