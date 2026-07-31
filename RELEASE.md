@@ -1,8 +1,8 @@
 # Release Process
 
 RemaGraph follows [Semantic Versioning](https://semver.org/), but is currently
-in a **pre-1.0 alpha** stage — there is no frozen public API yet (see
-[`BOUNDARIES.md`](BOUNDARIES.md)). The version number still communicates
+in a **pre-1.0** stage (alpha and, as of `0.4.0`, beta) — there is no frozen
+public API yet (see [`BOUNDARIES.md`](BOUNDARIES.md)). The version number still communicates
 intent using the rules below, but during pre-1.0, even a MINOR or PATCH bump
 may include a reviewed, CHANGELOG-documented behavioral adjustment to MCP tool
 parameters or CLI subcommands — something that would require a MAJOR bump once
@@ -20,11 +20,13 @@ the public surface is frozen at 1.0.
 
 ## Current state
 
-- Current version: `0.3.x` (see `pyproject.toml`), tagged as `-alpha` releases
-  (e.g. `v0.3.1-alpha`).
+- Current version: `0.4.x` (see `pyproject.toml`), tagged as `-alpha` or
+  `-beta` releases depending on maturity (e.g. `v0.3.1-alpha`, `v0.4.0-beta`).
 - **Not yet published to PyPI.** Installation today is via a git-pinned tag:
   ```bash
   uv tool install git+https://github.com/aiken884/RemaGraph.git@vX.Y.Z-alpha
+  # or, once tagged as beta:
+  uv tool install git+https://github.com/aiken884/RemaGraph.git@vX.Y.Z-beta
   ```
   See the "Installation" section of [`README.md`](README.md) for the current
   recommended tag.
@@ -34,9 +36,11 @@ the public surface is frozen at 1.0.
 1. Ensure `main` is green: CI (`smoke` → `lint` [ruff + mypy] → `test` with
    coverage ≥80%, per `.github/workflows/test.yml`) passes.
 2. Update `CHANGELOG.md` — move the `Unreleased` entries under a new
-   `## [X.Y.Z-alpha] - DATE` heading (both the English and 繁體中文 sections).
+   `## [X.Y.Z-alpha]` or `## [X.Y.Z-beta] - DATE` heading, whichever
+   maturity label applies (both the English and 繁體中文 sections).
 3. Bump the version in `pyproject.toml` to match.
-4. Commit, then tag: `git tag -a vX.Y.Z-alpha -m "..." && git push origin vX.Y.Z-alpha`.
+4. Commit, then tag: `git tag -a vX.Y.Z-alpha -m "..." && git push origin vX.Y.Z-alpha`
+   (substitute `-beta` once the release has reached that maturity).
 5. (Optional, not yet a fixed required step) Create a GitHub Release for the
    tag with notes drawn from `CHANGELOG.md`.
 
@@ -66,7 +70,7 @@ change to ship.
 # 發布流程
 
 RemaGraph 採用 [Semantic Versioning](https://semver.org/)，但目前處於
-**pre-1.0 alpha** 階段——還沒有凍結的公開 API（詳見 [`BOUNDARIES.md`](BOUNDARIES.md)）。
+**pre-1.0** 階段（含 alpha，自 `0.4.0` 起也含 beta）——還沒有凍結的公開 API（詳見 [`BOUNDARIES.md`](BOUNDARIES.md)）。
 版號依然依循下方規則傳達意圖，但在 pre-1.0 期間，即使是 MINOR 或 PATCH 版號，
 也可能包含經過審查、且已在 CHANGELOG 中記錄過的 MCP tool 參數或 CLI 子指令行為
 調整——這類調整一旦到了 1.0、公開介面凍結之後，就會需要走 MAJOR 版號。
@@ -81,11 +85,13 @@ RemaGraph 採用 [Semantic Versioning](https://semver.org/)，但目前處於
 
 ## 目前現況
 
-- 目前版本：`0.3.x`（見 `pyproject.toml`），以 `-alpha` 標籤打 tag（例如
-  `v0.3.1-alpha`）。
+- 目前版本：`0.4.x`（見 `pyproject.toml`），依成熟度以 `-alpha` 或 `-beta`
+  標籤打 tag（例如 `v0.3.1-alpha`、`v0.4.0-beta`）。
 - **尚未正式發布到 PyPI。** 目前的安裝方式是透過 git 釘住特定 tag：
   ```bash
   uv tool install git+https://github.com/aiken884/RemaGraph.git@vX.Y.Z-alpha
+  # 若已打 beta tag：
+  uv tool install git+https://github.com/aiken884/RemaGraph.git@vX.Y.Z-beta
   ```
   目前建議釘的 tag 版本見 [`README.md`](README.md)「安裝」章節。
 
@@ -94,9 +100,11 @@ RemaGraph 採用 [Semantic Versioning](https://semver.org/)，但目前處於
 1. 確認 `main` 綠燈：CI（`smoke` → `lint`〔ruff + mypy〕→ `test`，coverage ≥80%，
    對應 `.github/workflows/test.yml`）通過。
 2. 更新 `CHANGELOG.md`——把 `Unreleased` 章節搬到新的
-   `## [X.Y.Z-alpha] — DATE` 標題底下（英文、繁體中文兩個章節都要搬）。
+   `## [X.Y.Z-alpha]` 或 `## [X.Y.Z-beta] — DATE` 標題底下，依實際成熟度
+   標籤擇一（英文、繁體中文兩個章節都要搬）。
 3. 同步把 `pyproject.toml` 的版本號 bump 到位。
-4. commit，然後打 tag：`git tag -a vX.Y.Z-alpha -m "..." && git push origin vX.Y.Z-alpha`。
+4. commit，然後打 tag：`git tag -a vX.Y.Z-alpha -m "..." && git push origin vX.Y.Z-alpha`
+   （若已達 beta 成熟度則改用 `-beta`）。
 5. （可選，目前尚未固定為必要步驟）為該 tag 建立對應的 GitHub Release，內容取
    自 `CHANGELOG.md`。
 

@@ -19,7 +19,7 @@ RemaGraph is a lightweight **MCP** (Model Context Protocol) tool built for AI co
 
 | Item | Status |
 |------|--------|
-| **Version** | `0.3.1-alpha` (internal alpha; **not yet** on PyPI — install via the git tag pin below) |
+| **Version** | `0.4.0-beta` (pre-1.0 beta; the repo itself is now public — the PyPI package is **not yet** published, install via the git tag pin below) |
 | **Status** | v2: security / governance / reliability + cross-project collaboration + CLI (init/auto/store/search/status/maintain/link/migrate-project/install-hooks/serve) |
 | **Task memory convention** | [`docs/task-memory-convention.md`](./docs/task-memory-convention.md) |
 | **Release prep** | [`docs/reviews/v2-release-prep.md`](./docs/reviews/v2-release-prep.md) |
@@ -33,12 +33,12 @@ RemaGraph is a lightweight **MCP** (Model Context Protocol) tool built for AI co
 
 ### Installation (currently powering real-world Herdr Bridge operation)
 
-**Currently used primarily to run live inside Herdr Bridge; not yet published to PyPI.**
+**Currently used primarily to run live inside Herdr Bridge. The repo is public; the package itself has not yet been published to PyPI — install via the git tag pin below.**
 
-Recommended install — a one-liner pinned to the latest internal alpha tag:
+Recommended install — a one-liner pinned to the latest beta tag:
 
 ```bash
-uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.3.1-alpha
+uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.4.0-beta
 ```
 
 Without a version pin, this installs whatever is currently on `main`:
@@ -85,7 +85,7 @@ No code required. Full plain-language walkthrough: [`docs/task-memory-convention
 
 New users may also find [`docs/internal/alpha-test-playbook.md`](./docs/internal/alpha-test-playbook.md) useful as an onboarding guide — it includes scenarios and a feedback template.
 
-**Note**: RemaGraph is already running in production inside Herdr Bridge. It hasn't been published publicly yet — current focus is release prep.
+**Note**: RemaGraph is already running in production inside Herdr Bridge, and this repository is now public. Two separate things are still true, though: this is a pre-1.0 beta (see [`BOUNDARIES.md`](./BOUNDARIES.md) — no frozen public API yet), and the package has not been published to PyPI — install via the git tag pin above.
 
 ### MCP Quick Start
 
@@ -384,7 +384,7 @@ RemaGraph 是一套輕量的 MCP（Model Context Protocol）工具，設計給�
 
 | 項目 | 現況 |
 |------|------|
-| **版本** | `0.3.1-alpha`(內部 alpha 階段;**尚未**上架 PyPI,安裝方式見下方的 git tag pin) |
+| **版本** | `0.4.0-beta`(pre-1.0 beta 階段;repo 本身已公開;PyPI 套件**尚未**上架,安裝方式見下方的 git tag pin) |
 | **狀態** | v2:安全 / 治理 / 可靠度 + 跨專案協作 + CLI(init/auto/store/search/status/maintain/link/migrate-project/install-hooks/serve) |
 | **任務記憶慣例** | [`docs/task-memory-convention.md`](./docs/task-memory-convention.md) |
 | **發行準備** | [`docs/reviews/v2-release-prep.md`](./docs/reviews/v2-release-prep.md) |
@@ -398,12 +398,12 @@ RemaGraph 是一套輕量的 MCP（Model Context Protocol）工具，設計給�
 
 ### 安裝（目前主要用於 Herdr Bridge 真實運作）
 
-**目前主要用於 Herdr Bridge 真實運作，尚未對外公開發布 PyPI。**
+**目前主要用於 Herdr Bridge 真實運作。repo 本身已公開，但套件尚未發布到 PyPI——請透過下方的 git tag pin 安裝。**
 
-推薦安裝方式（一行指令，pin 到目前最新的內部 alpha 版本標記）：
+推薦安裝方式（一行指令，pin 到目前最新的 beta 版本標記）：
 
 ```bash
-uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.3.1-alpha
+uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.4.0-beta
 ```
 
 不指定版本則安裝 `main` 分支目前最新內容：
@@ -450,7 +450,7 @@ remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
 
 新使用者可參考 [`docs/internal/alpha-test-playbook.md`](./docs/internal/alpha-test-playbook.md) 作為上手指南（含場景與回饋模板）。
 
-**注意**：目前已在 Herdr Bridge 真實運作中使用，尚未對外公開發布，現階段聚焦發行前準備。
+**注意**：目前已在 Herdr Bridge 真實運作中使用，這個 repo 現在也已經對外公開。但有兩件事仍然分開成立：這是 pre-1.0 beta（詳見 [`BOUNDARIES.md`](./BOUNDARIES.md)——尚無凍結的公開 API），而套件本身尚未發布到 PyPI，請透過上方的 git tag pin 安裝。
 
 ### MCP 快速開始
 

@@ -7,6 +7,17 @@ All notable changes to RemaGraph will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### [0.4.0-beta] - 2026-07-31
+
+> **Note**: This release marks RemaGraph's move from alpha to **beta**, and the **first time this repository itself is made public** — until now it only ran internally inside Herdr Bridge. This is **not** a 1.0 release: per [`BOUNDARIES.md`](./BOUNDARIES.md), pre-1.0 still means no frozen public API, and "beta" here means the feature set has stabilized enough for wider testing, not that MCP tool parameters or CLI subcommands are locked. The PyPI package itself is still not published — install via the git tag below (`uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.4.0-beta`).
+
+#### Changed
+- **Full pre-publication review cycle**: a dedicated documentation and hygiene pass ahead of making the repo public. Highlights:
+  - Filled in missing README/DESIGN documentation for all 5 MCP tools (some had gaps in parameter tables and response fields).
+  - `remagraph_migrate_project` was previously a stub that didn't actually migrate anything; it now performs a real migration, sharing the same core implementation as the CLI's `migrate-project` subcommand, plus a follow-up fix for a per-record atomicity gap.
+  - All user-facing runtime strings across the project (CLI, core server/db/maintenance/arbitration modules, hooks installer, dedup, package metadata) were translated from Chinese to English, so RemaGraph now defaults to English at runtime.
+  - A broader sweep caught and corrected several stale facts and small inconsistencies left over from earlier releases (outdated version references, leftover internal-only wording, and similar).
+
 ### [0.3.1-alpha] - 2026-07-25 (internal alpha)
 
 > **Note**: This release is for internal use only and has not been published to PyPI. See the "Installation" section of the README for setup (`uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.3.1-alpha`).
@@ -108,7 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Apache-2.0** license and SPDX headers on `src/remagraph/*.py`.
 - **Test suite**: unit tests for models, DB, arbitration, dedup, store, search, audit, server; smoke tests under `tests/smoke/` with isolated temp state.
 
-[Unreleased]: https://github.com/aiken884/RemaGraph/compare/v0.3.1-alpha...HEAD
+[Unreleased]: https://github.com/aiken884/RemaGraph/compare/v0.4.0-beta...HEAD
+[0.4.0-beta]: https://github.com/aiken884/RemaGraph/compare/v0.3.1-alpha...v0.4.0-beta
 [0.3.1-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.3.0-alpha...v0.3.1-alpha
 [0.3.0-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.2.0-alpha...v0.3.0-alpha
 [0.2.0-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.1.0...v0.2.0-alpha
@@ -120,6 +132,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 格式依循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本號依循 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
+
+### [0.4.0-beta] — 2026-07-31
+
+> **注意**：此版本是 RemaGraph 從 alpha 進入 **beta** 的里程碑，也是**這個 repo 本身第一次對外公開**——在此之前僅在 Herdr Bridge 內部真實運作使用。這**不是** 1.0 發行：依 [`BOUNDARIES.md`](./BOUNDARIES.md)，pre-1.0 期間依然沒有凍結的公開 API，這裡的「beta」指的是功能集已相對穩定、可開始更廣泛測試，不代表 MCP tool 參數或 CLI 子指令已經鎖定不變。PyPI 套件本身仍未發布——安裝方式請透過下方 git tag（`uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.4.0-beta`）。
+
+#### Changed
+- **一次完整的發行前審查週期**：正式公開前的文件與清理專項審查，重點如下：
+  - 補齊 README/DESIGN 中 5 個 MCP tool 原本缺漏的文件內容（部分參數表與回應欄位先前有缺口）。
+  - `remagraph_migrate_project` 先前是空殼、實際上不會真的遷移任何資料，現在已改為真正的實作，與 CLI `migrate-project` 子指令共用同一套核心邏輯，並補上後續發現的單筆遷移原子性缺口修復。
+  - 全專案使用者可見的執行期訊息（CLI、核心 server/db/maintenance/arbitration 模組、hooks installer、dedup、套件 metadata）已從中文全面改為英文，RemaGraph 執行期預設語言現在是英文。
+  - 更大範圍的檢視另外抓到並修正了幾處前幾版遺留下來的過時事實與小處不一致（過時版本號引用、殘留的「僅限內部」措辭等）。
 
 ### [0.3.1-alpha] — 2026-07-25（內部 Alpha 測試版）
 
@@ -222,7 +245,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Apache-2.0** 授權與 `src/remagraph/*.py` 的 SPDX headers。
 - **測試套件**：models、DB、arbitration、dedup、store、search、audit、server 的單元測試；`tests/smoke/` 下的獨立 temp state smoke tests。
 
-[Unreleased]: https://github.com/aiken884/RemaGraph/compare/v0.3.1-alpha...HEAD
+[Unreleased]: https://github.com/aiken884/RemaGraph/compare/v0.4.0-beta...HEAD
+[0.4.0-beta]: https://github.com/aiken884/RemaGraph/compare/v0.3.1-alpha...v0.4.0-beta
 [0.3.1-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.3.0-alpha...v0.3.1-alpha
 [0.3.0-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.2.0-alpha...v0.3.0-alpha
 [0.2.0-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.1.0...v0.2.0-alpha

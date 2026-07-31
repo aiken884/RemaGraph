@@ -2,7 +2,7 @@
 
 This document draws the line between what a consumer of RemaGraph can currently depend on and what is internal implementation that may change at any time. It exists so that anyone building on top of RemaGraph — most notably [herdr-bridge](https://github.com/aiken884/herdr-bridge), which embeds RemaGraph as one of its modules — knows what's safe to rely on today, and what isn't.
 
-**RemaGraph is currently pre-1.0 alpha (the current version series is `0.3.x`).** Nothing here is a semver-frozen guarantee. What follows is a record of the *current* interface surface and of the parts that are deliberately internal and not meant to be depended on — not a promise that any of it will stay byte-for-byte identical release to release. A future `1.0` will be the point at which a specific interface version actually gets frozen; until then, MINOR and PATCH releases during the pre-1.0 period may carry reviewed, CHANGELOG-documented behavioral changes, including breaking ones.
+**RemaGraph is currently pre-1.0 (now in beta; the current version series is `0.4.x`).** Nothing here is a semver-frozen guarantee. What follows is a record of the *current* interface surface and of the parts that are deliberately internal and not meant to be depended on — not a promise that any of it will stay byte-for-byte identical release to release. A future `1.0` will be the point at which a specific interface version actually gets frozen; until then, MINOR and PATCH releases during the pre-1.0 period may carry reviewed, CHANGELOG-documented behavioral changes, including breaking ones.
 
 ## Current Public Interface (intended, not semver-guaranteed)
 
@@ -59,7 +59,7 @@ At runtime, RemaGraph depends on `model2vec` (dedup embeddings), `mcp` (FastMCP,
 
 這份文件劃出「使用 RemaGraph 的人現在可以依賴什麼」與「內部實作、隨時可能變」之間的界線。存在的目的是讓在它之上建構的人——尤其是 [herdr-bridge](https://github.com/aiken884/herdr-bridge)（把 RemaGraph 當作自己其中一個模組嵌入使用）——知道現況下哪些東西可以放心依賴，哪些不行。
 
-**RemaGraph 目前是 pre-1.0 alpha（現行版本序列為 `0.3.x`）。** 這份文件記錄的不是任何 semver 凍結保證，而是「目前的介面現況」，以及「刻意設計為內部、不該被依賴」的部分——不是承諾這些東西會逐版本、逐位元組維持不變。等到專案正式發行 `1.0` 時，才會真正凍結某個具體版本的介面；在那之前，pre-1.0 期間的 MINOR/PATCH 版本都可能包含經過審查、在 CHANGELOG 記錄過的行為調整，包括破壞性調整。
+**RemaGraph 目前是 pre-1.0（現已進入 beta；現行版本序列為 `0.4.x`）。** 這份文件記錄的不是任何 semver 凍結保證，而是「目前的介面現況」，以及「刻意設計為內部、不該被依賴」的部分——不是承諾這些東西會逐版本、逐位元組維持不變。等到專案正式發行 `1.0` 時，才會真正凍結某個具體版本的介面；在那之前，pre-1.0 期間的 MINOR/PATCH 版本都可能包含經過審查、在 CHANGELOG 記錄過的行為調整，包括破壞性調整。
 
 ## 目前的公開介面現況（intended，非 semver 保證）
 
