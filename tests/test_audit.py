@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """測試 audit.py —— WU-7 audit writer，強制 temp state。"""
 
 import json

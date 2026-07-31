@@ -1,0 +1,62 @@
+version = 1
+SPDX-PackageName = "remagraph"
+SPDX-PackageSupplier = "The RemaGraph Authors"
+SPDX-PackageDownloadLocation = "https://github.com/aiken884/RemaGraph"
+
+[[annotations]]
+path = [
+    "*.md",
+    "*.html",
+    "*.json",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "GOVERNANCE.md",
+    "MAINTAINERS.md",
+    "README.md",
+    "RELEASE.md",
+    "SECURITY.md",
+    "ADOPTERS.md",
+    "BOUNDARIES.md",
+    "CHANGELOG.md",
+    "DESIGN.md",
+    "docs/**/*.md",
+    "docs/**/*.html",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "The RemaGraph Authors"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [
+    ".github/**/*.yml",
+    ".github/**/*.md",
+    ".github/dependabot.yml",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "The RemaGraph Authors"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [
+    ".gitignore",
+    ".pre-commit-config.yaml",
+    ".env.example",
+    "pyproject.toml",
+    "uv.lock",
+    "REUSE.toml",
+    "mcp-config-example.json",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "The RemaGraph Authors"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [
+    "scripts/**/*",
+    "examples/**/*",
+    "src/remagraph/hooks/**/*",
+    "ci/**/*",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "The RemaGraph Authors"
+SPDX-License-Identifier = "Apache-2.0"

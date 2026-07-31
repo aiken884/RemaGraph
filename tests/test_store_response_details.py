@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """加強 process_store 回應欄位的測試（針對 mutmut 發現的倖存變異）。
 
 目的：確保 StoreResponse 中的所有欄位（status、reason、detail、id、superseded、invalidated_count）

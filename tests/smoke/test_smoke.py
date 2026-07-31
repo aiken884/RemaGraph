@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Integration smoke tests for the full RemaGraph MCP server lifecycle.
 
 每個 test 驗證一個端對端流程：write → search → status，使用 tmp_path 隔離。

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for db migrations and schema version handling.
 
 發行前驗證重點（O5）：

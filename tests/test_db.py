@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """測試 db.py — SQLite 連線管理、schema 初始化與 migration，涵蓋 D05 B1-B6。"""
 
 import sqlite3

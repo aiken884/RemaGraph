@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Adversarial tests: simulate state tampering and permission issues.
 
 - test_db_file_corruption_raises: corrupt the sqlite DB file

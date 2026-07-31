@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Regression tests for maintenance.py misusing append_audit() (Bug 2).
 
 append_audit(response: StoreResponse, request: StoreRequest) is strictly typed

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """測試 store.py — SQLite + FTS5 讀寫，涵蓋 D05 S1-S7。"""
 
 import json

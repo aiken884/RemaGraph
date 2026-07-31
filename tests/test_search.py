@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """WU-6: search + status 測試。
 
 所有測試使用 tmp_path + REMAGRAPH_STATE_DIR 隔離 state，

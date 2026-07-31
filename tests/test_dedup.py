@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """測試 dedup.py — model2vec 去重（規則 #4），涵蓋 D05 D1-D7。"""
 
 import sqlite3

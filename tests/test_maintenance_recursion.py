@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Regression tests for the db.connect() <-> maintenance infinite recursion bug.
 
 Root cause (confirmed by direct reproduction against a real project state dir):

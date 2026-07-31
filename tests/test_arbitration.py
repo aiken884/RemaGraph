@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """測試 arbitration.py — 仲裁規則 #1, #2, #3, #5 + reason codes，涵蓋 D05 A1-A9。"""
 
 import sqlite3

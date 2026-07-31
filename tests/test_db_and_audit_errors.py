@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for DB failure and audit write failure handling.
 
 - test_db_insert_failure_returns_error: simulate insert_memory raising

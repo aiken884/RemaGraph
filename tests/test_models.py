@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """測試 models.py — Pydantic schema 驗證，涵蓋 D05 M1-M7。"""
 
 from datetime import datetime, timezone

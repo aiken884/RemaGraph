@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for embedding and error handling paths.
 
 - test_model_load_failure_propagates: model2vec load failure during dedup

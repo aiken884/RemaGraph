@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Regression tests derived from fuzz harness findings.
 
 Covers representative invalid inputs that previously triggered pydantic ValidationError:

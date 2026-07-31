@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Unit tests for MCP server tool handlers.
 
 每個 test 直接呼叫 server.py 的 tool handler 函式（remagraph_store / remagraph_search /
