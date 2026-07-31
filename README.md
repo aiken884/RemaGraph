@@ -3,9 +3,17 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](./LICENSE)
 [![CI](https://github.com/aiken884/RemaGraph/actions/workflows/test.yml/badge.svg)](https://github.com/aiken884/RemaGraph/actions/workflows/test.yml)
 [![Version](https://img.shields.io/github/v/tag/aiken884/RemaGraph?label=version&color=brightgreen)](https://github.com/aiken884/RemaGraph/tags)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](./pyproject.toml)
+
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Checked with mypy](https://img.shields.io/badge/mypy-checked-2A6DB2?logo=python&logoColor=white)](https://mypy-lang.org/)
+[![REUSE status](https://api.reuse.software/badge/github.com/aiken884/RemaGraph)](https://api.reuse.software/info/github.com/aiken884/RemaGraph)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
 
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-support-F16061?logo=ko-fi&logoColor=white)](https://ko-fi.com/aikenlin)
 [![PayPal](https://img.shields.io/badge/PayPal-donate-00457C?logo=paypal&logoColor=white)](https://paypal.me/aikenlin)
+
+**[English](#english) | [繁體中文](#繁體中文)**
 
 > **Every agent leaves a trace.** RemaGraph is a lightweight MCP tool that captures what an AI coding agent leaves behind while it works, so whoever picks up next can follow the trail.
 >
