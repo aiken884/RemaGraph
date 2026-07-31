@@ -39,7 +39,6 @@ from typing import Any
 # 為了直接相容 herdr-bridge 環境，允許動態加入路徑
 def _ensure_herdr_bridge_path() -> None:
     candidates = [
-        Path("/Users/aikenlin/Projects/herdr-bridge/src"),
         Path(os.environ.get("HERDR_BRIDGE_SRC", "")),
     ]
     for p in candidates:
@@ -150,22 +149,22 @@ def build_prompt_with_memory(
     results = _recall_memories(tid, top_k=top_k, project_id=project_id)
 
     mem_lines = "\n".join(f"- {r.get('summary', '')}" for r in results[:top_k])
-    mem_block = mem_lines if mem_lines else "（目前沒有之前記憶）"
+    mem_block = mem_lines if mem_lines else "(no prior memories)"
 
-    proj_hint = f"（project={project_id}）" if project_id else ""
-    return f"""任務編號：{tid}
-執行者：{agent_label} {proj_hint}
+    proj_hint = f"(project={project_id})" if project_id else ""
+    return f"""Task: {tid}
+Agent: {agent_label} {proj_hint}
 
-【RemaGraph 之前記憶】
+[RemaGraph prior memories]
 {mem_block}
 
-【記憶規則（請遵守，強制）】
-- 關鍵進度：remagraph store --task-id {tid} --kind status_update --summary "..."
-- 結束交接：remagraph store --task-id {tid} --kind task_handoff --summary "..."
-- fleet 成員管理（tower 專用）：kind=fleet_member
-- 或最簡單：remagraph auto --task-id {tid} --agent-id {agent_label} -- <指令>
+[Memory rules (mandatory, please follow)]
+- Key progress: remagraph store --task-id {tid} --kind status_update --summary "..."
+- End-of-task handoff: remagraph store --task-id {tid} --kind task_handoff --summary "..."
+- Fleet member management (tower only): kind=fleet_member
+- Or simplest: remagraph auto --task-id {tid} --agent-id {agent_label} -- <command>
 
-現在的任務：
+Current task:
 {instruction}
 """
 
@@ -193,12 +192,12 @@ def dispatch_with_memory(
 
 
 if __name__ == "__main__":
-    # 示範：只印出會送給 agent 的文字
+    # Demo: just print the text that would be sent to the agent
     print(
         build_prompt_with_memory(
             task_id="demo-task-001",
             agent_label="demo-agent",
-            instruction="請跑測試並回報結果",
+            instruction="Please run the tests and report the results",
         )
     )
 
@@ -222,21 +221,21 @@ def build_acp_prompt_with_memory(
     tid = task_id or make_task_id("acp")
     results = _recall_memories(tid, top_k=top_k, project_id=project_id)
     mem_lines = "\n".join(f"- {r.get('summary', '')}" for r in results[:top_k])
-    mem_block = mem_lines if mem_lines else "（目前沒有之前記憶）"
+    mem_block = mem_lines if mem_lines else "(no prior memories)"
 
-    proj_hint = f"（project={project_id} cross-space）" if project_id else ""
-    prompt = f"""任務編號：{tid}
-執行者：{agent_label}（經 herdr-bridge ACP 派工） {proj_hint}
+    proj_hint = f"(project={project_id} cross-space)" if project_id else ""
+    prompt = f"""Task: {tid}
+Agent: {agent_label} (dispatched via herdr-bridge ACP) {proj_hint}
 
-【RemaGraph 之前記憶】
+[RemaGraph prior memories]
 {mem_block}
 
-【記憶規則（強制遵守，before/after hooks 必經）】
-結束後必須 store：
+[Memory rules (mandatory, before/after hooks required)]
+Must store on completion:
   remagraph store --task-id {tid} --agent-id {agent_label} --kind status_update --summary "..."
-- fleet_member record/recycle 由 tower 負責：kind=fleet_member
+- fleet_member record/recycle is owned by the tower: kind=fleet_member
 
-現在的任務：
+Current task:
 {instruction}
 """
     return tid, prompt
@@ -292,9 +291,9 @@ def dispatch_acp_with_memory(
         timeout_sec=timeout_sec,
     )
 
-    summary = f"ACP dispatch 完成。stop_reason={result.stop_reason}, reason={result.reason}"
+    summary = f"ACP dispatch completed. stop_reason={result.stop_reason}, reason={result.reason}"
     if result.text:
-        summary += f" | 輸出片段: {result.text[:400]}"
+        summary += f" | output excerpt: {result.text[:400]}"
 
     # 強制 store（mandatory after hook，所有路徑）
     store_res = _store_memory(
@@ -528,12 +527,12 @@ def send_task_report(
 
 
 if __name__ == "__main__":
-    # 額外示範：印出 ACP 版本的 prompt（不真正執行）
+    # Additional demo: print the ACP-version prompt (does not actually run it)
     tid, p = build_acp_prompt_with_memory(
         task_id="demo-acp-001",
         agent_label="opencode-worker",
-        instruction="分析目前目錄結構並列出關鍵檔案",
+        instruction="Analyze the current directory structure and list key files",
     )
-    print("=== ACP 注入記憶後的 prompt ===")
+    print("=== ACP memory-injected prompt ===")
     print(p)
-    print("\n（如要真實執行 dispatch_acp_with_memory，需提供合法隔離 workdir）")
+    print("\n(To actually run dispatch_acp_with_memory, provide a valid isolated workdir)")

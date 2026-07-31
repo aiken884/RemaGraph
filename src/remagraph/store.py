@@ -240,8 +240,10 @@ def process_store(
         detail = getattr(
             conn,
             READ_ONLY_DETAIL_ATTR,
-            "此連線目前為唯讀模式（資料庫 schema 已升級到超出本程式碼的寫入"
-            "相容版本），已拒絕本次寫入。請升級 remagraph 套件後再重試。",
+            "This connection is currently in read-only mode (the database "
+            "schema has been upgraded beyond this code's write-compatible "
+            "version); this write has been rejected. Please upgrade the "
+            "remagraph package and retry.",
         )
         return StoreResponse(
             status="rejected",

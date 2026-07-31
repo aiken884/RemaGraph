@@ -1,18 +1,18 @@
 #!/bin/bash
 #
-# 給使用 herdr Bridge 的指揮塔使用
-# 極簡記憶幫手（非技術者可直接複製使用）
+# For towers using the herdr Bridge
+# Minimal memory helper (usable as-is by non-technical users)
 #
-# 用法：在你的指揮塔腳本中：
+# Usage: in your tower script:
 #   MEMORY=$(./simple-memory-helper.sh get "task-001")
-#   然後把 $MEMORY 塞進送給 agent 的文字裡
+#   then insert $MEMORY into the text sent to the agent
 #
-# 或者自動包裝：
-#   ./simple-memory-helper.sh wrap "task-001" "agent-name" "你的原始指令"
+# Or auto-wrap:
+#   ./simple-memory-helper.sh wrap "task-001" "agent-name" "your original instruction"
 #
-# 指揮塔想只先 recall（不執行）可直接用：
+# A tower that just wants to recall (without running) can use directly:
 #   remagraph auto --recall-only --task-id "task-001" --agent-id "..."
-# cross project 測試 (Option B)：bridge 使用 herdr project，RemaGraph 側可共享。
+# cross project test (Option B): bridge uses the herdr project, shareable on the RemaGraph side.
 
 set -e
 
@@ -23,24 +23,24 @@ INSTRUCTION=${4:-""}
 
 case $CMD in
   get)
-    echo ">>> 自動讀取記憶..."
-    remagraph search --task-id "$TASK_ID" --top-k 5 2>/dev/null || echo "（無之前記憶）"
+    echo ">>> recalling memories..."
+    remagraph search --task-id "$TASK_ID" --top-k 5 2>/dev/null || echo "(no prior memories)"
     ;;
   wrap)
-    echo "任務編號：$TASK_ID"
-    echo "執行者：$AGENT_ID"
+    echo "Task:  $TASK_ID"
+    echo "Agent: $AGENT_ID"
     echo ""
-    echo ">>> 之前記憶："
-    remagraph search --task-id "$TASK_ID" --top-k 5 2>/dev/null || echo "（目前沒有之前記憶）"
+    echo ">>> prior memories:"
+    remagraph search --task-id "$TASK_ID" --top-k 5 2>/dev/null || echo "(no prior memories found)"
     echo ""
-    echo ">>> 請遵守：開始時可再查記憶，關鍵進度用 remagraph store 記錄，結束用 task_handoff"
+    echo ">>> please follow: you may recall memory again at the start, log key progress with remagraph store, and end with task_handoff"
     echo ""
-    echo "原始指令："
+    echo "original instruction:"
     echo "$INSTRUCTION"
     ;;
   *)
-    echo "用法: $0 get TASK_ID"
-    echo "   或: $0 wrap TASK_ID AGENT_ID '指令'"
+    echo "Usage: $0 get TASK_ID"
+    echo "   or: $0 wrap TASK_ID AGENT_ID 'instruction'"
     exit 1
     ;;
 esac
