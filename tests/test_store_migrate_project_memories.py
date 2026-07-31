@@ -349,3 +349,129 @@ def test_source_database_missing_raises_file_not_found(tmp_path, monkeypatch):
     monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(tmp_path / "caller-state"))
     with pytest.raises(FileNotFoundError):
         store_mod.migrate_project_memories("proj-a", "proj-e")
+
+
+# ---------------------------------------------------------------------------
+# 7：獨立審查發現的阻擋問題 -- learnings 是壞掉的 JSON 時，INSERT 已經寫進
+#    目標資料庫、但緊接著的 json.loads 卻拋例外，導致同一筆記憶同時以
+#    active 狀態存在於來源與目標兩邊，還被回報成 skipped。修復後：純運算
+#    （json.loads/json.dumps）已搬到 INSERT 之前，這裡驗證壞掉的 JSON 只會
+#    讓這筆記錄整批被跳過 -- 目標完全沒有寫入、來源仍是 active，不會出現
+#    「兩邊都 active + 回報 skipped」的三方矛盾。
+# ---------------------------------------------------------------------------
+
+
+def test_corrupt_learnings_json_skips_atomically_without_duplicate_active_copy(
+    tmp_path, monkeypatch
+):
+    proj_a_dir = tmp_path / "proj-a-state"
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(proj_a_dir))
+    conn = db_mod.connect(project_id="proj-a")
+    now = "2026-07-24T00:00:00Z"
+    # 直接手寫 INSERT，繞過 _insert_memory 固定帶入合法 '[]' 的 learnings，
+    # 刻意塞一個壞掉（非合法 JSON）的字串進去，重現審查者的實測情境。
+    conn.execute(
+        """
+        INSERT INTO memories (
+            id, project_id, kind, task_id, agent_id, timestamp,
+            summary, learnings, handoff_note, tags, status, created_at, updated_at
+        ) VALUES (?, ?, 'task_handoff', 'task-fixture', 'agent-fixture', ?,
+                  ?, ?, '', ?, 'active', ?, ?)
+        """,
+        (
+            "mem-a-corrupt-learnings",
+            "proj-a",
+            now,
+            "這筆記錄的 learnings 欄位壞掉了，看起來要遷去 proj-corrupt 才對",
+            "{this is not valid json",
+            json.dumps(["proj-corrupt"]),
+            now,
+            now,
+        ),
+    )
+    conn.close()
+
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(tmp_path / "caller-state"))
+    monkeypatch.setenv("REMAGRAPH_PROJECT", "caller-proj")
+
+    result = store_mod.migrate_project_memories("proj-a", "proj-corrupt")
+
+    assert result.migrated_count == 0
+    assert result.skipped_ids == ["mem-a-corrupt-learnings"]
+
+    # 來源：完全沒被觸碰，仍是 active（UPDATE 從未執行，因為在它之前的
+    # json.loads 就已經拋例外並整批跳過這筆）。
+    src_row = _read_row(proj_a_dir / "remagraph.db", "mem-a-corrupt-learnings")
+    assert src_row is not None
+    assert src_row["status"] == "active"
+
+    # 目標：safety_validate_project 仍會把 proj-corrupt 登記進 registry，
+    # 但資料庫裡完全不應該有這筆記錄 -- INSERT 從未被呼叫，不是「寫進去了
+    # 但被回報成 skipped」。
+    to_state_str = db_mod.get_registered_state_dir("proj-corrupt")
+    assert to_state_str is not None
+    tgt_row = _read_row(Path(to_state_str) / "remagraph.db", "mem-a-corrupt-learnings")
+    assert tgt_row is None
+
+
+# ---------------------------------------------------------------------------
+# 8：重複遷移的正式回歸測試 -- 同一組 from/to 執行兩次，第二次不得重複遷移
+# ---------------------------------------------------------------------------
+
+
+def test_running_migration_twice_does_not_duplicate_migrate_second_time(
+    tmp_path, monkeypatch
+):
+    proj_a_dir = tmp_path / "proj-a-state"
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(proj_a_dir))
+    conn = db_mod.connect(project_id="proj-a")
+    _insert_memory(
+        conn,
+        mem_id="mem-a-repeat-1",
+        project_id="proj-a",
+        tags=["proj-repeat"],
+        summary="這筆記錄看起來屬於 proj-repeat，用來驗證重複遷移不會重跑",
+    )
+    _insert_memory(
+        conn,
+        mem_id="mem-a-repeat-2",
+        project_id="proj-a",
+        tags=["proj-repeat"],
+        summary="第二筆同樣看起來屬於 proj-repeat 的記錄，摘要長度足夠通過門檻",
+    )
+    conn.close()
+
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(tmp_path / "caller-state"))
+    monkeypatch.setenv("REMAGRAPH_PROJECT", "caller-proj")
+
+    first_result = store_mod.migrate_project_memories("proj-a", "proj-repeat")
+    assert first_result.migrated_count == 2
+    assert first_result.skipped_ids == []
+
+    to_state_str = db_mod.get_registered_state_dir("proj-repeat")
+    assert to_state_str is not None
+    to_db_path = Path(to_state_str) / "remagraph.db"
+
+    # 第二次對同一組 from/to 再跑一次：來源那兩筆現在都已是 invalidated，
+    # 啟發式比對的 WHERE 條件（status != 'invalidated'）不會再命中它們，
+    # 所以這次應該完全沒有東西可遷移。
+    second_result = store_mod.migrate_project_memories("proj-a", "proj-repeat")
+    assert second_result.migrated_count == 0
+    assert second_result.skipped_ids == []
+
+    # 目標資料庫不應該出現重複記錄：兩筆 id 各自仍然只有一筆。
+    conn_tgt = sqlite3.connect(str(to_db_path))
+    try:
+        for mem_id in ("mem-a-repeat-1", "mem-a-repeat-2"):
+            count = conn_tgt.execute(
+                "SELECT COUNT(*) FROM memories WHERE id = ?", (mem_id,)
+            ).fetchone()[0]
+            assert count == 1
+    finally:
+        conn_tgt.close()
+
+    # 來源那兩筆維持 invalidated，沒有被第二次呼叫弄成其他奇怪狀態。
+    for mem_id in ("mem-a-repeat-1", "mem-a-repeat-2"):
+        src_row = _read_row(proj_a_dir / "remagraph.db", mem_id)
+        assert src_row is not None
+        assert src_row["status"] == "invalidated"

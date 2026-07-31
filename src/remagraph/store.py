@@ -511,13 +511,25 @@ def migrate_project_memories(
        require_env_match=False——這是『主動遷移進某個已知合法專案』的情境，
        不要求呼叫端目前的 REMAGRAPH_STATE_DIR 剛好已經等於該專案目錄）。
     2. 解析 from_project 實際登記的 state_dir（見
-       _resolve_migration_source_state_dir）。
+       _resolve_migration_source_state_dir）。**注意：這裡只透過
+       db.get_registered_state_dir()/db.get_state_dir() 查出 state_dir 實際
+       路徑，並沒有像 to_project 那樣經過完整的 safety_validate_project()
+       （herdr-* 規則、project.json metadata 一致性等檢查）。這是刻意的
+       不對稱設計**——遷移的語意是『把資料從一個已知來源搬進一個受驗證合法
+       的目標』，來源本身是否也要通過同一套安全閥門，交由呼叫端（CLI/MCP
+       server）依情境自行決定是否要在呼叫本函式之前額外驗證，不要誤以為
+       from_project 也受完整安全閥保護。
     3. 用 task_id/tags/agent_id/summary 啟發式比對，找出來源資料庫裡「看起
        來屬於」to_project 的記錄。
     4. dry_run=True：只回傳預估筆數，不開啟目標連線、不做任何寫入。
-    5. dry_run=False：逐筆 INSERT OR IGNORE 進目標資料庫（強制 project_id
-       為 to_project），並在來源標記 status='invalidated'、於 learnings
-       附加遷移軌跡；單筆失敗只記錄該筆 id 到 skipped_ids，不中斷其餘筆。
+    5. dry_run=False：逐筆遷移，且對每一筆記錄都先完成所有可能失敗的純運算
+       （目前是解析/更新 learnings 欄位的 JSON），再執行唯一會產生外部
+       副作用的 INSERT OR IGNORE 進目標資料庫（強制 project_id 為
+       to_project），最後才在來源標記 status='invalidated' 並寫回更新後的
+       learnings；任何一步失敗都只記錄該筆 id 到 skipped_ids、不中斷其餘筆
+       ——刻意把純運算放在 INSERT 之前，是為了避免『INSERT 已經寫進目標，
+       但緊接著的純運算（例如壞掉的 JSON）才失敗，導致這筆記錄同時以
+       active 狀態存在於來源與目標兩邊，卻被回報成 skipped』這種矛盾狀態。
 
     不呼叫 print()/sys.exit()：所有失敗一律以例外拋出，呼叫端（CLI/MCP
     server）各自決定如何呈現給使用者。
@@ -615,6 +627,22 @@ def migrate_project_memories(
             try:
                 for row in rows:
                     try:
+                        # 先完成所有「純運算、可能失敗」的步驟（例如
+                        # learnings 欄位若含壞掉的 JSON，json.loads 會在
+                        # 這裡拋例外），確保接下來的 INSERT 是這個迴圈裡
+                        # 唯一、且是最後一步會產生外部副作用（寫入
+                        # conn_tgt）的操作。若這裡拋例外，整批直接跳過這筆
+                        # ——conn_tgt 完全不會被寫入，不會出現「目標已寫入
+                        # active 副本，但因後續步驟失敗而被回報成
+                        # skipped」的矛盾狀態（同一筆記憶同時以 active
+                        # 存在於來源與目標兩邊）。
+                        learn = json.loads(row["learnings"] or "[]")
+                        learn.append(
+                            f"migrated-to:{to_project} at "
+                            f"{datetime.now(timezone.utc).isoformat()}"
+                        )
+                        updated_learnings = json.dumps(learn, ensure_ascii=False)
+
                         cols = [k for k in row.keys() if k != "project_id"]
                         vals = [row[k] for k in cols]
                         placeholders = ",".join("?" for _ in cols)
@@ -625,15 +653,10 @@ def migrate_project_memories(
                         )
                         conn_tgt.execute(sql, [to_project] + vals)
 
-                        learn = json.loads(row["learnings"] or "[]")
-                        learn.append(
-                            f"migrated-to:{to_project} at "
-                            f"{datetime.now(timezone.utc).isoformat()}"
-                        )
                         conn_src.execute(
                             "UPDATE memories SET status='invalidated', "
                             "learnings=? WHERE id=?",
-                            (json.dumps(learn, ensure_ascii=False), row["id"]),
+                            (updated_learnings, row["id"]),
                         )
                         migrated += 1
                     except Exception:
