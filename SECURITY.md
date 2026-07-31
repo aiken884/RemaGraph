@@ -1,27 +1,57 @@
 # Security Policy
 
-## Supported Versions
+## English
+
+### Supported Versions
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.2.x   | :white_check_mark: (開發中，發行準備) |
+| 0.2.x   | :white_check_mark: (active development, pre-release) |
 | < 0.2   | :x:                |
 
-## 回報安全漏洞
+### Reporting a Vulnerability
+
+Please **do not** open a public issue.
+
+Contact a maintainer directly at aiken@megapower.asia (or through an internal channel).
+
+Please include:
+- A description of the vulnerability
+- Steps to reproduce
+- Affected version(s)
+- Potential impact
+
+We aim to respond within 48 hours, and will credit reporters publicly after a fix ships (if desired).
+
+### Other Security Practices
+
+- Dependency security is checked with `pip-audit` and GitHub Dependabot.
+- No hardcoded secrets (enforced via gitleaks scanning).
+
+## 繁體中文
+
+### 支援版本
+
+| 版本 | 是否支援 |
+| ------- | ------------------ |
+| 0.2.x   | :white_check_mark:（開發中，發行準備） |
+| < 0.2   | :x:                |
+
+### 回報安全漏洞
 
 請**不要**公開 issue。
 
 請直接聯絡維護者（aiken@megapower.asia 或透過內部管道）。
 
-包含：
-- 描述漏洞
+回報內容請包含：
+- 漏洞描述
 - 重現步驟
 - 受影響版本
-- 可能的影響
+- 可能造成的影響
 
-我們會在 48 小時內回應，並在修復後公開致謝（若適用）。
+我們會在 48 小時內回應，並在修復後公開致謝回報者（若你希望如此）。
 
-## 其他
+### 其他安全措施
 
-- 依賴安全：使用 `pip-audit` 與 GitHub Dependabot。
-- 無硬編碼 secret（gitleaks 檢查）。
+- 依賴套件安全性：使用 `pip-audit` 與 GitHub Dependabot 檢查。
+- 不得有硬編碼 secret（透過 gitleaks 掃描把關）。
