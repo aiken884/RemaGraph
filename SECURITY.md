@@ -4,10 +4,12 @@
 
 ### Supported Versions
 
+RemaGraph is currently **pre-1.0 alpha** and follows a rolling-release model (see [`RELEASE.md`](RELEASE.md) / [`BOUNDARIES.md`](BOUNDARIES.md)): there is no frozen public API yet, so only the latest published `0.3.x` alpha tag is supported.
+
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.2.x   | :white_check_mark: (active development, pre-release) |
-| < 0.2   | :x:                |
+| Latest `0.3.x` alpha tag | :white_check_mark: (pre-1.0 rolling release; only the latest version receives security fixes) |
+| Anything older          | :x:                |
 
 ### Reporting a Vulnerability
 
@@ -32,10 +34,12 @@ We aim to respond within 48 hours, and will credit reporters publicly after a fi
 
 ### 支援版本
 
+RemaGraph 目前處於 **pre-1.0 alpha** 階段，採滾動發布模式（詳見 [`RELEASE.md`](RELEASE.md)／[`BOUNDARIES.md`](BOUNDARIES.md)）：尚未凍結公開 API，因此只有最新發行的 `0.3.x` alpha tag 受支援。
+
 | 版本 | 是否支援 |
 | ------- | ------------------ |
-| 0.2.x   | :white_check_mark:（開發中，發行準備） |
-| < 0.2   | :x:                |
+| 最新的 `0.3.x` alpha tag | :white_check_mark:（pre-1.0 滾動發布，只有最新版本會收到安全修復） |
+| 更早的版本               | :x:                |
 
 ### 回報安全漏洞
 

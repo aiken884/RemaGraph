@@ -229,7 +229,7 @@ FTS5 BM25 full-text search (trigram tokenizer, CJK-aware) plus tag/kind/agent_id
 | `agent_id` | `str` | Filter by agent (optional) |
 | `task_id` | `str` | Filter by task (optional) |
 | `all_projects` | `bool` | Default `false`; when `true`, removes the `project_id` filter within "this one database file" — each project is its own independent SQLite file, and this flag never opens any other file |
-| `cross_project_label` | `str` | Optional. When provided, this switches entirely to the cross-project label search path: via the shared project registry, it runs an exact label match across the current project plus every other known project, each its own independent database file (full-text/filter params like `query`/`kind`/`tags` don't apply on this path). Orthogonal to `all_projects` — the two are independent dimensions. Fan-out is capped at 20 "other" known projects; beyond that, the response is flagged `cross_project_fanout_capped: true` (see response fields below) instead of silently truncating and pretending the result set is complete. See the "Cross-Project Collaboration" section of [`DESIGN.md`](./DESIGN.md) |
+| `cross_project_label` | `str` | Optional. When provided, this switches entirely to the cross-project label search path: via the shared project registry, it runs an exact label match across the current project plus every other known project, each its own independent database file (full-text/filter params like `query`/`kind`/`tags` don't apply on this path). Orthogonal to `all_projects` — the two are independent dimensions. Fan-out is capped at 50 "other" known projects; beyond that, the response is flagged `cross_project_fanout_capped: true` (see response fields below) instead of silently truncating and pretending the result set is complete. See the "Cross-Project Collaboration" section of [`DESIGN.md`](./DESIGN.md) |
 | `include_related` | `bool` | Default `false`. A third, fully independent dimension from `cross_project_label`/`all_projects`: when `true`, fans out — in addition to the normal FTS query against the current project — to projects found within `related_hops` via a `project_edges` traversal (`db.recall_related()`), i.e. projects explicitly declared as related through the `remagraph link` CLI subcommand. Unlike `cross_project_label`, matching is still by the normal FTS query, not exact label match. Requires `project_id` as the traversal starting point; if `project_id` is omitted, this gracefully degrades to an ordinary search (no related fan-out) rather than raising an error |
 | `related_hops` | `int` | Default `1` (only directly-declared relations). Max **5**. BFS traversal depth used when `include_related=true`; has no effect otherwise |
 
@@ -350,7 +350,7 @@ uv run pytest -m 'not slow'
 REMAGRAPH_STATE_DIR=$(mktemp -d) uv run pytest tests/smoke
 ```
 
-- CI pipeline: smoke → lint (ruff + mypy) → test (coverage ≥80%); plus gitleaks, pip-audit, and mutmut (non-blocking).
+- CI pipeline: smoke → adversarial → lint (ruff + mypy) → test (coverage ≥80%); plus gitleaks, pip-audit, and mutmut (non-blocking).
 - Never let tests default to writing production state — smoke tests must use `REMAGRAPH_STATE_DIR` or pytest's `tmp_path`.
 
 ### Resources
@@ -590,7 +590,7 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 | `agent_id` | `str` | 過濾 agent（選填） |
 | `task_id` | `str` | 過濾任務（選填） |
 | `all_projects` | `bool` | 預設 `false`；`true` 時移除「目前這一個資料庫檔案內」的 `project_id` 過濾（每個 project 各自是獨立 SQLite 檔案，此旗標從不開啟其他檔案） |
-| `cross_project_label` | `str` | 選填。提供時完全改走跨專案標籤搜尋路徑：透過共用的 project registry，對「目前專案 + 所有已知專案」各自獨立的資料庫檔案，依 label 精確比對（`query`/`kind`/`tags` 等全文檢索/過濾參數不適用）。與 `all_projects` 是互不相干的兩個維度。fan-out 上限 20 個「其他」已知專案，超過時回應會標記 `cross_project_fanout_capped: true`（見下方回應欄位），不悄悄截斷佯裝完整。詳見 [`DESIGN.md`](./DESIGN.md) 的「跨專案協作」章節 |
+| `cross_project_label` | `str` | 選填。提供時完全改走跨專案標籤搜尋路徑：透過共用的 project registry，對「目前專案 + 所有已知專案」各自獨立的資料庫檔案，依 label 精確比對（`query`/`kind`/`tags` 等全文檢索/過濾參數不適用）。與 `all_projects` 是互不相干的兩個維度。fan-out 上限 50 個「其他」已知專案，超過時回應會標記 `cross_project_fanout_capped: true`（見下方回應欄位），不悄悄截斷佯裝完整。詳見 [`DESIGN.md`](./DESIGN.md) 的「跨專案協作」章節 |
 | `include_related` | `bool` | 預設 `false`。與 `cross_project_label`/`all_projects` 完全獨立的第三個維度：`true` 時，除了對「目前專案」執行正常的 FTS 查詢外，會額外沿 `project_edges` traversal（`db.recall_related()`）fan out 到 `related_hops` 之內、透過 `remagraph link` CLI 子指令明確宣告為關聯的專案。與 `cross_project_label` 不同，比對方式仍是正常的 FTS 查詢，不是 label 精確比對。需要 `project_id` 作為 traversal 起點；`project_id` 為空時優雅退化為一般搜尋（不展開 related fan-out），不拋出例外 |
 | `related_hops` | `int` | 預設 `1`（僅限直接宣告的關聯）。上限 **5**。`include_related=true` 時的 BFS traversal 深度；否則此欄位無意義 |
 
@@ -711,7 +711,7 @@ uv run pytest -m 'not slow'
 REMAGRAPH_STATE_DIR=$(mktemp -d) uv run pytest tests/smoke
 ```
 
-- CI：smoke → lint（ruff + mypy）→ test（coverage ≥80）；另有 gitleaks、pip-audit、mutmut（非 blocking）。
+- CI：smoke → adversarial → lint（ruff + mypy）→ test（coverage ≥80）；另有 gitleaks、pip-audit、mutmut（非 blocking）。
 - 勿在測試中預設寫入生產 state；冒煙測試必須使用 `REMAGRAPH_STATE_DIR` 或 pytest 的 `tmp_path`。
 
 ### 資源

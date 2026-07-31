@@ -21,7 +21,7 @@ This document exists in two full, structurally-parallel versions: [English](#eng
 | **GitHub** | Personal account (private `aiken884/RemaGraph`) |
 | **License** | Apache-2.0 (same as CodeGraph) |
 | **PyPI** | Target `pip install remagraph`; **v1 not yet published** (currently `pip install -e .` / install from source) |
-| **Package version** | `0.1.0` (see `pyproject.toml`); implementation closeout tracked in [`docs/reviews/v1-closeout-status.md`](docs/reviews/v1-closeout-status.md) |
+| **Package version** | `0.3.1` (see `pyproject.toml`); implementation closeout tracked in [`docs/reviews/v1-closeout-status.md`](docs/reviews/v1-closeout-status.md) |
 | **Python** | 3.11+, dependencies managed with uv |
 | **Relationship to external projects** | Fully independent (no code coupling). Coordinates directly with herdr-bridge via ACP, plus an example integration. The organization layer (herdr-org) is still design-stage only. The tool layer and governance layer are both complete today, and any AI coding agent can use RemaGraph directly. |
 
@@ -126,17 +126,17 @@ The agent writes a memory. This triggers five arbitration rules; once they all p
 
 **Response (rejected by arbitration):**
 ```json
-{ "status": "rejected", "reason": "summary_too_short", "detail": "需 ≥ 30 字，目前 12 字" }
+{ "status": "rejected", "reason": "summary_too_short", "detail": "summary must be >= 30 characters, currently 12" }
 ```
 
 **Response (label format violation):**
 ```json
-{ "status": "rejected", "reason": "invalid_label", "detail": "label 'Dep:acpx' 不符合命名空間格式 ..." }
+{ "status": "rejected", "reason": "invalid_label", "detail": "label 'Dep:acpx' does not match the namespace format ^[a-z]+:[a-zA-Z0-9_-]+\\Z (e.g. 'dep:opencode', 'topic:auth', 'kind:bug')" }
 ```
 
 **Response (read-only degradation rejection):**
 ```json
-{ "status": "rejected", "reason": "read_only_mode", "detail": "此連線目前為唯讀模式（資料庫 schema 已升級到超出本程式碼的寫入相容版本），已拒絕本次寫入。請升級 remagraph 套件後再重試。" }
+{ "status": "rejected", "reason": "read_only_mode", "detail": "This connection is currently in read-only mode (the database schema has been upgraded beyond this code's write-compatible version); this write has been rejected. Please upgrade the remagraph package and retry." }
 ```
 - `read_only_mode`: triggered when the connection has been flagged read-only by the three-tier judgment described under "Version Compatibility" below, and this check happens before the five arbitration rules and before model2vec dedup — it never enters a transaction at all
 
@@ -441,7 +441,7 @@ Background: an independently pinned, older consumer that opens a database whose 
 |------|------|
 | `min_reader_version` | The oldest code `SCHEMA_VERSION` this database allows to be "read." Defaults to `"1"`. |
 | `min_writer_version` | The oldest code `SCHEMA_VERSION` this database allows to "write." Every migration that touches fields/CHECK constraints updates this to the `SCHEMA_VERSION` in effect at that time (e.g., v4→v5 writes `"5"`; v5→v6 only adds the `memory_labels` table without modifying `memories`' own fields/CHECK constraints, so `min_writer_version` is deliberately left unchanged). |
-| `upgrade_hint` | Self-contained, code-constant-independent upgrade guidance text (in Chinese), shown alongside rejection/degradation messages. |
+| `upgrade_hint` | Self-contained, code-constant-independent upgrade guidance text (in English), shown alongside rejection/degradation messages. |
 
 Reading these three fields always goes through defensive reads (`_read_meta_int_defensively()` / `_read_upgrade_hint_defensively()`): any failure — missing table, missing field, type mismatch, etc. — returns `None` rather than raising, and never interrupts the existing reject/degrade flow.
 
@@ -608,10 +608,10 @@ Follows the herdr-bridge standard:
 |------|------|
 | **Tests** | pytest (unit tests + MCP integration tests) |
 | **Coverage** | `pytest --cov=src/remagraph --cov-fail-under=80` |
-| **Mutation testing** | mutmut (scoped to `arbitration.py` + `dedup.py`, `--runner pytest -n auto`, non-blocking but continuously tracked) |
+| **Mutation testing** | mutmut (scoped to `arbitration.py` + `dedup.py`, `runner = "pytest"`, non-blocking but continuously tracked) |
 | **Secret scanning** | gitleaks (every push / PR, full Git history) |
 | **Sign-off** | DCO (`git commit -s`) |
-| **CI** | GitHub Actions: ubuntu × macos × Python 3.11–3.14 |
+| **CI** | GitHub Actions: ubuntu × macos × Python 3.11–3.13 |
 
 ---
 
@@ -627,7 +627,9 @@ remagraph/
 │   └── workflows/
 │       ├── test.yml
 │       ├── gitleaks.yml
-│       └── pip-audit.yml
+│       ├── pip-audit.yml
+│       ├── mutmut.yml
+│       └── publish.yml
 ├── src/
 │   └── remagraph/
 │       ├── __init__.py
@@ -720,7 +722,7 @@ Each stage's trigger is actual usage and user feedback, not pre-planning.
 | **GitHub** | 個人帳號（private `aiken884/RemaGraph`） |
 | **授權** | Apache-2.0（與 CodeGraph 相同） |
 | **PyPI** | 目標 `pip install remagraph`；**v1 尚未 publish**（目前 `pip install -e .`／原始碼安裝） |
-| **套件版本** | `0.1.0`（見 `pyproject.toml`）；實作收斂 [`docs/reviews/v1-closeout-status.md`](docs/reviews/v1-closeout-status.md) |
+| **套件版本** | `0.3.1`（見 `pyproject.toml`）；實作收斂 [`docs/reviews/v1-closeout-status.md`](docs/reviews/v1-closeout-status.md) |
 | **Python** | 3.11+，uv 管理依賴 |
 | **與外部專案的關係** | 完全獨立（無程式碼耦合）。與 herdr-bridge 透過 ACP 直接協調 + 範例整合；組織層（herdr-org）僅設計階段。目前工具層+治理層已完成，任何 AI coding agent 都可直接使用 |
 
@@ -1140,7 +1142,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_labels_label ON memory_labels(label);
 |------|------|
 | `min_reader_version` | 這個資料庫允許被「讀取」的最舊程式碼 `SCHEMA_VERSION`。目前預設 `"1"` |
 | `min_writer_version` | 這個資料庫允許被「寫入」的最舊程式碼 `SCHEMA_VERSION`。每次涉及欄位/CHECK 變動的 migration 都會更新為當時的 `SCHEMA_VERSION`（例如 v4→v5 時寫入 `"5"`；v5→v6 純新增 `memory_labels` 表，不修改 `memories` 本身欄位/CHECK，刻意維持 `min_writer_version` 不變） |
-| `upgrade_hint` | 自我完整、不依賴任何程式碼常數的中文升級指引文字，供拒絕/降級訊息附加顯示 |
+| `upgrade_hint` | 自我完整、不依賴任何程式碼常數的英文升級指引文字，供拒絕/降級訊息附加顯示 |
 
 讀取這三個欄位一律走防禦性讀取（`_read_meta_int_defensively()` / `_read_upgrade_hint_defensively()`）：表不存在、欄位缺漏、型別不符等任何失敗都回傳 `None`，絕不拋出例外中斷既有的拒絕/降級流程。
 
@@ -1307,10 +1309,10 @@ RemaGraph 對外公告的合約（本節可獨立引用）：
 |------|------|
 | **測試** | pytest（單元測試 + MCP 整合測試） |
 | **覆蓋率** | `pytest --cov=src/remagraph --cov-fail-under=80` |
-| **突變測試** | mutmut（限縮 `arbitration.py` + `dedup.py`，`--runner pytest -n auto`，非阻塞但持續追蹤） |
+| **突變測試** | mutmut（限縮 `arbitration.py` + `dedup.py`，`runner = "pytest"`，非阻塞但持續追蹤） |
 | **機密掃描** | gitleaks（每 push / PR，全 Git 歷史） |
 | **簽章** | DCO（`git commit -s`） |
-| **CI** | GitHub Actions：ubuntu × macos × Python 3.11–3.14 |
+| **CI** | GitHub Actions：ubuntu × macos × Python 3.11–3.13 |
 
 ---
 
@@ -1326,7 +1328,9 @@ remagraph/
 │   └── workflows/
 │       ├── test.yml
 │       ├── gitleaks.yml
-│       └── pip-audit.yml
+│       ├── pip-audit.yml
+│       ├── mutmut.yml
+│       └── publish.yml
 ├── src/
 │   └── remagraph/
 │       ├── __init__.py
