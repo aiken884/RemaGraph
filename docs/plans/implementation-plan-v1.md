@@ -6,7 +6,6 @@
 | **實作收斂** | [`docs/reviews/v1-closeout-status.md`](../reviews/v1-closeout-status.md)；證據 HEAD 含 `ef666a5` |
 | **Date** | 2026-07-21（計畫凍結）／2026-07-21（實作收斂） |
 | **Version** | v1.2.1（v1.2 + 實作完成狀態對齊；不改 §2 凍結決策） |
-| **Orchestrated-by** | CommandTower |
 | **SOT** | [`DESIGN.md`](../../DESIGN.md)（設計凍結 commit `8905d23`） |
 | **設計展開** | [`docs/design/00-index.md`](../design/00-index.md) 及 D01–D05 |
 | **治理框架** | Vault《通用專案治理框架與檢查清單》→ 本計畫 §11 + [`docs/governance/checklist.md`](../governance/checklist.md) |
@@ -19,9 +18,9 @@
 
 1. **歷史**：本文件初稿階段只規劃、不執行實作；進入寫碼前須人類明確「同意實作」。**v1 已於 2026-07-21 經 Goal 授權並由艦隊完成。**
 2. 實作必須對齊凍結設計；若與 `DESIGN.md` 衝突，**以 DESIGN.md 為準**並開 ADR／回報，不得靜默偏離。
-3. **不耦合** herdr-bridge／herdr-gov（程式碼層/API層不得直接 import/依賴）。目前透過 ACP 直接協調 + examples/ 範例對接；組織層（herdr-org）僅設計階段。
+3. **不耦合**任何具體外部指揮／治理系統（程式碼層/API層不得直接 import/依賴任何特定外部專案）；跨專案協作僅透過 `examples/` 範例對接與公開穩定介面（如 Audit Contract）進行。
 4. 依賴新增限設計已列：`model2vec`、`mcp`、`pydantic`；optional `sqlite-vec` 僅 v2。建議 **pin 上界**（如 `model2vec>=0.1.0,<2.0`、`mcp>=1.0,<2`）於 WU-0。
-5. 指揮塔／艦隊紀律：實作由艦隊經 `route()` 派工；本計畫為「實作藍圖」。
+5. 派工紀律：實作由執行代理依專案路由政策派工；本計畫為「實作藍圖」。
 6. **本計畫 APPROVE ≠ 開工令**（歷史規則保留）；v1 開工已另有人類 Goal 同意。**PyPI publish 仍須另開 HITL**，不因 v1 完成而自動授權。
 
 ---
@@ -234,7 +233,7 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 ### 6.1 每 WU
 
 - [x] 對應驗收列通過（WU-0～10；見 closeout）
-- [x] 無 herdr 耦合
+- [x] 無外部具名系統耦合
 - [x] 無未核准依賴
 - [x] guilty-until-proven
 - [x] **P0-4 對抗式審查完成**（異質 tier／不同實例；結論可追溯）— [`docs/reviews/v1-adversarial-dispatch-summary.md`](../reviews/v1-adversarial-dispatch-summary.md)
@@ -345,7 +344,7 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 | P0-1 | Git 流程 | private repo、有意義 commit | 實作期 branch／PR 慣例；公開前 branch protection |
 | P0-2 | License | Apache-2.0 `LICENSE` | 維持；可選 SPDX 標頭於 WU-0／10 |
 | P0-3 | 測試+覆蓋率+**冒煙** | **已真測**；smoke→lint→test；cov≥80 | 維持；mutmut 非 blocking 追蹤 |
-| P0-4 | 審查+**對抗式驗證** | 指揮塔章程＋設計期 PPLX | 每功能 WU：route() 異質審查；紀錄可追溯 |
+| P0-4 | 審查+**對抗式驗證** | orchestrator 派工紀律＋設計期 PPLX | 每功能 WU：異質審查；紀錄可追溯 |
 | P0-5 | Secret | gitleaks CI；無 secret 進庫設計 | WU-0：`.env.example`、pre-commit gitleaks |
 | P0-6 | 決策文件 | DESIGN + design docs + 計畫 + PPLX 紀錄 | WU-10 README；重大偏離寫 ADR |
 | P0-7 | 依賴掃描 | pyproject、pip-audit CI | WU-0 pin／lock；HIGH+ fail |
@@ -366,9 +365,9 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─────────────┐
 - 實作建議路徑：`tests/smoke/`（名稱可調），**WU-8 後必須本機全綠，WU-9 進 CI**。  
 - 冒煙目標：**< 1～2 分鐘**；完整矩陣其後跑。
 
-### 11.4 對抗式審查流程（P0-4 × 指揮塔）
+### 11.4 對抗式審查流程（P0-4 × orchestrator）
 
-對齊框架 Q7 與 command-tower-charter §3.5.1：
+對齊框架 Q7 與內部 orchestrator 派工紀律：
 
 1. 實作：`route()` 選 implement tier，完成 WU 程式與測試。  
 2. 審查：`route()` 再選 **review／audit** tier（**不同實例**；能力地板達標；避免與實作者同一未隔離 session）。  

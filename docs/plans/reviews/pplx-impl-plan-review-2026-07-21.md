@@ -2,7 +2,6 @@
 type: implementation-plan-review
 date: 2026-07-21
 reviewer: PPLX
-orchestrated_by: CommandTower
 ---
 
 # RemaGraph v1 實作計畫 — 請 PPLX 對抗式審查
@@ -31,7 +30,6 @@ orchestrated_by: CommandTower
 |------|------|
 | **狀態** | 計畫撰寫／待 PPLX 審核共識（**禁止實作**直至人類明確同意） |
 | **Date** | 2026-07-21 |
-| **Orchestrated-by** | CommandTower |
 | **SOT** | [`DESIGN.md`](../../DESIGN.md)（PPLX 設計共識已凍結，commit `8905d23`） |
 | **設計展開** | [`docs/design/00-index.md`](../design/00-index.md) 及 D01–D05 |
 | **設計複審** | [`docs/design/reviews/pplx-recheck-2026-07-21.md`](../design/reviews/pplx-recheck-2026-07-21.md) → **APPROVE** |
@@ -42,9 +40,9 @@ orchestrated_by: CommandTower
 
 1. **本文件只規劃實作，不執行實作。** 進入寫碼／改 stub 行為前，必須另有使用者明確指示（例如「同意實作」）。
 2. 實作必須對齊凍結設計；若與 `DESIGN.md` 衝突，**以 DESIGN.md 為準**並開 ADR／回報，不得靜默偏離。
-3. **不耦合** herdr-bridge／herdr-gov（程式碼、README、tool 名稱皆不得綁定）。
+3. **不耦合**任何具體外部指揮／治理系統（程式碼、README、tool 名稱皆不得綁定特定外部專案）。
 4. 依賴新增限設計已列：`model2vec`、`mcp`、`pydantic`；optional `sqlite-vec` 僅 v2。
-5. 指揮塔／艦隊紀律：實作由艦隊經 `route()` 派工；本計畫可被派工作為「實作藍圖」，**不是**授權立刻開工。
+5. 派工紀律：實作由執行代理經路由政策派工；本計畫可被派工作為「實作藍圖」，**不是**授權立刻開工。
 
 ---
 
@@ -192,7 +190,7 @@ state：`~/.local/state/remagraph/`（db + audit，權限 0700／0600）。
 
 | 項目 | 內容 |
 |------|------|
-| 範圍 | README 安裝／MCP config（stdio）；CHANGELOG 草稿；確認邊界無 herdr 耦合 |
+| 範圍 | README 安裝／MCP config（stdio）；CHANGELOG 草稿；確認邊界無外部具名系統耦合 |
 | 依賴 | WU-8 |
 | 驗收 | README 可複製即用；**不**自動 publish |
 | 對應設計 | DESIGN 部署；D03 config 範例 |
@@ -231,9 +229,9 @@ WU-0 ─┬─► WU-1 ─► WU-3 ─┐
 ### 6.1 每 WU 完成
 
 - [ ] 對應 D05 驗收列通過（單元／整合）
-- [ ] 無 herdr 耦合字串進入 src／公開文件（除歷史禁止宣告）
+- [ ] 無外部具名系統耦合字串進入 src／公開文件（除歷史禁止宣告）
 - [ ] 不引入未核准依賴
-- [ ] 指揮塔／審查者 guilty-until-proven（測試綠 ≠ 自動通過）
+- [ ] orchestrator／審查者 guilty-until-proven（測試綠 ≠ 自動通過）
 
 ### 6.2 Pre-merge（對 main）
 

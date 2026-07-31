@@ -1,9 +1,7 @@
 # Goal 長任務：RemaGraph v1 全量實作
 
-> **用途**：複製下方「Goal 目標句」與「Plan 本體」啟動 Grok Goal（或等價 `/goal`），讓 agent **以指揮塔模式**協調完成 v1 開發。  
+> **用途**：複製下方「Goal 目標句」與「Plan 本體」啟動 Grok Goal（或等價 `/goal`），讓 agent **以協調者角色**協調完成 v1 開發。  
 > **SOT**：[`implementation-plan-v1.md`](./implementation-plan-v1.md)、[`DESIGN.md`](../../DESIGN.md)、[`docs/design/`](../design/)、[`docs/governance/checklist.md`](../governance/checklist.md)  
-> **指揮塔章程**：`~/Projects/herdr-org/docs/command-tower-charter.md`  
-> **herdr 整合現況**：工具層+治理層已完成；組織層設計階段，開發稍後。跨專案使用 ACP。
 > **現況**（2026-07-21 收斂）：**v1 Goal 已完成**；證據見 [`docs/reviews/v1-closeout-status.md`](../reviews/v1-closeout-status.md)。下文 Goal／Plan 本體保留為歷史可重跑紀錄；task checklist 已勾選。
 
 ---
@@ -11,15 +9,15 @@
 ## 一、Goal 目標句（貼進 Goal 的 Objective）
 
 ```text
-以指揮塔角色完成 RemaGraph v1 實作（stdio MCP 三 tool + SQLite/FTS5/trigram + 仲裁/去重/audit + 測試/CI/治理 P0），嚴格依 docs/plans/implementation-plan-v1.md 的 WU-0～WU-10 與 docs/governance/checklist.md 執行。
+以協調者角色完成 RemaGraph v1 實作（stdio MCP 三 tool + SQLite/FTS5/trigram + 仲裁/去重/audit + 測試/CI/治理 P0），嚴格依 docs/plans/implementation-plan-v1.md 的 WU-0～WU-10 與 docs/governance/checklist.md 執行。
 
-硬性角色（command-tower-charter）：禁止親自撰寫/修改功能程式碼與設計文件正文；禁止使用 spawn_subagent 做實作；禁止手挑模型。實作/改檔一律經 herdr 艦隊派工；派工前必須呼叫 herdr_gov route() 選 tier→binding，記錄 why。每完成一個功能 WU 必須再 route() 派異質審查（審查 agent 的 (model_family, tier) 至少一維不同於實作者；不可則 escalation 不得標完成）。艦隊 tab 預設 --no-focus。
+硬性角色（orchestrator 派工紀律）：協調者本人禁止親自撰寫/修改功能程式碼與設計文件正文；禁止用子代理當作規避此限制的手段；禁止手挑模型。實作/改檔一律派工給執行代理；派工前必須依專案路由政策選定 tier／執行對象，記錄選擇理由。每完成一個功能 WU 必須再派一次異質審查（審查代理的 (model_family, tier) 至少一維不同於實作者；不可則 escalation 不得標完成）。派工預設背景執行，不搶佔協調者自身視窗。
 
 技術凍結：stdio 優先；potion-multilingual-128M；cosine≥0.90；FTS5 tokenize=trigram；handoff_note 僅 task_handoff；top_k/limit 預設20最大100；has_more=top_k+1 演算法；EMBEDDING_DIM 實測 assert；冒煙必須 REMAGRAPH_STATE_DIR/tmp_path，禁止寫入 ~/.local/state/remagraph/。
 
 驗收：pytest 全綠；coverage≥80；冒煙 §11.3 全綠且進 CI（smoke→lint→test）；gitleaks 乾淨；pip-audit 無未處理 HIGH/CRITICAL；mutmut 對 arbitration+dedup 目標≥70% 或 PR 說明；docs/governance/checklist.md 的 P0 無未解釋的 [ ]；三 tool 可 stdio 使用；Audit Contract 可驗證。成功判定必須驗實際產出內容，不可只看 exit 0。
 
-交付：定期 commit；push 到 origin/main（private aiken884/RemaGraph）；排除 .omo/ 與 secrets。禁止自動 PyPI publish。禁止耦合 herdr-bridge/herdr-gov。
+交付：定期 commit；push 到 origin/main（private aiken884/RemaGraph）；排除 .omo/ 與 secrets。禁止自動 PyPI publish。禁止耦合任何具體外部指揮／治理系統。
 
 全程台灣繁體中文溝通。完成後在 {SCRATCH}/ 留下 git/pytest/smoke/coverage 證據，並回報各 WU 狀態與 route() 派工紀錄摘要。
 ```
@@ -29,7 +27,7 @@
 ## 二、Plan 本體（Goal harness 用；可整段貼上或讓 Goal 以此生成 plan.md）
 
 ```markdown
-# Plan: RemaGraph v1 full implementation (Command Tower orchestration)
+# Plan: RemaGraph v1 full implementation (orchestrated multi-agent build-out)
 
 ## Goal kind
 code-change
@@ -40,7 +38,7 @@ code-change
 3. Quality gates pass: ruff; pytest all green; `pytest --cov=src/remagraph --cov-fail-under=80`; smoke suite (§11.3) green with **temp state only** (`REMAGRAPH_STATE_DIR` / pytest `tmp_path`); gitleaks clean; pip-audit no unfixed HIGH/CRITICAL; SQLite ≥3.38 + FTS5 trigram gate green; mutmut on arbitration+dedup target ≥70% or documented PR exception.
 4. Governance: `docs/governance/checklist.md` P0 items have no unexplained `[ ]`; every feature WU has recorded implementer + adversarial reviewer with distinct `(model_family, tier)` (or escalated); adversarial findings tracked to close or explicit defer.
 5. Git: changes committed with meaningful messages (DCO/`Orchestrated-by` style as project practice); pushed to `origin/main` of private `aiken884/RemaGraph`; no secrets, no `.omo/`.
-6. **Orchestration integrity**: no functional code authored by the tower session itself; dispatches used `route()`; no model hand-picking; parallel-by-default where dependencies allow.
+6. **Orchestration integrity**: no functional code authored by the orchestrating session itself; dispatches followed the project's routing policy; no model hand-picking; parallel-by-default where dependencies allow.
 
 ## Verification plan
 1. `gating`: `git fetch` + `git rev-parse HEAD` == `origin/main` (or document unpushed only if push blocked); `git status` clean except allowed junk; log shows implementation commits.
@@ -58,19 +56,19 @@ code-change
 - sqlite-vec semantic search, audit rotation, multi-process shared DB
 - Cross-task_id supersede, bidirectional invalidate
 - Calibrating dedup threshold with production Chinese corpus beyond 0.90 baseline
-- Implementing herdr-bridge/herdr-gov integration or naming
-- Tower personally editing `src/**` feature code or rewriting DESIGN.md architecture
-- Using Grok/Claude subagents as substitute for herdr fleet implementers
+- Implementing integration with, or naming, any specific external orchestration/governance system
+- Orchestrator personally editing `src/**` feature code or rewriting DESIGN.md architecture
+- Using subagents as a workaround to bypass the dispatch-to-fleet requirement
 
 ## Assumed scope
 - Repo: `/Users/aikenlin/Projects/RemaGraph` (or workspace root RemaGraph)
 - Plan: `docs/plans/implementation-plan-v1.md` (latest on main, includes governance §11 and review fixes)
 - Design: `DESIGN.md`, `docs/design/00`–`05`, audit contract `docs/audit.md`
-- Fleet: `herdr agent start` / tab with `--no-focus`; model from `route()` via `herdr_gov` + `config/fleet.yaml`
+- Fleet: background-dispatched agent sessions; model/tier selected via the project's routing policy + `config/fleet.yaml`
 - State tests: always injectable state dir; production path only for optional manual smoke outside CI
 
 ## Implementation approach
-Act as **Command Tower** only: decompose, `route()`, dispatch fleet in parallel (worktree if file conflicts), monitor, gate, adversarial re-dispatch, integrate reports, commit/push.
+Act as **orchestrator** only: decompose, route work via the project's dispatch policy, dispatch fleet in parallel (worktree if file conflicts), monitor, gate, adversarial re-dispatch, integrate reports, commit/push.
 
 Dependency order (critical path):
 WU-0 → WU-1 → WU-2 → WU-4 → WU-5 → WU-8 → WU-9 → WU-10
@@ -78,15 +76,15 @@ Parallel after WU-1: WU-3 ∥ (WU-2→WU-4); after WU-5: WU-6 ∥ WU-7 then join
 
 Per feature WU loop:
 1. route(implement) → fleet implements + tests for that WU
-2. Tower verifies content assertions (not exit code only)
+2. Orchestrator verifies content assertions (not exit code only)
 3. route(review/audit) with heterogeneous (model_family, tier) → fleet adversarial review
 4. Fix loop max 3 then escalate to human
 5. Update governance checklist + dispatch log; commit
 
-Do not skip gates to “save time”. Prefer multiple fleet instances over tower coding.
+Do not skip gates to “save time”. Prefer multiple fleet instances over orchestrator coding.
 
 ## Task checklist
-- [x] Bootstrap: re-read charter + plan §0–§2 + governance checklist; confirm git clean baseline; capture `{SCRATCH}/baseline.txt`
+- [x] Bootstrap: re-read plan §0–§2 + governance checklist; confirm git clean baseline; capture `{SCRATCH}/baseline.txt`
 - [x] WU-0 工程基線: pin deps, entrypoint, ruff, pre-commit, .env.example, uv.lock frozen CI, SQLite≥3.38 + trigram gate tests; route()+fleet; adversarial optional for pure config
 - [x] WU-1 models TDD: Memory/Store/Search schemas; test_models; route()+fleet; adversarial
 - [x] WU-2 db: schema/triggers/trigram/WAL/permissions/idempotent init; route()+fleet; adversarial
@@ -101,11 +99,11 @@ Do not skip gates to “save time”. Prefer multiple fleet instances over tower
 - [x] Final: full verification plan; push main; write dispatch/closeout 紀錄（`docs/reviews/v1-adversarial-dispatch-summary.md`、`docs/reviews/v1-closeout-status.md`）；report to user
 
 ## Risks / Contradictions
-- Tower agent may try to code directly — **hard stop**; re-dispatch fleet
+- Orchestrating agent may try to code directly — **hard stop**; re-dispatch fleet
 - route() may return no_candidate / same family only — escalate or fail_up; never fake heterogeneity
 - model2vec download / offline CI — use mocks + HF_HUB_OFFLINE strategy per plan §7; fail-fast tool errors not server crash
 - FTS5 trigram CJK recall — record ≥3 Chinese queries baseline; short queries explicit behavior
-- File conflicts under parallel fleet — use herdr/git worktree
+- File conflicts under parallel fleet — use git worktree
 - Push/auth failure — capture error; do not claim remote updated
 - Do not treat plan APPROVE as license to skip human release for PyPI
 ```
@@ -123,11 +121,11 @@ Do not skip gates to “save time”. Prefer multiple fleet instances over tower
 
 ---
 
-## 四、指揮塔執行備忘（給跑 Goal 的 agent）
+## 四、協調者執行備忘（給跑 Goal 的 agent）
 
 | 可以 | 不可以 |
 |------|--------|
-| `route()` + `herdr agent start … --no-focus` | 自己改 `src/**` 功能 |
+| 依路由政策派工給背景 fleet agent | 自己改 `src/**` 功能 |
 | 拆 WU、並行、重派、驗收 | `spawn_subagent` 當實作主力 |
 | 跑測試／讀 diff 做 Gate | 手寫「我覺得用 claude」 |
 | commit／push（依 Goal 授權） | 跳過對抗審查標完成 |
@@ -150,7 +148,7 @@ Do not skip gates to “save time”. Prefer multiple fleet instances over tower
 - `docs/governance/checklist.md` P0 收斂  
 - `origin/main` 含實作 commit  
 - 無自動 PyPI  
-- 指揮塔可交出 dispatch／WU 狀態摘要  
+- 協調者可交出 dispatch／WU 狀態摘要  
 
 ---
 
@@ -158,4 +156,4 @@ Do not skip gates to “save time”. Prefer multiple fleet instances over tower
 
 | 日期 | 說明 |
 |------|------|
-| 2026-07-21 | 初版：對齊 implementation-plan v1.2 + 審查修正 + 指揮塔章程 |
+| 2026-07-21 | 初版：對齊 implementation-plan v1.2 + 審查修正 + orchestrator 派工紀律 |
