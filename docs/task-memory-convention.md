@@ -53,7 +53,7 @@ TASK_ID=fix-login-001 AGENT_ID=my-ai ./remagraph-task.sh echo "hello"
 
 ## 兩類使用者怎麼用
 
-### A. 沒有用 herdr Bridge（獨立 script / CI / 手動）
+### A. 獨立使用（獨立 script / CI / 手動）
 
 直接用上面的 `remagraph auto` 或 `remagraph-task.sh` 即可。
 
@@ -64,13 +64,13 @@ remagraph status
 remagraph search --task-id fix-login-001
 ```
 
-### B. 已經在用 herdr Bridge（指揮塔派工）
+### B. 已串接上游自動派工系統
 
-**目前狀態**：工具層（herdr-bridge）與治理層已完成；組織層（herdr-org）僅設計階段，開發稍後。RemaGraph 側 MemoryDispatcher 已就緒，herdr-bridge 側 ACP hooks 已實作。
+**目前狀態**：RemaGraph 側的 MemoryDispatcher 已就緒，可供任何上游派工系統（例如企業內部的自動化派工器、CI 排程器）在派工前呼叫，取得「已注入記憶」的文字。
 
-指揮塔派工時，把「已注入記憶」的文字送給 agent 即可。
+上游系統派工時，把「已注入記憶」的文字送給 agent 即可。
 
-最簡單做法：複製 `examples/herdr-bridge/dispatch_with_memory.py` 的 `build_prompt_with_memory()`，在 `send_to_agent` 前呼叫。
+最簡單做法：參考 `build_prompt_with_memory()` 這類 helper 函式的寫法（在派工前組出含記憶摘要的 prompt），在送出指令前呼叫。
 
 ```python
 from dispatch_with_memory import build_prompt_with_memory
@@ -80,7 +80,7 @@ text = build_prompt_with_memory(
     agent_label="headless-worker-03",
     instruction="請修復登入失敗",
 )
-actions.send_to_agent("rule:tower", agent_id, text)
+actions.send_to_agent("rule:dispatcher", agent_id, text)
 ```
 
 agent 端建議在啟動時用：
@@ -98,7 +98,7 @@ remagraph auto --task-id "$TASK_ID" --agent-id "$AGENT_ID" -- <真正指令>
 | 初始化 | `remagraph init --project 名稱` |
 | 一鍵自動 | `remagraph auto --task-id T --agent-id A -- 指令` |
 | 手動寫入 | `remagraph store --task-id T --agent-id A --kind status_update --summary "..."` |
-| fleet 管理（tower） | `remagraph store --task-id fleet --agent-id tower --kind fleet_member --summary "..." --tags '["member:xx"]'` |
+| fleet 管理（協調者角色） | `remagraph store --task-id fleet --agent-id coordinator --kind fleet_member --summary "..." --tags '["member:xx"]'` |
 | 查某個任務 | `remagraph search --task-id T` |
 | 全文搜尋 | `remagraph search --query "關鍵字"` |
 | 看最新現況 | `remagraph status` |
@@ -125,7 +125,7 @@ remagraph auto --task-id "$TASK_ID" --agent-id "$AGENT_ID" -- <真正指令>
 2. **關鍵進度**：`status_update`  
 3. **結束 / 交接**：`task_handoff`  
 4. **發現限制**：`discovered_constraint`  
-5. **艦隊成員（僅 tower）**：`fleet_member` record/recycle（PPLX B 強制整合）
+5. **艦隊成員（僅協調者角色使用）**：`fleet_member` record/recycle（PPLX B 強制整合）
 
 ---
 
@@ -141,7 +141,6 @@ remagraph auto --task-id "$TASK_ID" --agent-id "$AGENT_ID" -- <真正指令>
 ## 相關檔案
 
 - 包裝腳本：`examples/simple/remagraph-task.sh`
-- herdr 幫手：`examples/herdr-bridge/simple-memory-helper.sh`
-- herdr Python 範例：`examples/herdr-bridge/dispatch_with_memory.py`
+- 上游派工整合範例：詳見 `examples/` 目錄下的進階範例
 - 一鍵安裝：`scripts/one-key-install.sh`
-- 完整整合計劃：`docs/plans/remagraph-herdr-integration-plan.md`
+- 完整整合規劃：詳見 `docs/plans/` 目錄下的整合規劃文件

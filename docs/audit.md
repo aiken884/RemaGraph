@@ -1,6 +1,6 @@
 # Audit Contract
 
-> 本文件內容逐字複製自 [`DESIGN.md`](../DESIGN.md) 「審計 (Audit)」章節的「Audit Contract」小節。此為 RemaGraph 對外公告的穩定合約，外部排程系統（例如 herdr-gov）可獨立引用本節，無需閱讀完整設計文件。若合約有變動，SOT 仍是 `DESIGN.md`，本檔案會同步更新。
+> 本文件內容逐字複製自 [`DESIGN.md`](../DESIGN.md) 「審計 (Audit)」章節的「Audit Contract」小節。此為 RemaGraph 對外公告的穩定合約，外部排程系統可獨立引用本節，無需閱讀完整設計文件。若合約有變動，SOT 仍是 `DESIGN.md`，本檔案會同步更新。
 
 ### Audit Contract（給外部排程系統）
 

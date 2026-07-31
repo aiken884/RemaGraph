@@ -1,10 +1,10 @@
 # RemaGraph 內部 Alpha 測試 Playbook
 
-**目的**：讓內部團隊（尤其是 herdr Bridge 使用者）快速上手，並收集真實使用回饋，持續讓它變得「極簡」。
+**目的**：讓內部團隊快速上手，並收集真實使用回饋，持續讓它變得「極簡」。
 
-**適用對象**：herdr 指揮塔開發者、headless agent 維護者、非技術使用者測試者。
+**適用對象**：自動派工系統開發者、headless agent 維護者、非技術使用者測試者。
 
-**現況**：工具層 + 治理層已就緒；組織層（herdr-org 正式 workload）設計階段，稍後開發。測試重點在 RemaGraph wrapper + herdr-bridge hooks。
+**現況**：工具層 + 治理層已就緒。測試重點在 RemaGraph wrapper 與上游派工流程的整合。
 
 ---
 
@@ -46,8 +46,8 @@
 - 用 `--kind task_handoff` 寫入。
 - 另一個 agent 用同 task_id 讀取，確認能接手。
 
-### C. 指揮塔自動派工情境（最重要）
-- 模擬指揮塔：
+### C. 自動派工情境（最重要）
+- 模擬派工系統：
   - 先用 `--recall-only` 查記憶
   - 再用 `remagraph auto` 或 `remagraph-task.sh` 包裝實際 agent 指令
 - 確認 task_id / agent_id 能正確帶入。
@@ -69,7 +69,7 @@
 - 範例：
   - `fix-login-20260722-a3f2`
   - `daily-brief-20260722`
-  - `herdr-bridge-alpha-test-001`
+  - `demo-alpha-test-001`
 
 **不要用中文、空白、特殊符號。**
 
@@ -82,7 +82,7 @@
 ```
 測試日期：2026-07-22
 測試者：Aiken
-測試場景：單一任務連續執行 + 指揮塔 recall-only
+測試場景：單一任務連續執行 + 派工前 recall-only
 task_id：alpha-test-001
 
 【好用之處】
@@ -106,7 +106,7 @@ task_id：alpha-test-001
 - 目標是「極簡到連非技術者都不用想太多」。
 - 目前最推薦用法：
   - 非技術：`remagraph-task.sh` + 兩個環境變數
-  - 指揮塔：`remagraph auto --recall-only` 先查 + 自動包裝執行
+  - 派工系統：`remagraph auto --recall-only` 先查 + 自動包裝執行
 - 所有測試資料都留在本地 `~/.local/state/remagraph-*/`
 
 ---
@@ -115,7 +115,7 @@ task_id：alpha-test-001
 
 1. 收集 3–5 筆真實回饋
 2. 討論是否需要調整 CLI 或文件
-3. 再決定是否要繼續強化「指揮塔自動注入」功能
+3. 再決定是否要繼續強化「派工前自動注入記憶」功能
 
 ---
 
