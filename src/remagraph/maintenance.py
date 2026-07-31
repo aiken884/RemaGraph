@@ -315,10 +315,15 @@ def run_maintenance(
 
         # 4. Vacuum
         size_mb = _get_db_size_mb(state_dir)
-        if force or size_mb > policy.vacuum_threshold_mb:
+        if force or _should_vacuum(conn, policy, size_mb):
             conn.execute("VACUUM")
             stats["vacuum"] = "done"
             stats["size_before_mb"] = size_mb
+            # 記錄本次 VACUUM 完成後的實際大小，作為下次 _should_vacuum
+            # 判斷成長幅度的基準（見 _should_vacuum / _record_vacuum_size_mb
+            # docstring）。重新量測而非沿用 size_before_mb，因為 VACUUM 之後
+            # 檔案大小通常已改變（可壓縮的空閒頁被回收）。
+            _record_vacuum_size_mb(conn, _get_db_size_mb(state_dir))
 
         # 5. Analyze
         conn.execute("ANALYZE")
@@ -342,14 +347,40 @@ def run_maintenance(
 def _prune_superseded(
     conn: sqlite3.Connection, policy: MaintenancePolicy, project_id: str
 ) -> int:
+    """刪除指定 project 下已被取代（status != 'active'）且夠舊的 memories。
+
+    安全性由兩層節流保護：
+    - created_at 年齡過濾：只刪除真的夠舊（預設 90 天）的資料，不會誤刪
+      剛寫入不久的資料。
+    - policy.prune_superseded_max_per_task 透過 LIMIT 限制本次呼叫實際
+      刪除的筆數上限（獨立對抗式審查發現的落差修復：這個欄位過去只在
+      MaintenancePolicy 建構子被賦值，SQL 裡完全沒有 LIMIT，從未真正限制過
+      任何查詢——`_should_prune()` 的安全性論證因此建立在一個不存在的保護
+      機制上。SQLite 的 DELETE 不支援直接寫 LIMIT 子句，這裡改用
+      `WHERE rowid IN (SELECT rowid ... LIMIT N)` 的寫法達到等價效果）。
+
+    命名沿用既有欄位 `prune_superseded_max_per_task`，但目前查詢並未依
+    task_id 分組——這是「這次呼叫的 DELETE 總共最多刪 N 筆」，而不是「每個
+    task_id 各自最多刪 N 筆」。欄位名稱是既有設計的歷史遺留，這裡先讓實際
+    行為與文件/docstring 宣稱的節流保護一致；若未來要改成真正 per-task_id
+    分組的節流，需要另外設計查詢（不在本次修復範圍）。
+    """
     cursor = conn.execute(
         """
         DELETE FROM memories
-        WHERE project_id = ?
-          AND status != 'active'
-          AND created_at < datetime('now', ?)
+        WHERE rowid IN (
+            SELECT rowid FROM memories
+            WHERE project_id = ?
+              AND status != 'active'
+              AND created_at < datetime('now', ?)
+            LIMIT ?
+        )
         """,
-        (project_id, f"-{policy.prune_superseded_age_days} days"),
+        (
+            project_id,
+            f"-{policy.prune_superseded_age_days} days",
+            policy.prune_superseded_max_per_task,
+        ),
     )
     return int(cursor.rowcount)
 
@@ -416,8 +447,11 @@ def _should_prune() -> bool:
     節流已經由 _prune_superseded 這條 DELETE 本身提供：
     - created_at < datetime('now', '-N days') 的年齡過濾，只會刪除真的
       夠舊（預設 90 天）的資料，不會誤刪剛寫入不久的資料。
-    - policy.prune_superseded_max_per_task 限制每次 DELETE 影響的筆數上限，
-      單次呼叫的影響範圍本來就很小。
+    - policy.prune_superseded_max_per_task 透過 `WHERE rowid IN (SELECT
+      ... LIMIT N)` 限制單次 DELETE 實際刪除的筆數上限（獨立對抗式審查
+      發現並修復：這個欄位一度只在建構子被賦值、從未真正接到任何 SQL
+      LIMIT，本函式的安全性論證因此一度建立在不存在的保護機制上——
+      _prune_superseded() 現在已補上對應的 LIMIT，論證與程式碼一致）。
     在這兩層保護之下，「每次維護都嘗試 prune 一次」不會造成過度刪除或效能
     問題 —— 額外加一層時間頻率門檻反而需要引入新的持久狀態，增加複雜度卻
     沒有對應的安全性效益。
@@ -472,6 +506,100 @@ def _get_db_size_mb(state_dir: pathlib.Path) -> float:
         except OSError:
             continue
     return total_bytes / (1024 * 1024)
+
+
+# _meta 表（db.py 既有的 key/value TEXT 慣例，見 db._run_migrations /
+# db._read_meta_int_defensively）新增的 key，持久化「上次真的執行過 VACUUM
+# 之後量到的 size_mb」，供 _should_vacuum 判斷本次相對成長幅度。
+_VACUUM_LAST_SIZE_META_KEY = "maintenance_last_vacuum_size_mb"
+
+# VACUUM 相對成長節流門檻（獨立對抗式審查發現的阻擋問題修復）。
+#
+# 背景：_should_checkpoint 有天然的自我節流——TRUNCATE checkpoint 會把
+# -wal 檔案截斷回 0，下次呼叫從 0 重新累積。VACUUM 沒有等價機制：VACUUM
+# 只能回收「可壓縮的空閒頁」，無法讓資料庫小於實際存活資料量。只要一個
+# project 的活資料本身就超過 policy.vacuum_threshold_mb（預設 50MB），
+# VACUUM 之後檔案大小依然 > 門檻，於是此後每一次 db.connect(project_id=...)
+# （每次 connect 都會呼叫 light_maintenance_on_connect -> run_maintenance）
+# 都會再跑一次全庫 VACUUM —— 這是需要獨佔鎖、對整個檔案重寫的昂貴操作，會
+# 變成永久性效能稅。
+#
+# 節流設計：把 size_mb 相對「上次 VACUUM 完成後記錄的基準值」的成長幅度，
+# 與這個門檻比較，只有成長幅度達標才判定值得再花一次全庫重寫的代價。
+#
+# 用「相對成長比例」而非「絕對成長 MB 數」的理由：VACUUM 的成本正比於資料庫
+# 目前的總大小（整個檔案都要重寫），門檻應該隨資料庫規模等比例縮放，而不是
+# 固定的絕對 MB 數 —— 對 60MB 的資料庫要求成長 12MB 才再 vacuum，跟對 6GB
+# 的資料庫要求成長 1.2GB 才再 vacuum，兩者付出的相對代價（多花的 I/O 相對於
+# 回收到的空間）是一致的，固定絕對值做不到這件事。
+#
+# 20% 這個數字：需要夠低才能讓真的持續膨脹的資料庫還是能定期被瘦身，也要夠
+# 高才能避免「資料庫只多長一點點就又整個重寫一次」這種划不來的高頻 VACUUM。
+# 20% 是保守但不過度壓抑維護頻率的折衷值 —— 遠低於 100%（不會放任資料庫
+# 無限膨脹到看不出效果才觸發），但也不會像 1%~5% 那樣幾乎不節流。
+_VACUUM_GROWTH_RATIO_THRESHOLD = 0.20
+
+
+def _read_last_vacuum_size_mb(conn: sqlite3.Connection) -> float | None:
+    """讀取上次 VACUUM 完成後記錄的 size_mb 基準值。
+
+    找不到（_meta 表不存在、key 不存在、值無法解析成 float）一律回傳
+    None，交由呼叫端（_should_vacuum）視為「從未記錄過」處理 —— 與本模組
+    其餘讀取 _meta 的既有防禦性慣例一致（見 db._read_meta_int_defensively）。
+    """
+    try:
+        row = conn.execute(
+            "SELECT value FROM _meta WHERE key = ?", (_VACUUM_LAST_SIZE_META_KEY,)
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    if row is None:
+        return None
+    try:
+        return float(row[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def _record_vacuum_size_mb(conn: sqlite3.Connection, size_mb: float) -> None:
+    """把剛執行完 VACUUM 後量到的 size_mb 寫回 _meta，作為下次
+    _should_vacuum 判斷成長幅度的基準。
+
+    best-effort：任何失敗都吞掉，不能讓「記錄節流基準值」這個附帶動作
+    反過來讓整個維護流程失敗（與 resolve_project_state_dir() 呼叫
+    register_known_project 的 best-effort 慣例一致）。
+    """
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)",
+            (_VACUUM_LAST_SIZE_META_KEY, str(size_mb)),
+        )
+    except sqlite3.Error:
+        pass
+
+
+def _should_vacuum(conn: sqlite3.Connection, policy: MaintenancePolicy, size_mb: float) -> bool:
+    """是否該執行 VACUUM。
+
+    第一層沿用既有靜態門檻：size_mb 必須超過 policy.vacuum_threshold_mb。
+    第二層是本次修復新增的成長節流（見 _VACUUM_GROWTH_RATIO_THRESHOLD 上方
+    大段說明）：在超過靜態門檻的前提下，還要求本次 size_mb 相對「上次
+    VACUUM 完成後記錄的基準值」成長達到 _VACUUM_GROWTH_RATIO_THRESHOLD，
+    才判定值得再花一次全庫重寫的代價。
+
+    從未記錄過基準值時（首次呼叫、_meta 表還不存在、或基準值本身是
+    0/負數）視為「相對成長無限大」，一律允許執行 —— 這與修復前『完全沒有
+    節流機制』時的行為一致，不影響既有的『第一次 VACUUM 會執行』測試。
+    """
+    if size_mb <= policy.vacuum_threshold_mb:
+        return False
+
+    last_size_mb = _read_last_vacuum_size_mb(conn)
+    if last_size_mb is None or last_size_mb <= 0:
+        return True
+
+    growth_ratio = (size_mb - last_size_mb) / last_size_mb
+    return growth_ratio >= _VACUUM_GROWTH_RATIO_THRESHOLD
 
 
 # ---------------------------------------------------------------------------

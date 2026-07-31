@@ -164,6 +164,90 @@ def test_should_prune_always_true():
 
 
 # ---------------------------------------------------------------------------
+# _prune_superseded -- LIMIT 節流（問題 2 修復）
+# ---------------------------------------------------------------------------
+
+
+def _insert_superseded_memory(
+    conn: sqlite3.Connection, *, id_suffix: str, project_id: str, created_at: str
+) -> None:
+    """插入一筆足夠舊（created_at 早於 prune_superseded_age_days 門檻）且
+    status='superseded' 的 memories row，供 _prune_superseded 測試使用。"""
+    conn.execute(
+        """
+        INSERT INTO memories (
+            id, project_id, kind, task_id, agent_id, timestamp,
+            summary, learnings, handoff_note, tags, status,
+            created_at, updated_at
+        ) VALUES (?, ?, 'status_update', 'task-1', 'agent-1', ?,
+                   ?, '[]', '', '[]', 'superseded',
+                   ?, ?)
+        """,
+        (
+            f"mem-old-{id_suffix}",
+            project_id,
+            created_at,
+            f"old summary {id_suffix} padded to be long enough for storage",
+            created_at,
+            created_at,
+        ),
+    )
+
+
+def test_prune_superseded_respects_max_per_task_limit(tmp_path, monkeypatch):
+    """回歸測試（問題 2 修復）：過去 SQL 完全沒有 LIMIT，
+    prune_superseded_max_per_task 這個欄位從未真正限制過任何查詢 -- 插入
+    超過上限筆數的可清除資料，驗證 _prune_superseded 單次呼叫刪除的筆數
+    不會超過 policy.prune_superseded_max_per_task。"""
+    project_id = "testproj"
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(state_dir))
+
+    conn = db_mod.connect(project_id=project_id, skip_maintenance=True)
+    try:
+        old_ts = "2000-01-01T00:00:00Z"
+        for i in range(8):
+            _insert_superseded_memory(
+                conn, id_suffix=str(i), project_id=project_id, created_at=old_ts
+            )
+        conn.commit()
+
+        policy = maint_mod.MaintenancePolicy(prune_superseded_max_per_task=3)
+        deleted = maint_mod._prune_superseded(conn, policy, project_id)
+        assert deleted == 3
+
+        remaining = conn.execute(
+            "SELECT COUNT(*) FROM memories WHERE project_id = ? AND status = 'superseded'",
+            (project_id,),
+        ).fetchone()[0]
+        assert remaining == 8 - 3
+    finally:
+        conn.close()
+
+
+def test_prune_superseded_deletes_all_when_below_limit(tmp_path, monkeypatch):
+    """回歸保護：筆數本來就在上限之下時，LIMIT 不應該少刪任何一筆。"""
+    project_id = "testproj"
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(state_dir))
+
+    conn = db_mod.connect(project_id=project_id, skip_maintenance=True)
+    try:
+        old_ts = "2000-01-01T00:00:00Z"
+        for i in range(2):
+            _insert_superseded_memory(
+                conn, id_suffix=str(i), project_id=project_id, created_at=old_ts
+            )
+        conn.commit()
+
+        policy = maint_mod.MaintenancePolicy(prune_superseded_max_per_task=5)
+        deleted = maint_mod._prune_superseded(conn, policy, project_id)
+        assert deleted == 2
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # _should_optimize_fts
 # ---------------------------------------------------------------------------
 
@@ -201,6 +285,88 @@ def test_should_optimize_fts_true_on_query_failure_is_safe_default(tmp_path):
     try:
         policy = maint_mod.MaintenancePolicy()
         assert maint_mod._should_optimize_fts(conn, policy) is True
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# _should_vacuum / _read_last_vacuum_size_mb / _record_vacuum_size_mb
+# （VACUUM 節流機制 -- 問題 1 修復）
+# ---------------------------------------------------------------------------
+
+
+def test_read_last_vacuum_size_mb_none_when_meta_table_missing():
+    """_meta 表尚不存在（例如尚未初始化 schema 的連線）時必須安全回傳
+    None，而非拋出例外。"""
+    conn = sqlite3.connect(":memory:")
+    try:
+        assert maint_mod._read_last_vacuum_size_mb(conn) is None
+    finally:
+        conn.close()
+
+
+def test_record_and_read_last_vacuum_size_mb_roundtrip():
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        assert maint_mod._read_last_vacuum_size_mb(conn) is None
+
+        maint_mod._record_vacuum_size_mb(conn, 42.5)
+        assert maint_mod._read_last_vacuum_size_mb(conn) == pytest.approx(42.5)
+
+        # INSERT OR REPLACE：再次記錄要覆蓋舊值，而不是累加新 row。
+        maint_mod._record_vacuum_size_mb(conn, 100.0)
+        assert maint_mod._read_last_vacuum_size_mb(conn) == pytest.approx(100.0)
+    finally:
+        conn.close()
+
+
+def test_should_vacuum_false_at_or_below_static_threshold():
+    conn = sqlite3.connect(":memory:")
+    try:
+        policy = maint_mod.MaintenancePolicy(vacuum_threshold_mb=50)
+        assert maint_mod._should_vacuum(conn, policy, 50.0) is False
+        assert maint_mod._should_vacuum(conn, policy, 10.0) is False
+    finally:
+        conn.close()
+
+
+def test_should_vacuum_true_above_threshold_with_no_recorded_baseline():
+    """從未記錄過基準值（例如從來沒做過 VACUUM）時，視為成長無限大，一律
+    允許執行 -- 與修復前『完全沒有節流機制』時的行為一致，確保不影響第一
+    次 VACUUM 的既有行為。"""
+    conn = sqlite3.connect(":memory:")
+    try:
+        policy = maint_mod.MaintenancePolicy(vacuum_threshold_mb=50)
+        assert maint_mod._should_vacuum(conn, policy, 100.0) is True
+    finally:
+        conn.close()
+
+
+def test_should_vacuum_false_when_growth_below_ratio_threshold():
+    """核心節流案例：活資料本身就超過門檻，VACUUM 後大小幾乎不變 --
+    只成長 10%（< 20% 門檻）不該再觸發下一次 VACUUM。"""
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        maint_mod._record_vacuum_size_mb(conn, 100.0)
+
+        policy = maint_mod.MaintenancePolicy(vacuum_threshold_mb=50)
+        assert maint_mod._should_vacuum(conn, policy, 110.0) is False
+    finally:
+        conn.close()
+
+
+def test_should_vacuum_true_when_growth_meets_ratio_threshold():
+    """成長達到（或超過）20% 門檻時，仍然允許再次 VACUUM -- 節流不能變成
+    永久封印，資料庫真的長大過一輪還是要能被瘦身。"""
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        maint_mod._record_vacuum_size_mb(conn, 100.0)
+
+        policy = maint_mod.MaintenancePolicy(vacuum_threshold_mb=50)
+        assert maint_mod._should_vacuum(conn, policy, 120.0) is True
     finally:
         conn.close()
 
@@ -273,3 +439,67 @@ def test_run_maintenance_normal_path_skips_checkpoint_and_fts_below_thresholds(
     assert "fts_optimized" not in stats
     assert "vacuum" not in stats
     assert stats["integrity"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# 端到端：run_maintenance -- VACUUM 節流（問題 1 修復的核心回歸測試）
+# ---------------------------------------------------------------------------
+
+
+def test_run_maintenance_does_not_vacuum_twice_in_a_row_when_size_persistently_over_threshold(
+    tmp_path, monkeypatch
+):
+    """問題 1 的核心回歸測試：模擬「一個 project 的活資料本身就超過
+    vacuum_threshold_mb」的情境 -- size_mb 持續超過門檻、且兩次呼叫之間
+    完全沒有成長。修復前沒有節流機制時，_get_db_size_mb 每次都 > 門檻，
+    第二次呼叫 run_maintenance 一樣會再跑一次全庫 VACUUM，變成每次
+    db.connect() 都要付出的永久性效能稅。
+
+    透過 monkeypatch 固定 _get_db_size_mb 的回傳值，隔離掉真實檔案大小的
+    時間/環境差異，只驗證節流邏輯本身：連續兩次呼叫 run_maintenance
+    （force=False），第二次不應該再觸發 VACUUM。
+    """
+    project_id = "testproj"
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(state_dir))
+
+    conn = db_mod.connect(project_id=project_id, skip_maintenance=True)
+    _insert_memory(conn, id_suffix="1", project_id=project_id)
+    conn.close()
+
+    # 固定回傳一個持續超過門檻、且不隨呼叫次數變化的 size_mb。
+    monkeypatch.setattr(maint_mod, "_get_db_size_mb", lambda state_dir: 100.0)
+
+    policy = maint_mod.MaintenancePolicy(vacuum_threshold_mb=50)
+
+    stats1 = maint_mod.run_maintenance(policy, project_id, force=False)
+    assert stats1.get("vacuum") == "done"
+
+    stats2 = maint_mod.run_maintenance(policy, project_id, force=False)
+    assert "vacuum" not in stats2
+
+
+def test_run_maintenance_vacuums_again_after_significant_growth(tmp_path, monkeypatch):
+    """節流不能變成永久封印：資料庫在兩次呼叫之間真的顯著成長（>= 20%）
+    時，第二次呼叫仍然應該觸發 VACUUM。"""
+    project_id = "testproj"
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(state_dir))
+
+    conn = db_mod.connect(project_id=project_id, skip_maintenance=True)
+    _insert_memory(conn, id_suffix="1", project_id=project_id)
+    conn.close()
+
+    fake_size = {"current_mb": 100.0}
+    monkeypatch.setattr(
+        maint_mod, "_get_db_size_mb", lambda state_dir: fake_size["current_mb"]
+    )
+
+    policy = maint_mod.MaintenancePolicy(vacuum_threshold_mb=50)
+
+    stats1 = maint_mod.run_maintenance(policy, project_id, force=False)
+    assert stats1.get("vacuum") == "done"
+
+    fake_size["current_mb"] = 130.0  # 相對上次基準值成長 30%，超過 20% 門檻
+    stats2 = maint_mod.run_maintenance(policy, project_id, force=False)
+    assert stats2.get("vacuum") == "done"
