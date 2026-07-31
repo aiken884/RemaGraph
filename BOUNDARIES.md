@@ -1,6 +1,6 @@
 # API Boundaries and Stability Contract
 
-This document draws the line between what a consumer of RemaGraph can currently depend on and what is internal implementation that may change at any time. It exists so that anyone building on top of RemaGraph — most notably [herdr-bridge](https://github.com/aiken884/herdr-bridge), which embeds RemaGraph as one of its modules — knows what's safe to rely on today, and what isn't.
+This document draws the line between what a consumer of RemaGraph can currently depend on and what is internal implementation that may change at any time. It exists so that anyone building on top of RemaGraph, whether as a standalone tool or embedded as a module inside a larger AI orchestration system, knows what's safe to rely on today, and what isn't.
 
 **RemaGraph is currently pre-1.0 (now in beta; the current version series is `0.4.x`).** Nothing here is a semver-frozen guarantee. What follows is a record of the *current* interface surface and of the parts that are deliberately internal and not meant to be depended on — not a promise that any of it will stay byte-for-byte identical release to release. A future `1.0` will be the point at which a specific interface version actually gets frozen; until then, MINOR and PATCH releases during the pre-1.0 period may carry reviewed, CHANGELOG-documented behavioral changes, including breaking ones.
 
@@ -14,7 +14,7 @@ RemaGraph exposes two surfaces: five MCP tools (stdio transport, via FastMCP) an
 - **`remagraph_search`** — FTS5 BM25 full-text search (trigram tokenizer, CJK-aware) with kind/status/tags/agent_id/task_id filtering, plus three independent fan-out dimensions: `all_projects`, `cross_project_label`, and `include_related`.
 - **`remagraph_status`** — returns the latest active `status_update` memories (deduplicated by `task_id`), plus a version-compatibility handshake (`server_code_version`/`db_schema_version`/`min_reader_version`/`min_writer_version`/`upgrade_hint`/`read_only`).
 - **`remagraph_maintain`** — runs DB auto-maintenance (WAL checkpoint, prune, FTS optimize, VACUUM, integrity checks), gated by safety valves.
-- **`remagraph_migrate_project`** — one-time migration of memories from a source project to a target project's independent DB (e.g. `default` → `herdr-bridge`), marking the source `invalidated`.
+- **`remagraph_migrate_project`** — one-time migration of memories from a source project to a target project's independent DB (e.g. `default` → `team-project`), marking the source `invalidated`.
 
 ### CLI subcommands (`src/remagraph/cli.py`, plus `serve` dispatched separately in `server.main()`)
 
@@ -57,7 +57,7 @@ At runtime, RemaGraph depends on `model2vec` (dedup embeddings), `mcp` (FastMCP,
 
 # API 邊界與穩定性契約
 
-這份文件劃出「使用 RemaGraph 的人現在可以依賴什麼」與「內部實作、隨時可能變」之間的界線。存在的目的是讓在它之上建構的人——尤其是 [herdr-bridge](https://github.com/aiken884/herdr-bridge)（把 RemaGraph 當作自己其中一個模組嵌入使用）——知道現況下哪些東西可以放心依賴，哪些不行。
+這份文件劃出「使用 RemaGraph 的人現在可以依賴什麼」與「內部實作、隨時可能變」之間的界線。存在的目的是讓在它之上建構的人——不論是把它當作獨立工具使用，還是當作模組嵌入更大的 AI orchestration 系統——知道現況下哪些東西可以放心依賴，哪些不行。
 
 **RemaGraph 目前是 pre-1.0（現已進入 beta；現行版本序列為 `0.4.x`）。** 這份文件記錄的不是任何 semver 凍結保證，而是「目前的介面現況」，以及「刻意設計為內部、不該被依賴」的部分——不是承諾這些東西會逐版本、逐位元組維持不變。等到專案正式發行 `1.0` 時，才會真正凍結某個具體版本的介面；在那之前，pre-1.0 期間的 MINOR/PATCH 版本都可能包含經過審查、在 CHANGELOG 記錄過的行為調整，包括破壞性調整。
 
@@ -71,7 +71,7 @@ RemaGraph 對外暴露兩個介面面：5 個 MCP tools（stdio transport，透�
 - **`remagraph_search`** — FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ kind/status/tags/agent_id/task_id 過濾，另有三個互相獨立的 fan-out 維度：`all_projects`、`cross_project_label`、`include_related`。
 - **`remagraph_status`** — 回傳最新的 active `status_update` 記憶（依 `task_id` 去重），並附上版本相容性 handshake 資訊（`server_code_version`/`db_schema_version`/`min_reader_version`/`min_writer_version`/`upgrade_hint`/`read_only`）。
 - **`remagraph_maintain`** — 執行 DB 自動維護（WAL checkpoint、prune、FTS optimize、VACUUM、完整性檢查），受安全閥門把關。
-- **`remagraph_migrate_project`** — 把記憶從來源 project 一次性遷移到目標 project 的獨立 DB（例如 `default` → `herdr-bridge`），並在來源標記 `invalidated`。
+- **`remagraph_migrate_project`** — 把記憶從來源 project 一次性遷移到目標 project 的獨立 DB（例如 `default` → `team-project`），並在來源標記 `invalidated`。
 
 ### CLI 子指令（`src/remagraph/cli.py`，另外 `serve` 由 `server.main()` 獨立分派）
 

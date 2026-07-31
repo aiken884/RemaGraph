@@ -6,7 +6,7 @@ very welcome — real usage is how the project earns trust and prioritizes work.
 
 | Adopter | Since | How it's used |
 |---------|-------|---------------|
-| herdr-bridge / herdr-gov / herdr-org | 2026-07 | Shared cross-project agent memory backend for three AI command towers, under the Cross-Tower Shared Infrastructure Coordination Protocol (effective 2026-07-25). Used for task hand-off, status updates, discovered-constraint logging, and cross-project label search across the fleet. |
+| Internal multi-agent AI orchestration system | 2026-07 | Shared cross-project agent memory backend for a fleet of internal AI orchestration processes — used for task hand-off, status updates, discovered-constraint logging, and cross-project label search. |
 | The maintainer (internal) | 2026-07 | Driving multi-agent AI coding workflows — recall/store around task dispatch so a different agent (or the same agent, later) can pick up a task's trail without re-deriving it from scratch. |
 
 > This is an early, pre-1.0 project. If you are evaluating or using RemaGraph
@@ -24,7 +24,7 @@ very welcome — real usage is how the project earns trust and prioritizes work.
 
 | 採用者 | 起始時間 | 用途 |
 |---------|-------|---------------|
-| herdr-bridge / herdr-gov / herdr-org | 2026-07 起 | 三座 AI 指揮塔共用的跨專案 agent 記憶後端，依跨塔共用基礎設施協調協定（2026-07-25 生效）運作。用於任務交接、狀態更新、發現限制記錄、以及跨專案標籤搜尋。 |
+| 內部多 agent AI orchestration 系統 | 2026-07 起 | 供一批內部 AI orchestration 流程共用的跨專案 agent 記憶後端。用於任務交接、狀態更新、發現限制記錄、以及跨專案標籤搜尋。 |
 | 維護者本人（內部使用） | 2026-07 起 | 驅動多 agent AI coding workflow——在任務派工前後 recall/store，讓另一個 agent（或同一個 agent 之後接手）不必從零重建這條軌跡就能接著做。 |
 
 > 這是一個早期、pre-1.0 的專案。如果你正在評估或使用 RemaGraph，且願意被列出

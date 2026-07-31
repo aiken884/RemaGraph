@@ -7,9 +7,8 @@ for how decisions are made and how one becomes a maintainer.
 |------------|--------|------|
 | Aiken Lin  | [@aiken884](https://github.com/aiken884) | Lead maintainer — all areas |
 
-> This project currently has a single maintainer. As RemaGraph is adopted
-> across more command towers (see [`ADOPTERS.md`](ADOPTERS.md)), this list is
-> expected to grow.
+> This project currently has a single maintainer. As RemaGraph gains more
+> adopters (see [`ADOPTERS.md`](ADOPTERS.md)), this list is expected to grow.
 
 ## Emeritus
 
@@ -26,7 +25,7 @@ _None yet._
 |------------|--------|------|
 | Aiken Lin  | [@aiken884](https://github.com/aiken884) | 主要維護者——所有範圍 |
 
-> 本專案目前僅有一位維護者。隨著 RemaGraph 被更多指揮塔採用（見
+> 本專案目前僅有一位維護者。隨著 RemaGraph 被更多使用者採用（見
 > [`ADOPTERS.md`](ADOPTERS.md)），預期這份名單會逐步增加。
 
 ## 榮譽退休維護者（Emeritus）

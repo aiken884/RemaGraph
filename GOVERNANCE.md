@@ -7,9 +7,9 @@ project and its adopter base grow.
 
 ## Roles
 
-- **Users** — anyone using RemaGraph, including the command towers listed in
-  [`ADOPTERS.md`](ADOPTERS.md). Feedback via issues and discussions is the
-  primary input to the roadmap.
+- **Users** — anyone using RemaGraph, including the internal orchestration
+  systems listed in [`ADOPTERS.md`](ADOPTERS.md). Feedback via issues and
+  discussions is the primary input to the roadmap.
 - **Contributors** — anyone who submits a pull request, issue, or review.
 - **Maintainers** — listed in [`MAINTAINERS.md`](MAINTAINERS.md). They review
   and merge changes, cut releases, and steward the project's direction.
@@ -70,7 +70,7 @@ RemaGraph 是一個採用 Apache-2.0 授權的開源專案。本文件說明決�
 ## 角色
 
 - **使用者（Users）**——任何使用 RemaGraph 的人，包含 [`ADOPTERS.md`](ADOPTERS.md)
-  列出的各指揮塔。透過 issue 與討論串提供的回饋是 roadmap 最主要的輸入來源。
+  列出的各內部 orchestration 系統。透過 issue 與討論串提供的回饋是 roadmap 最主要的輸入來源。
 - **貢獻者（Contributors）**——任何提交 pull request、issue 或 code review 的人。
 - **維護者（Maintainers）**——名單見 [`MAINTAINERS.md`](MAINTAINERS.md)。負責審查
   與合併變更、切版本發布，並掌舵專案方向。
