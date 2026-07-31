@@ -22,6 +22,7 @@ from typing import Any
 from remagraph.audit import append_event
 from remagraph.db import (
     READ_ONLY_ATTR,
+    get_db_path,
     get_state_dir,
     load_project_metadata,
     register_known_project,
@@ -234,13 +235,21 @@ def _record_violation(project_id: str, reason: str) -> None:
 
 
 class MaintenancePolicy:
-    def __init__(self, **kwargs):
-        self.wal_checkpoint_interval_ops = kwargs.get("wal_checkpoint_interval_ops", 1000)
-        self.prune_superseded_age_days = kwargs.get("prune_superseded_age_days", 90)
-        self.prune_superseded_max_per_task = kwargs.get("prune_superseded_max_per_task", 5)
-        self.fts_optimize_interval = kwargs.get("fts_optimize_interval", 10000)
-        self.vacuum_threshold_mb = kwargs.get("vacuum_threshold_mb", 50)
-        self.integrity_check_on_startup = kwargs.get("integrity_check_on_startup", True)
+    def __init__(
+        self,
+        wal_checkpoint_interval_ops: int = 1000,
+        prune_superseded_age_days: int = 90,
+        prune_superseded_max_per_task: int = 5,
+        fts_optimize_interval: int = 10000,
+        vacuum_threshold_mb: int = 50,
+        integrity_check_on_startup: bool = True,
+    ) -> None:
+        self.wal_checkpoint_interval_ops = wal_checkpoint_interval_ops
+        self.prune_superseded_age_days = prune_superseded_age_days
+        self.prune_superseded_max_per_task = prune_superseded_max_per_task
+        self.fts_optimize_interval = fts_optimize_interval
+        self.vacuum_threshold_mb = vacuum_threshold_mb
+        self.integrity_check_on_startup = integrity_check_on_startup
 
 
 def run_maintenance(
@@ -290,7 +299,7 @@ def run_maintenance(
 
     try:
         # 1. WAL checkpoint
-        if force or _should_checkpoint(conn):
+        if force or _should_checkpoint(conn, policy):
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             stats["wal_checkpoint"] = "done"
 
@@ -300,7 +309,7 @@ def run_maintenance(
             stats["pruned_count"] = deleted
 
         # 3. FTS optimize
-        if force or _should_optimize_fts():
+        if force or _should_optimize_fts(conn, policy):
             conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('optimize')")
             stats["fts_optimized"] = True
 
@@ -330,7 +339,9 @@ def run_maintenance(
 
 
 # 簡化 helper（實際應從 arbitration 共用）
-def _prune_superseded(conn, policy, project_id: str) -> int:
+def _prune_superseded(
+    conn: sqlite3.Connection, policy: MaintenancePolicy, project_id: str
+) -> int:
     cursor = conn.execute(
         """
         DELETE FROM memories
@@ -340,14 +351,127 @@ def _prune_superseded(conn, policy, project_id: str) -> int:
         """,
         (project_id, f"-{policy.prune_superseded_age_days} days"),
     )
-    return cursor.rowcount
+    return int(cursor.rowcount)
 
 
-def _should_checkpoint(conn: sqlite3.Connection) -> bool: ...
-def _should_prune() -> bool: ...
-def _should_optimize_fts() -> bool: ...
+def _should_checkpoint(conn: sqlite3.Connection, policy: MaintenancePolicy) -> bool:
+    """近似判斷「距離上次 checkpoint 累積了多少寫入」，決定是否該做 WAL
+    checkpoint。
+
+    設計取捨（原本這裡完全沒有可用的狀態）：run_maintenance 每次呼叫都可能
+    是全新的 conn，甚至全新的 process（見 light_maintenance_on_connect 每次
+    db.connect() 都會呼叫一次），因此無法可靠地在記憶體中維護一個「已執行
+    幾次寫入」的計數器 —— 那個計數器活不過一次 connect() 的生命週期。
+
+    改用 SQLite 本身、與磁碟一致的物理訊號：目前 -wal 檔案累積的頁數（frame
+    數）。理由：
+    - 每次 commit 至少會把一個已修改頁面寫進 WAL，frame 數量因此是「累積寫入
+      量」的下界近似，不需要任何額外的持久化狀態。
+    - 這個訊號天然具備「interval」語意：checkpoint（尤其是 TRUNCATE 模式）
+      會把 -wal 檔截斷回 0，下一次呼叫時 frame 數重新從 0 開始累積 ——
+      與 policy.wal_checkpoint_interval_ops「每隔 N 次操作 checkpoint 一次」
+      的意圖方向一致，即使兩者不是嚴格的 1:1 對應（一次邏輯操作可能橫跨
+      多個 frame）。
+    - 對 :memory: 資料庫或尚未產生 -wal 檔的全新連線，安全回傳 False ——
+      沒有檔案可查時，沒有 checkpoint 的必要，也不該因為查詢失敗而拋出例外
+      中斷整個維護流程。
+    """
+    try:
+        rows = conn.execute("PRAGMA database_list").fetchall()
+    except sqlite3.Error:
+        return False
+
+    main_file: str | None = None
+    for row in rows:
+        # PRAGMA database_list 回傳 (seq, name, file) 三欄。
+        if row[1] == "main" and row[2]:
+            main_file = row[2]
+            break
+    if not main_file:
+        return False  # :memory: 或尚未附掛實體檔案的資料庫，無 WAL 可查
+
+    wal_path = pathlib.Path(main_file).with_name(pathlib.Path(main_file).name + "-wal")
+    try:
+        wal_size = wal_path.stat().st_size
+    except OSError:
+        return False  # 尚未產生 -wal 檔（例如全新連線、從未寫入過）
+
+    try:
+        page_size_row = conn.execute("PRAGMA page_size").fetchone()
+        page_size = page_size_row[0] if page_size_row else 4096
+    except sqlite3.Error:
+        page_size = 4096
+    if not page_size or page_size <= 0:
+        page_size = 4096
+
+    wal_frames = wal_size // page_size
+    return wal_frames >= policy.wal_checkpoint_interval_ops
+
+
+def _should_prune() -> bool:
+    """是否該嘗試 prune superseded 資料。
+
+    設計取捨：跟 checkpoint 一樣，目前完全沒有「上次 prune 是什麼時候」的
+    持久狀態可用。但這裡選擇更簡單的簡化 —— 永遠回傳 True，理由是真正的
+    節流已經由 _prune_superseded 這條 DELETE 本身提供：
+    - created_at < datetime('now', '-N days') 的年齡過濾，只會刪除真的
+      夠舊（預設 90 天）的資料，不會誤刪剛寫入不久的資料。
+    - policy.prune_superseded_max_per_task 限制每次 DELETE 影響的筆數上限，
+      單次呼叫的影響範圍本來就很小。
+    在這兩層保護之下，「每次維護都嘗試 prune 一次」不會造成過度刪除或效能
+    問題 —— 額外加一層時間頻率門檻反而需要引入新的持久狀態，增加複雜度卻
+    沒有對應的安全性效益。
+    """
+    return True
+
+
+def _should_optimize_fts(conn: sqlite3.Connection, policy: MaintenancePolicy) -> bool:
+    """是否該執行 FTS5 optimize（合併 b-tree segments）。
+
+    設計取捨：跟 _should_checkpoint 一樣的問題 —— 沒有跨呼叫的操作計數可用。
+    這裡選擇一個介於「完全簡化成永遠 True」與「精確追蹤 segment 數」之間的
+    折衷：以 memories 主表的目前列數，對照 policy.fts_optimize_interval 當
+    作『語料量門檻』—— 語料量在門檻以下時完全略過（optimize 對只有幾筆資料
+    的小型/測試資料庫沒有實質意義，純粹是不必要的 I/O），一旦跨過門檻則每次
+    維護都執行一次。
+
+    這與欄位名稱字面上「每隔 N 筆操作 optimize 一次」的語意不完全相同（因為
+    沒有持久化的『上次 optimize 時的列數』可用來判斷是否又累積了 N 筆），但
+    FTS5 的 'optimize' 指令本身是冪等且安全的操作（對已經是單一 segment 的
+    索引重新執行只是多一次掃描，不會造成資料損壞），因此跨過門檻後『每次都
+    執行』是安全的簡化，同時仍然有意義地重用了 fts_optimize_interval 這個
+    欄位（避免對小型資料庫的每一次維護呼叫都做沒有必要的 optimize）。
+
+    查詢失敗時（例如 memories 表尚不存在的連線）保守回傳 True —— optimize
+    本身冪等安全，寧可多做一次也不要因為判斷失敗而略過。
+    """
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM memories").fetchone()
+    except sqlite3.Error:
+        return True
+    count = row[0] if row else 0
+    return count >= policy.fts_optimize_interval
+
+
 def _get_db_size_mb(state_dir: pathlib.Path) -> float:
-    return 0  # 實作省略，見 db.py 類似邏輯
+    """回傳 state_dir 下資料庫目前實際佔用的磁碟空間（MB）。
+
+    參考 db.py 的 get_db_path()/DB_FILENAME 慣例取得主檔路徑。VACUUM 的
+    觸發判斷（size_mb > policy.vacuum_threshold_mb）關心的是「這個資料庫
+    目前佔了多少磁碟空間、值不值得花時間重建」，而不是「主檔案裡有多少
+    已使用的邏輯頁面」——在 WAL 模式下，尚未 checkpoint 回主檔的寫入會停留
+    在 -wal 附屬檔，只看主檔大小在 WAL 檔尚未被回收前會低估使用者實際佔用
+    的磁碟空間，因此主檔 + -wal + -shm 三個檔案的大小都一併計入加總。
+    """
+    db_path = get_db_path(state_dir=state_dir)
+    total_bytes = 0
+    for suffix in ("", "-wal", "-shm"):
+        candidate = db_path.with_name(db_path.name + suffix) if suffix else db_path
+        try:
+            total_bytes += candidate.stat().st_size
+        except OSError:
+            continue
+    return total_bytes / (1024 * 1024)
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +482,7 @@ def _get_db_size_mb(state_dir: pathlib.Path) -> float:
 def light_maintenance_on_connect(project_id: str = "default") -> None:
     """connect() 後自動呼叫的輕量維護。"""
     try:
-        policy = MaintenancePolicy()  # type: ignore[no-untyped-call]
+        policy = MaintenancePolicy()
         run_maintenance(policy, project_id, force=False)
     except Exception as e:
         # 不阻斷啟動，但記錄

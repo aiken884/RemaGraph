@@ -555,7 +555,7 @@ def remagraph_maintain(
     _check_rate_limit("maintenance")
     try:
         safety_validate_project(project_id)
-        policy = MaintenancePolicy()  # type: ignore[no-untyped-call]
+        policy = MaintenancePolicy()
         stats = run_maintenance(policy, project_id, force=force)
         return {"status": "ok", "stats": stats}
     except Exception as e:
