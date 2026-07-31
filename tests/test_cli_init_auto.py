@@ -26,7 +26,7 @@ def test_init_creates_dir_and_env_file(tmp_path, monkeypatch, capsys):
     args = build_parser().parse_args(["init", "--project", "demo-proj"])
     cmd_init(args)
     out = capsys.readouterr().out
-    assert "初始化完成" in out
+    assert "initialization complete" in out
     state = tmp_path / ".local" / "state" / "remagraph-demo-proj"
     assert state.is_dir()
     assert (state / "env.sh").is_file()

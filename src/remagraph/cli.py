@@ -91,7 +91,7 @@ def _parse_json_list(raw: str | None) -> list[str] | None:
         return parsed
     except (json.JSONDecodeError, ValueError):
         print(
-            'error: --tags/--learnings 必須是 JSON 陣列，例如 \'["a","b"]\'',
+            'ERROR: --tags/--learnings must be a JSON array, e.g. \'["a","b"]\'',
             file=sys.stderr,
         )
         sys.exit(1)
@@ -107,7 +107,7 @@ def _pad_summary(text: str, min_len: int = 30) -> str:
     text = text.strip()
     if len(text) >= min_len:
         return text
-    pad = "（自動補足長度以符合 RemaGraph 記錄規則）"
+    pad = " (auto-padded by RemaGraph to meet the minimum summary length)"
     return (text + pad)[: max(min_len, len(text) + len(pad))]
 
 
@@ -120,8 +120,8 @@ def cmd_store(args: argparse.Namespace) -> None:
     project = args.project or os.environ.get("REMAGRAPH_PROJECT") or "default"
     if project and project != "default" and project not in (args.task_id or "").lower():
         print(
-            f"WARNING: task_id '{args.task_id}' 未含 project '{project}' 前綴，"
-            f"建議用 {project}-xxx",
+            f"WARNING: task_id '{args.task_id}' does not include the project "
+            f"'{project}' prefix; consider using '{project}-xxx'",
             file=sys.stderr,
         )
     request = StoreRequest(
@@ -139,7 +139,7 @@ def cmd_store(args: argparse.Namespace) -> None:
     try:
         conn = _get_conn(_project_id_for_conn(project))
     except Exception as e:
-        print(f"ERROR: 無法連線資料庫 - {e}", file=sys.stderr)
+        print(f"ERROR: failed to connect to database - {e}", file=sys.stderr)
         sys.exit(1)
     response = process_store(request, conn)
     result: dict[str, Any] = {
@@ -175,8 +175,8 @@ def cmd_search(args: argparse.Namespace) -> None:
         and not args.cross_project_label
     ):
         print(
-            "error: 請提供 --query，或至少提供 --task-id / --agent-id，"
-            "或使用 --all-projects / --cross-project-label",
+            "ERROR: provide --query, or at least --task-id / --agent-id, "
+            "or use --all-projects / --cross-project-label",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -197,7 +197,7 @@ def cmd_search(args: argparse.Namespace) -> None:
     try:
         conn = _get_conn(_project_id_for_conn(project))
     except Exception as e:
-        print(f"ERROR: 無法連線資料庫 - {e}", file=sys.stderr)
+        print(f"ERROR: failed to connect to database - {e}", file=sys.stderr)
         sys.exit(1)
     response = search_memories(conn, request)
     _print_json(
@@ -232,7 +232,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     try:
         conn = _get_conn(_project_id_for_conn(project))
     except Exception as e:
-        print(f"ERROR: 無法連線資料庫 - {e}", file=sys.stderr)
+        print(f"ERROR: failed to connect to database - {e}", file=sys.stderr)
         sys.exit(1)
     request = StatusRequest(limit=args.limit, project_id=project)
     response = get_status(conn, request)
@@ -271,35 +271,40 @@ def cmd_init(args: argparse.Namespace) -> None:
     )
     meta_file.chmod(0o600)
 
-    print("✅ RemaGraph 初始化完成！")
-    print(f"專案：{project}")
-    print(f"記憶資料夾：{state_dir}")
+    print("RemaGraph initialization complete!")
+    print(f"Project: {project}")
+    print(f"Memory folder: {state_dir}")
     print("")
-    print("【最簡單三步驟（非技術使用者）】")
+    print("[Quick start in 3 steps, for non-technical users]")
     print(f"  1. source {env_file}")
-    print("  2. 下載包裝腳本（若尚未下載）：")
+    print("  2. Download the wrapper script if you haven't already:")
     print("     curl -O .../remagraph-task.sh")
     print("     chmod +x remagraph-task.sh")
-    print("  3. 執行任務：")
+    print("  3. Run your task:")
     print(f"     REMAGRAPH_PROJECT={project} TASK_ID=... ./remagraph-task.sh ...")
     print("")
-    print("或用內建一鍵指令（推薦）：")
+    print("Or use the built-in one-shot command (recommended):")
     print(f"  remagraph auto --project {project} --task-id ... ")
     print("")
-    print("【herdr Bridge 使用者額外提示】")
-    print("  在指揮塔派工時，建議這樣用：")
+    print("[Extra tips for herdr Bridge users]")
+    print("  When dispatching from the command tower, this is the recommended usage:")
     print(f"  REMAGRAPH_PROJECT={project} TASK_ID=... remagraph auto --project {project} ...")
-    print("  或派工前先查記憶：")
+    print("  Or check memory before dispatching:")
     print(f"  remagraph auto --project {project} --recall-only ...")
-    print("  或在送給 agent 的 prompt 裡面直接寫上 task_id，讓 agent 自己呼叫。")
+    print(
+        "  Or write task_id directly into the agent's prompt so the agent can call it itself."
+    )
     print("")
-    print("注意：project/task_id/agent_id 限英文數字底線連字號")
+    print(
+        "Note: project/task_id/agent_id may only contain letters, digits, "
+        "underscores, and hyphens"
+    )
     print("")
-    print("之後可直接：")
+    print("You can now use these directly:")
     print(f"  export REMAGRAPH_STATE_DIR={state_dir}")
     print(f"  export REMAGRAPH_PROJECT={project}")
     print("")
-    print("內部測試者請參考：docs/internal/alpha-test-playbook.md")
+    print("Internal testers, see: docs/internal/alpha-test-playbook.md")
 
 
 # ---------------------------------------------------------------------------
@@ -321,56 +326,56 @@ def cmd_auto(args: argparse.Namespace) -> None:
         if not quiet:
             print(msg, file=sys.stderr)
 
-    _log("=== RemaGraph auto 開始 ===")
-    _log(f"專案：{project} 任務：{task_id} / 執行者：{agent_id}")
+    _log("=== RemaGraph auto starting ===")
+    _log(f"Project: {project}  Task: {task_id}  Agent: {agent_id}")
 
     # 1. recall
     request = SearchRequest(query="", top_k=top_k, project_id=project, task_id=task_id)
     try:
         response = search_memories(_get_conn(_project_id_for_conn(project)), request)
         memories = response.results
-    except Exception as exc:  # noqa: BLE001 — 記憶失敗不阻斷主任務
-        _log(f"（讀取記憶失敗：{exc}，繼續）")
+    except Exception as exc:  # noqa: BLE001 — memory failures must not block the main task
+        _log(f"(Failed to recall memory: {exc}, continuing anyway)")
         memories = []
 
     if not quiet:
         if memories:
-            _log(f">>> 找到 {len(memories)} 筆之前記憶：")
+            _log(f">>> Found {len(memories)} prior memory record(s):")
             for m in memories:
                 _log(f"  - {m.get('summary', '')[:80]}")
         else:
-            _log(">>> 目前沒有之前記憶")
+            _log(">>> No prior memories found")
 
     if getattr(args, "recall_only", False):
-        _log(">>> recall-only 模式：不執行、不儲存")
+        _log(">>> recall-only mode: skipping execution and storage")
         _print_json({"recalled": len(memories), "memories": memories})
-        _log("=== RemaGraph auto 結束 ===")
+        _log("=== RemaGraph auto finished ===")
         return
 
-    # 2. 執行外部指令（可選）
+    # 2. Run the external command (optional)
     exit_code = 0
     if cmd:
-        _log(f">>> 執行：{' '.join(cmd)}")
+        _log(f">>> Running: {' '.join(cmd)}")
         try:
             completed = subprocess.run(cmd, check=False)
             exit_code = int(completed.returncode)
         except FileNotFoundError:
-            _log(f"error: 找不到指令 {cmd[0]!r}")
+            _log(f"ERROR: command not found: {cmd[0]!r}")
             sys.exit(127)
         except OSError as exc:
-            _log(f"error: 無法執行指令：{exc}")
+            _log(f"ERROR: failed to execute command: {exc}")
             sys.exit(126)
     else:
-        _log(">>> 未提供外部指令，僅做 recall + store")
+        _log(">>> No external command provided, doing recall + store only")
 
-    # 3. 自動 store
+    # 3. Auto store
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     if args.summary:
         summary = args.summary
     elif cmd:
-        summary = f"auto 完成指令「{' '.join(cmd)}」，退出碼={exit_code}，時間={ts}"
+        summary = f'auto completed command "{" ".join(cmd)}", exit_code={exit_code}, time={ts}'
     else:
-        summary = f"auto 完成（僅記錄），時間={ts}，task={task_id}"
+        summary = f"auto completed (record only), time={ts}, task={task_id}"
     summary = _pad_summary(summary)
 
     kind = args.kind or "status_update"
@@ -382,7 +387,8 @@ def cmd_auto(args: argparse.Namespace) -> None:
         )
     if project and project != "default" and project not in (task_id or "").lower():
         print(
-            f"WARNING: task_id '{task_id}' 未含 project '{project}' 前綴，建議用 {project}-xxx",
+            f"WARNING: task_id '{task_id}' does not include the project "
+            f"'{project}' prefix; consider using '{project}-xxx'",
             file=sys.stderr,
         )
     try:
@@ -405,10 +411,10 @@ def cmd_auto(args: argparse.Namespace) -> None:
             "recalled": len(memories),
         }
         if not quiet:
-            _log(f">>> 已儲存記憶：{store_resp.status} id={store_resp.id}")
+            _log(f">>> Memory stored: {store_resp.status} id={store_resp.id}")
         _print_json(store_out)
     except Exception as exc:  # noqa: BLE001
-        _log(f"（儲存記憶失敗：{exc}，不影響任務結果）")
+        _log(f"(Failed to store memory: {exc}, does not affect the task result)")
         _print_json(
             {
                 "status": "error",
@@ -418,7 +424,7 @@ def cmd_auto(args: argparse.Namespace) -> None:
             }
         )
 
-    _log("=== RemaGraph auto 結束 ===")
+    _log("=== RemaGraph auto finished ===")
     if cmd:
         sys.exit(exit_code)
 
@@ -431,17 +437,17 @@ def cmd_auto(args: argparse.Namespace) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="remagraph",
-        description="RemaGraph — AI agent 記憶工具（極簡 CLI）",
+        description="RemaGraph -- a minimalist memory CLI for AI agents",
     )
     parser.add_argument(
         "--allow-default-state-dir",
         action="store_true",
-        help="允許預設共享 state dir（不推薦）",
+        help="Allow the default shared state dir (not recommended)",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     # store
-    p_store = sub.add_parser("store", help="寫入記憶")
+    p_store = sub.add_parser("store", help="Store a memory")
     p_store.add_argument("--project", default=None)
     p_store.add_argument("--task-id", required=True)
     p_store.add_argument("--agent-id", required=True)
@@ -451,168 +457,216 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["task_handoff", "status_update", "discovered_constraint", "fleet_member"],
     )
     p_store.add_argument("--summary", required=True)
-    p_store.add_argument("--learnings", help='JSON 陣列，例如 \'["a","b"]\'')
+    p_store.add_argument("--learnings", help='JSON array, e.g. \'["a","b"]\'')
     p_store.add_argument("--handoff-note", default="")
-    p_store.add_argument("--tags", help="JSON 陣列")
-    p_store.add_argument("--invalidates", help="JSON 陣列")
+    p_store.add_argument("--tags", help="JSON array")
+    p_store.add_argument("--invalidates", help="JSON array")
     p_store.add_argument(
         "--labels",
         help=(
-            "JSON 陣列，命名空間化標籤，例如 '[\"dep:opencode\",\"topic:auth\"]'"
-            "（與 --tags 是不同概念：labels 有 namespace:value 格式要求，"
-            "供跨專案標籤搜尋使用，見 search --cross-project-label）"
+            "JSON array of namespaced labels, e.g. "
+            "'[\"dep:opencode\",\"topic:auth\"]'. A different concept from "
+            "--tags: labels require a namespace:value format and are used "
+            "for cross-project label search (see search --cross-project-label)"
         ),
     )
 
     # search
-    p_search = sub.add_parser("search", help="查詢記憶（可用 --task-id 不帶 --query）")
-    p_search.add_argument("--query", default="", help="全文關鍵字（可省略，改用 --task-id）")
+    p_search = sub.add_parser(
+        "search", help="Search memories (--task-id can be used without --query)"
+    )
+    p_search.add_argument(
+        "--query", default="", help="Full-text keyword query (optional; use --task-id instead)"
+    )
     p_search.add_argument("--top-k", type=int, default=20)
     p_search.add_argument(
         "--kind",
         choices=["task_handoff", "status_update", "discovered_constraint", "fleet_member"],
     )
     p_search.add_argument("--status", choices=["active", "superseded", "invalidated"])
-    p_search.add_argument("--tags", help="JSON 陣列")
+    p_search.add_argument("--tags", help="JSON array")
     p_search.add_argument("--project")
     p_search.add_argument("--agent-id")
     p_search.add_argument("--task-id")
     p_search.add_argument(
-        "--all-projects", action="store_true", help="跨所有 project 查詢（需同意）"
+        "--all-projects", action="store_true", help="Search across all projects (opt-in)"
     )
     p_search.add_argument(
         "--cross-project-label",
         default=None,
         help=(
-            "依命名空間化 label（如 'dep:opencode'）跨『所有已知 project 各自"
-            "獨立的資料庫檔案』搜尋（見 item 4a registry），與 --all-projects"
-            "（僅移除目前這個資料庫檔案內的 project 過濾）是完全不同的兩件事"
+            "Search across each known project's own separate database file "
+            "by a namespaced label (e.g. 'dep:opencode'; see the item 4a "
+            "registry). This is a completely different mechanism from "
+            "--all-projects, which only removes the project filter within "
+            "the current database file"
         ),
     )
     p_search.add_argument(
         "--include-related",
         action="store_true",
         help=(
-            "額外 fan out 到透過 `remagraph link` 明確宣告為圖形關聯、且在"
-            "--related-hops 之內的 project（見 project_edges/recall_related，"
-            "item 5），與 --cross-project-label（對所有已知 project 無差別"
-            "fan-out）、--all-projects 是三個完全獨立的維度。需要 --project"
-            "（或 REMAGRAPH_PROJECT）作為 traversal 起點，未提供時優雅退化為"
-            "一般搜尋"
+            "Additionally fan out to projects explicitly declared as "
+            "graph-linked via `remagraph link`, within --related-hops (see "
+            "project_edges/recall_related, item 5). This is a fully "
+            "independent dimension from --cross-project-label (indiscriminate "
+            "fan-out to all known projects) and --all-projects. Requires "
+            "--project (or REMAGRAPH_PROJECT) as the traversal starting "
+            "point; gracefully falls back to a normal search if not provided"
         ),
     )
     p_search.add_argument(
         "--related-hops",
         type=int,
         default=1,
-        help="--include-related 的 BFS traversal 深度（預設 1，僅限直接關聯）",
+        help="BFS traversal depth for --include-related (default 1, direct relations only)",
     )
     p_search.add_argument(
         "--fanout-cap",
         type=int,
         default=None,
         help=(
-            "跨專案 fan-out（--cross-project-label / --include-related）單次"
-            "最多開幾個『其他』專案資料庫連線的上限覆寫（預設 50，可另用 "
-            "REMAGRAPH_FANOUT_CAP 環境變數設定，本旗標優先）。一律 clamp 到"
-            "硬性上限 200（僅能由 REMAGRAPH_FANOUT_HARD_CAP 環境變數明確 "
-            "opt-in 提高），不支援 0 表示不限"
+            "Override the max number of 'other' project database connections "
+            "opened per cross-project fan-out (--cross-project-label / "
+            "--include-related) call (default 50; can also be set via the "
+            "REMAGRAPH_FANOUT_CAP env var, this flag takes precedence). "
+            "Always clamped to a hard cap of 200 (raise only via explicit "
+            "opt-in through the REMAGRAPH_FANOUT_HARD_CAP env var); 0 does "
+            "not mean unlimited"
         ),
     )
 
     # status
-    p_status = sub.add_parser("status", help="查詢最新現況")
+    p_status = sub.add_parser("status", help="Show latest status")
     p_status.add_argument("--project", default=None)
     p_status.add_argument("--limit", type=int, default=20)
     p_status.add_argument(
-        "--all-projects", action="store_true", help="跨所有 project 查詢（需同意）"
+        "--all-projects", action="store_true", help="Search across all projects (opt-in)"
     )
 
     # init
-    p_init = sub.add_parser("init", help="初始化 RemaGraph（一行搞定，適合新手）")
-    p_init.add_argument("--project", default="default", help="專案名稱（用來區分不同任務）")
+    p_init = sub.add_parser(
+        "init", help="Initialize RemaGraph (one command, beginner-friendly)"
+    )
+    p_init.add_argument(
+        "--project", default="default", help="Project name (used to distinguish different tasks)"
+    )
 
     # auto
     p_auto = sub.add_parser(
         "auto",
-        help="一鍵：讀取記憶 → 執行指令 → 自動儲存（最推薦）",
+        help="One-shot: recall memory -> run command -> auto-store (recommended)",
     )
     p_auto.add_argument("--project", default=None)
-    p_auto.add_argument("--task-id", default=None, help="任務編號（省略則自動產生）")
+    p_auto.add_argument(
+        "--task-id", default=None, help="Task ID (auto-generated if omitted)"
+    )
     p_auto.add_argument(
         "--agent-id",
         default=None,
-        help="執行者名稱（省略則用環境變數或 default-agent）",
+        help="Agent name (falls back to an env var or 'default-agent' if omitted)",
     )
-    p_auto.add_argument("--summary", default="", help="自訂結尾摘要（可省略，會自動產生）")
+    p_auto.add_argument(
+        "--summary", default="", help="Custom closing summary (optional, auto-generated if omitted)"
+    )
     p_auto.add_argument(
         "--kind",
         choices=["task_handoff", "status_update", "discovered_constraint", "fleet_member"],
         default=None,
     )
     p_auto.add_argument("--handoff-note", default="")
-    p_auto.add_argument("--tags", help="JSON 陣列")
+    p_auto.add_argument("--tags", help="JSON array")
     p_auto.add_argument("--top-k", type=int, default=5)
-    p_auto.add_argument("--quiet", action="store_true", help="少印訊息，只輸出 JSON")
+    p_auto.add_argument(
+        "--quiet", action="store_true", help="Print fewer messages, output JSON only"
+    )
     p_auto.add_argument(
         "--recall-only",
         action="store_true",
-        help="只讀取之前記憶，不執行指令也不自動儲存（適合指揮塔派工前先查）",
+        help=(
+            "Only recall prior memories; do not run a command or auto-store "
+            "(useful for checking memory before dispatching from a command tower)"
+        ),
     )
-    p_auto.add_argument("--all-projects", action="store_true", help="recall 時跨 project（不推薦）")
+    p_auto.add_argument(
+        "--all-projects", action="store_true", help="Cross projects during recall (not recommended)"
+    )
     p_auto.add_argument(
         "cmd",
         nargs=argparse.REMAINDER,
-        help="要執行的指令（建議前面加 -- ）",
+        help="Command to run (prefixing it with -- is recommended)",
     )
 
     # maintain
     p_maintain = sub.add_parser(
-        "maintain", help="執行 DB 自動維護（WAL/FTS/prune/vacuum/integrity）"
+        "maintain", help="Run automatic DB maintenance (WAL/FTS/prune/vacuum/integrity)"
     )
     p_maintain.add_argument("--project", default=None)
-    p_maintain.add_argument("--force", action="store_true", help="強制所有維護操作")
-    p_maintain.add_argument("--dry-run", action="store_true", help="只顯示會做什麼，不實際執行")
+    p_maintain.add_argument(
+        "--force", action="store_true", help="Force all maintenance operations"
+    )
+    p_maintain.add_argument(
+        "--dry-run", action="store_true", help="Only show what would be done, without executing"
+    )
 
     # link
     p_link = sub.add_parser(
         "link",
-        help="宣告兩個 project 之間的關聯 edge（供 --include-related recall 使用）",
+        help="Declare a relation edge between two projects (used by --include-related recall)",
     )
-    p_link.add_argument("--from", dest="from_project", required=True, help="來源 project_id")
-    p_link.add_argument("--to", dest="to_project", required=True, help="目標 project_id")
+    p_link.add_argument(
+        "--from", dest="from_project", required=True, help="Source project_id"
+    )
+    p_link.add_argument(
+        "--to", dest="to_project", required=True, help="Target project_id"
+    )
     p_link.add_argument(
         "--relation",
         required=True,
         choices=["depends_on", "sibling", "shares_upstream", "monorepo_member"],
-        help="關聯類型（traversal 時一律視為對稱雙向，見 db.recall_related 說明）",
+        help=(
+            "Relation type (always treated as symmetric/bidirectional during "
+            "traversal, see db.recall_related)"
+        ),
     )
 
     # migrate-project
     p_migrate = sub.add_parser(
         "migrate-project",
-        help="將某 project 記憶從來源 DB 遷移到目標 per-project DB，並標記 invalidated",
+        help=(
+            "Migrate a project's memories from the source DB to a target "
+            "per-project DB, marking the originals invalidated"
+        ),
     )
-    p_migrate.add_argument("--from", dest="from_project", required=True, help="來源 project")
-    p_migrate.add_argument("--to", dest="to_project", required=True, help="目標 project")
+    p_migrate.add_argument(
+        "--from", dest="from_project", required=True, help="Source project"
+    )
+    p_migrate.add_argument(
+        "--to", dest="to_project", required=True, help="Target project"
+    )
     p_migrate.add_argument("--dry-run", action="store_true")
-    p_migrate.add_argument("--force", action="store_true", help="忽略部分安全檢查")
+    p_migrate.add_argument(
+        "--force", action="store_true", help="Ignore some safety checks"
+    )
 
     # install-hooks
     p_install_hooks = sub.add_parser(
         "install-hooks",
-        help="安裝 git post-commit hook，讓 commit 自動把摘要寫回 RemaGraph",
+        help="Install a git post-commit hook that auto-writes commit summaries to RemaGraph",
         description=(
-            "安裝 git post-commit hook，讓 commit 自動把摘要寫回 RemaGraph，"
-            "不需要手動從其他專案複製檔案。預設安裝到目前 repo（自動辨識"
-            "worktree、core.hooksPath），--global 則額外設定 git 原生的 "
-            "init.templateDir，讓『之後』新建立的 repo 自動帶有此 hook —— "
-            "但有兩個限制：(1) 只影響本指令執行後新建立的 repo，既有 repo "
-            "仍須各自執行一次非 --global 的 install-hooks；(2) 不建議在 CI "
-            "環境中使用 --global（CI runner 的 $HOME 可能是暫時性或跨 "
-            "job/repo 共用，尤其自架 runner，有安全疑慮 —— CI pipeline 應"
-            "改為每個 repo、每個 job 各自明確執行一次非 --global 的 "
-            "install-hooks）。"
+            "Install a git post-commit hook that automatically writes commit "
+            "summaries back to RemaGraph, without manually copying files from "
+            "another project. By default installs into the current repo "
+            "(auto-detects worktrees and core.hooksPath). --global additionally "
+            "sets git's native init.templateDir so that repos created "
+            "afterwards automatically get this hook -- but with two "
+            "limitations: (1) it only affects repos created after this "
+            "command runs; existing repos still need to run a non-global "
+            "install-hooks individually; (2) using --global in CI is not "
+            "recommended (a CI runner's $HOME may be ephemeral or shared "
+            "across jobs/repos, especially on self-hosted runners, which is a "
+            "security concern -- CI pipelines should instead run a non-global "
+            "install-hooks explicitly for each repo/job)."
         ),
     )
     p_install_hooks.add_argument(
@@ -620,14 +674,18 @@ def build_parser() -> argparse.ArgumentParser:
         dest="global_install",
         action="store_true",
         help=(
-            "額外設定 git 原生 init.templateDir，讓之後新建立的 repo 自動帶有此 "
-            "hook（見上方 description 的兩個限制）"
+            "Additionally set git's native init.templateDir so repos created "
+            "afterwards automatically get this hook (see the two limitations "
+            "in the description above)"
         ),
     )
     p_install_hooks.add_argument(
         "--force",
         action="store_true",
-        help="覆蓋既有非 remagraph 管理的 hook 檔案或符號連結（會先備份再覆蓋）",
+        help=(
+            "Overwrite an existing hook file or symlink not managed by "
+            "remagraph (backs it up first)"
+        ),
     )
 
     return parser
@@ -642,7 +700,8 @@ def main(argv: list[str] | None = None) -> None:
             proj = getattr(args, "project", None) or os.environ.get("REMAGRAPH_PROJECT", "default")
             if proj == "default":
                 print(
-                    "WARNING: 預設共享 state dir + default project，建議 init --project",
+                    "WARNING: using the default shared state dir with the "
+                    "default project; consider running init --project",
                     file=sys.stderr,
                 )
         try:
@@ -721,20 +780,20 @@ def cmd_maintain(args: argparse.Namespace) -> None:
         os.environ["REMAGRAPH_STATE_DIR"] = str(state_dir)
         os.environ["REMAGRAPH_PROJECT"] = project
     except Exception as e:
-        print(f"ERROR: 安全閥門阻擋 - {e}", file=sys.stderr)
+        print(f"ERROR: blocked by the safety valve - {e}", file=sys.stderr)
         sys.exit(1)
 
     if args.dry_run:
-        print("[dry-run] 將執行：WAL/FTS/prune/vacuum/analyze")
+        print("[dry-run] would run: WAL/FTS/prune/vacuum/analyze")
         return
 
     policy = MaintenancePolicy()
     try:
         stats = run_maintenance(policy, project, force=args.force)
-        print("維護完成：")
+        print("Maintenance complete:")
         _print_json(stats)
     except Exception as e:
-        print(f"ERROR: 維護失敗 - {e}", file=sys.stderr)
+        print(f"ERROR: maintenance failed - {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -749,20 +808,20 @@ def cmd_migrate_project(args: argparse.Namespace) -> None:
     print(f"=== RemaGraph migrate-project: {from_proj} → {to_proj} ===")
 
     if from_proj == to_proj:
-        print("ERROR: from 與 to 不能相同", file=sys.stderr)
+        print("ERROR: --from and --to cannot be the same", file=sys.stderr)
         sys.exit(1)
 
-    # 驗證目標 project 的 state_dir
+    # Validate the target project's state_dir
     try:
         to_state = safety_validate_project(to_proj, require_env_match=False)
         os.environ["REMAGRAPH_STATE_DIR"] = str(to_state)
         os.environ["REMAGRAPH_PROJECT"] = to_proj
     except Exception as e:
-        print(f"ERROR: 目標 project 驗證失敗 - {e}", file=sys.stderr)
+        print(f"ERROR: target project validation failed - {e}", file=sys.stderr)
         sys.exit(1)
 
     if args.dry_run:
-        print(f"[dry-run] 從 {from_proj} 遷移到 {to_proj} (target: {to_state})")
+        print(f"[dry-run] migrating from {from_proj} to {to_proj} (target: {to_state})")
         return
 
     # 實際遷移邏輯（簡化版，使用 sqlite 直接操作）
@@ -770,7 +829,7 @@ def cmd_migrate_project(args: argparse.Namespace) -> None:
     target_db = to_state / "remagraph.db"
 
     if not default_db.exists():
-        print("ERROR: default DB 不存在", file=sys.stderr)
+        print("ERROR: default DB does not exist", file=sys.stderr)
         sys.exit(1)
 
     conn_src = sqlite3.connect(str(default_db))
@@ -788,7 +847,7 @@ def cmd_migrate_project(args: argparse.Namespace) -> None:
         (f"%{to_proj}%", f"%{to_proj}%", f"%{to_proj}%", f"%{to_proj}%"),
     ).fetchall()
 
-    print(f"找到 {len(rows)} 筆待遷移")
+    print(f"Found {len(rows)} record(s) to migrate")
 
     migrated = 0
     for row in rows:
@@ -820,9 +879,12 @@ def cmd_migrate_project(args: argparse.Namespace) -> None:
     conn_tgt.close()
     conn_src.close()
 
-    print(f"遷移完成：{migrated} 筆")
+    print(f"Migration complete: {migrated} record(s)")
     if not args.force:
-        print("建議：執行 remagraph maintain --project {to_proj} --force 清理目標 DB")
+        print(
+            f"Suggestion: run 'remagraph maintain --project {to_proj} --force' "
+            "to clean up the target DB"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -846,7 +908,7 @@ def cmd_link(args: argparse.Namespace) -> None:
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
-    print(f"已宣告關聯：{args.from_project} --{args.relation}--> {args.to_project}")
+    print(f"Relation declared: {args.from_project} --{args.relation}--> {args.to_project}")
 
 
 # ---------------------------------------------------------------------------
@@ -875,7 +937,7 @@ def cmd_install_hooks(args: argparse.Namespace) -> None:
 
     for message in outcome.messages:
         print(message)
-    print(f"post-commit hook 安裝路徑：{outcome.path}")
+    print(f"post-commit hook install path: {outcome.path}")
 
 
 if __name__ == "__main__":
