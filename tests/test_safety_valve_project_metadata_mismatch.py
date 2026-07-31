@@ -54,6 +54,7 @@ from remagraph.maintenance import SafetyValveError
 def fake_home(tmp_path, monkeypatch):
     monkeypatch.delenv("REMAGRAPH_STATE_DIR", raising=False)
     monkeypatch.delenv("REMAGRAPH_PROJECT", raising=False)
+    monkeypatch.delenv("REMAGRAPH_RESTRICTED_PREFIXES", raising=False)
     home = tmp_path / "fake-home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -123,7 +124,8 @@ def test_different_project_reusing_another_projects_directory_is_rejected(
 
 def test_metadata_mismatch_violation_recorded_with_distinct_reason(tmp_path, monkeypatch):
     """違規記錄使用新的、可區分的 reason 字串（而非既有的
-    missing_remagraph_state_dir / state_dir_mismatch / herdr_using_default_db
+    missing_remagraph_state_dir / state_dir_mismatch /
+    restricted_prefix_using_default_db
     任何一個），讓稽核記錄可明確辨識是哪一種違規。"""
     state_dir = tmp_path / "proj-a-dir"
     _write_project_json(state_dir, "A")

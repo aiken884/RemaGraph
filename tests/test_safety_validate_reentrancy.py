@@ -14,9 +14,10 @@ Root cause (confirmed by direct reproduction, see task write-up):
                 -> same underlying condition still true -> fails again with R
                 -> _record_violation(P, R) AGAIN -> ... unbounded
 
-A live repro (herdr-* project_id against a state dir whose basename is
-"remagraph", fully isolated under tmp_path -- never the real
-~/.local/state/remagraph*) showed this writes ~330 duplicate
+A live repro (a project_id matching a REMAGRAPH_RESTRICTED_PREFIXES entry,
+against a state dir whose basename is "remagraph", fully isolated under
+tmp_path -- never the real ~/.local/state/remagraph*) showed this writes
+~330 duplicate
 "safety_violation" audit entries for a single real violation, and the
 discovered_constraint memory record this code path exists to write is
 *never* actually persisted (process_store always fails validation before
@@ -93,17 +94,21 @@ def _clean_env(monkeypatch):
     # Never let a leftover REMAGRAPH_* env var from the running shell leak in.
     monkeypatch.delenv("REMAGRAPH_STATE_DIR", raising=False)
     monkeypatch.delenv("REMAGRAPH_PROJECT", raising=False)
+    monkeypatch.delenv("REMAGRAPH_RESTRICTED_PREFIXES", raising=False)
 
 
 @pytest.fixture
 def isolated_state_dir(tmp_path, monkeypatch):
-    """Isolated fake state dir whose *basename* is "remagraph" -- this is what
-    makes safety_validate_project's herdr_using_default_db branch fire for a
-    herdr-* project_id, without ever touching the real default state dir
-    (REMAGRAPH_STATE_DIR is monkeypatched, scoped to this test only).
+    """Isolated fake state dir whose *basename* is "remagraph" -- combined with
+    REMAGRAPH_RESTRICTED_PREFIXES below, this is what makes
+    safety_validate_project's restricted_prefix_using_default_db branch fire
+    for a project_id matching one of the configured restricted prefixes,
+    without ever touching the real default state dir (REMAGRAPH_STATE_DIR is
+    monkeypatched, scoped to this test only).
     """
     state_dir = tmp_path / "state" / "remagraph"
     monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("REMAGRAPH_RESTRICTED_PREFIXES", "blocked-")
     return state_dir
 
 
@@ -113,15 +118,16 @@ def isolated_state_dir(tmp_path, monkeypatch):
 
 
 def test_safety_validate_project_violation_logs_exactly_once_no_recursion(isolated_state_dir):
-    """A herdr-* project_id against the default DB (basename "remagraph")
-    triggers the herdr_using_default_db violation. This must raise exactly
+    """A project_id matching a configured REMAGRAPH_RESTRICTED_PREFIXES entry,
+    against the default DB (basename "remagraph"), triggers the
+    restricted_prefix_using_default_db violation. This must raise exactly
     one SafetyValveError -- never RecursionError, never hang -- and must
     write exactly one safety_violation audit event, and must actually
     succeed in writing the discovered_constraint memory record once (proving
     the bypass only skips the redundant re-validation, not the intended
     record-what-happened functionality).
     """
-    project_id = "herdr-reentrancy-test"
+    project_id = "blocked-reentrancy-test"
 
     with pytest.raises(SafetyValveError):
         safety_validate_project(project_id)
@@ -134,11 +140,27 @@ def test_safety_validate_project_violation_logs_exactly_once_no_recursion(isolat
         "this indicates the process_store reentrancy loop is firing repeatedly"
     )
     assert violations[0]["project_id"] == project_id
-    assert violations[0]["reason"] == "herdr_using_default_db"
+    assert violations[0]["reason"] == "restricted_prefix_using_default_db"
 
     assert _discovered_constraint_count(isolated_state_dir, project_id) == 1, (
         "discovered_constraint memory record must be written exactly once"
     )
+
+
+def test_safety_validate_project_default_env_unset_does_not_block_any_prefix(
+    tmp_path, monkeypatch
+):
+    """新增的預設行為：REMAGRAPH_RESTRICTED_PREFIXES 未設定時，即使 project_id
+    帶有一個「看起來像」受限前綴的字串（例如 "blocked-"），且 state dir
+    basename 為 "remagraph"，也不會觸發 restricted_prefix_using_default_db
+    這條規則 -- 只有明確設定 REMAGRAPH_RESTRICTED_PREFIXES 才會生效。
+    """
+    state_dir = tmp_path / "state" / "remagraph"
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(state_dir))
+    monkeypatch.delenv("REMAGRAPH_RESTRICTED_PREFIXES", raising=False)
+
+    resolved = safety_validate_project("blocked-reentrancy-test-default")
+    assert resolved == state_dir.resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +175,7 @@ def test_process_store_violating_project_id_raises_once_not_recursively(isolated
     raise SafetyValveError (security not weakened for external callers) --
     but must not recurse hundreds of times through _record_violation first.
     """
-    project_id = "herdr-reentrancy-test-2"
+    project_id = "blocked-reentrancy-test-2"
     conn = sqlite3.connect(":memory:", isolation_level=None)
     conn.row_factory = sqlite3.Row
     db_mod._init_schema(conn)
@@ -186,7 +208,7 @@ def test_process_store_violating_project_id_raises_once_not_recursively(isolated
 
 
 def test_db_connect_explicit_project_id_violation_does_not_recurse(isolated_state_dir):
-    project_id = "herdr-reentrancy-test-3"
+    project_id = "blocked-reentrancy-test-3"
 
     with pytest.raises(SafetyValveError):
         db_mod.connect(project_id=project_id)
@@ -205,7 +227,7 @@ def test_db_connect_env_derived_backward_compat_violation_does_not_recurse(
     REMAGRAPH_PROJECT set in the environment to a non-'default' value (the
     normal per-project deployment pattern via each project's env.sh).
     """
-    project_id = "herdr-reentrancy-test-4"
+    project_id = "blocked-reentrancy-test-4"
     monkeypatch.setenv("REMAGRAPH_PROJECT", project_id)
 
     with pytest.raises(SafetyValveError):
@@ -238,7 +260,7 @@ def test_process_store_default_still_enforces_safety_valve_for_external_callers(
     db_mod._init_schema(conn)
 
     req = StoreRequest(
-        project_id="herdr-reentrancy-test-5",
+        project_id="blocked-reentrancy-test-5",
         task_id="task-002",
         agent_id="test-agent",
         kind="task_handoff",

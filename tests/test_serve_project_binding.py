@@ -57,6 +57,7 @@ def _reset_server_state():
 def setup_test_env(tmp_path, monkeypatch):
     monkeypatch.delenv("REMAGRAPH_STATE_DIR", raising=False)
     monkeypatch.delenv("REMAGRAPH_PROJECT", raising=False)
+    monkeypatch.delenv("REMAGRAPH_RESTRICTED_PREFIXES", raising=False)
     _reset_server_state()
     yield
     _reset_server_state()
@@ -148,8 +149,10 @@ def test_run_serve_explicit_flag_takes_precedence_over_env(tmp_path, monkeypatch
 
 
 # ---------------------------------------------------------------------------
-# 3b. 啟動時安全閥門失敗（例如 herdr-* 對 basename 'remagraph' 的目錄）→
-#     _run_serve 快速失敗，MCP 迴圈不啟動（沿用既有 safety_validate_project）
+# 3b. 啟動時安全閥門失敗（例如受限前綴 project 對 basename 'remagraph' 的
+#     目錄，見 REMAGRAPH_RESTRICTED_PREFIXES）→ _run_serve 快速失敗，MCP
+#     迴圈不啟動（沿用既有 safety_validate_project）；未設定該環境變數時，
+#     同樣的 project_id 不會被這條規則攔下（新增的預設行為）。
 # ---------------------------------------------------------------------------
 
 
@@ -158,6 +161,7 @@ def test_run_serve_fails_fast_when_safety_valve_rejects_at_startup(
 ):
     state_dir = tmp_path / "state" / "remagraph"  # basename 'remagraph'
     monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("REMAGRAPH_RESTRICTED_PREFIXES", "herdr-,acme-")
 
     with pytest.raises(SystemExit) as ei:
         server._run_serve(["--project", "herdr-foo"])
@@ -166,7 +170,26 @@ def test_run_serve_fails_fast_when_safety_valve_rejects_at_startup(
     no_op_mcp_run.assert_not_called()
     assert server._conn is None
     err = capsys.readouterr().err
-    assert "herdr" in err
+    assert "REMAGRAPH_RESTRICTED_PREFIXES" in err
+
+
+def test_run_serve_succeeds_when_restricted_prefixes_env_unset(
+    tmp_path, monkeypatch, no_op_mcp_run
+):
+    """新增的預設行為：REMAGRAPH_RESTRICTED_PREFIXES 未設定時，即使
+    project_id 帶有一個「看起來像」受限前綴的字串，且 state dir basename 為
+    'remagraph'，safety_validate_project 也不會攔下它 -- serve 應能正常
+    啟動並綁定成功。
+    """
+    state_dir = tmp_path / "state" / "remagraph"  # basename 'remagraph'
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(state_dir))
+    monkeypatch.delenv("REMAGRAPH_RESTRICTED_PREFIXES", raising=False)
+
+    server._run_serve(["--project", "herdr-foo"])
+
+    assert server._bound_project_id == "herdr-foo"
+    assert server._conn is not None
+    no_op_mcp_run.assert_called_once_with(transport="stdio")
 
 
 def test_run_serve_prints_mismatch_warning_before_startup_failure(

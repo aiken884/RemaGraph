@@ -558,6 +558,8 @@ Every memory can additionally carry multiple "namespaced" labels (the `memory_la
 
 This safety valve only takes effect when the caller explicitly passes `project_id` into `connect()`; the CLI subcommands and `remagraph serve` now both do so (before the 2026-07-25 fix, both called `_db.connect()` with zero arguments, so the safety valve was never triggered at all — which file actually got connected purely depended on whatever the process's environment happened to be at that moment. This was the root cause of an actual production incident: one project's `serve` process inherited another project's environment variables and silently wrote its data into the latter's real database.)
 
+`safety_validate_project` also rejects a `project_id` matching a configurable, deployment-defined restricted prefix from ever using the default DB: the `REMAGRAPH_RESTRICTED_PREFIXES` environment variable (comma-separated, e.g. `"team-a-,team-b-"`, empty by default) lets any deployment decide which `project_id` naming conventions must never resolve to the default state dir, without RemaGraph itself hardcoding any specific project's name or convention. A match raises `SafetyValveError` and logs a `restricted_prefix_using_default_db` audit violation. When the environment variable is unset (the default), no prefix is restricted.
+
 `remagraph serve`'s project-binding model (PPLX architecture review consensus, see the pending-decisions record below): **a single `serve` process is strictly bound to a single project, and fails fast at startup** — it is not "the first call determines the binding":
 - At startup, either `--project <id>` or the `REMAGRAPH_PROJECT` environment variable must be provided; if both are absent, it exits non-zero immediately, without entering the MCP stdio loop
 - On a successful binding, it prints a diagnostic message (the actually-bound `project_id` and the resolved state_dir); if the connection is detected to be in read-only degraded mode, it also warns upfront
@@ -1263,6 +1265,8 @@ RemaGraph 每個 `project_id` 對應完全獨立的 state_dir / SQLite 檔案（
 `project_id` 本身只是資料列上的標籤欄位，**真正決定連到哪個實體 SQLite 檔案的是 `REMAGRAPH_STATE_DIR`/`REMAGRAPH_PROJECT` 環境變數**（或明確傳入 `connect()` 的 `state_dir`）。`db.connect(project_id=...)` 內建 `maintenance.safety_validate_project(project_id)` 這道安全閥：透過 `resolve_project_state_dir(project_id)` 算出這個 `project_id` 應該對應的權威 state_dir，並讀取該目錄下的 `project.json`（`db.validate_project_metadata()`）確認其記錄的 `project_id` 與目前要求的一致——不一致（該目錄先前已合法用於另一個 project）一律 `SafetyValveError`，記一筆 `project_metadata_mismatch` 違規稽核，在任何寫入發生之前就擋下。
 
 這道安全閥門只有在呼叫端把 `project_id` 明確傳進 `connect()` 時才會生效；CLI 各子命令與 `remagraph serve` 現在都會這麼做（2026-07-25 修復前，兩者皆以零參數呼叫 `_db.connect()`，安全閥完全不會被觸發，實際連到哪個檔案純看 process 環境當下剛好是什麼——這正是一次真實生產事故的根因：一個專案的 `serve` process 繼承了另一個專案的環境變數，卻悄悄把資料寫進了後者的真實資料庫）。
+
+`safety_validate_project` 另外會拒絕「符合部署方自訂受限前綴」的 `project_id` 使用 default DB：`REMAGRAPH_RESTRICTED_PREFIXES` 環境變數（逗號分隔，例如 `"team-a-,team-b-"`，預設空字串）讓任何部署自行決定哪些 `project_id` 命名慣例不該解析到 default state dir，RemaGraph 本身不寫死任何具體專案的名稱或命名慣例。符合前綴時會拋出 `SafetyValveError`，並記一筆 `restricted_prefix_using_default_db` 違規稽核；未設定該環境變數時（預設），不限制任何前綴。
 
 `remagraph serve` 的專案綁定模型（PPLX 架構審查共識，見下方待決策記錄）：**單一 serve process 嚴格綁定單一 project，且在啟動時就 fail-fast**，不是「第一次呼叫決定綁定」：
 - 啟動時必須提供 `--project <id>` 或 `REMAGRAPH_PROJECT` 環境變數其中之一，兩者皆缺席直接非零 exit，不進入 MCP stdio 迴圈

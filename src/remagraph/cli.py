@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CLI subcommands for headless agent integration (herdr bridge).
+"""CLI subcommands for headless/automated agent integration.
 
 Usage:
     remagraph init [--project NAME]
@@ -292,8 +292,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     print("Or use the built-in one-shot command (recommended):")
     print(f"  remagraph auto --project {project} --task-id ... ")
     print("")
-    print("[Extra tips for herdr Bridge users]")
-    print("  When dispatching from the command tower, this is the recommended usage:")
+    print("[Extra tip if dispatched by an automated task-orchestration system]")
+    print("  When dispatching from such a system, this is the recommended usage:")
     print(f"  REMAGRAPH_PROJECT={project} TASK_ID=... remagraph auto --project {project} ...")
     print("  Or check memory before dispatching:")
     print(f"  remagraph auto --project {project} --recall-only ...")

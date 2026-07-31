@@ -514,7 +514,7 @@ def migrate_project_memories(
        _resolve_migration_source_state_dir）。**注意：這裡只透過
        db.get_registered_state_dir()/db.get_state_dir() 查出 state_dir 實際
        路徑，並沒有像 to_project 那樣經過完整的 safety_validate_project()
-       （herdr-* 規則、project.json metadata 一致性等檢查）。這是刻意的
+       （受限前綴規則、project.json metadata 一致性等檢查）。這是刻意的
        不對稱設計**——遷移的語意是『把資料從一個已知來源搬進一個受驗證合法
        的目標』，來源本身是否也要通過同一套安全閥門，交由呼叫端（CLI/MCP
        server）依情境自行決定是否要在呼叫本函式之前額外驗證，不要誤以為
@@ -537,7 +537,7 @@ def migrate_project_memories(
     Raises:
         ValueError: from_project 與 to_project 相同。
         remagraph.maintenance.SafetyValveError: to_project 未通過既有安全
-            閥門驗證（herdr-* 規則、project.json metadata 不一致等）。
+            閥門驗證（受限前綴規則、project.json metadata 不一致等）。
         ProjectNotRegisteredError: from_project 從未被登記過，找不到其
             state_dir。
         FileNotFoundError: from_project 的 state_dir 已解析出來，但底下

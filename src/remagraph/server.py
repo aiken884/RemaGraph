@@ -589,7 +589,7 @@ def remagraph_maintain(
     description=(
         "Migrate memories from a source project to a target project's "
         "separate DB, and mark them invalidated in the source. For one-time "
-        "migrations only (e.g. default -> herdr-bridge). Performs a real "
+        "migrations only (e.g. default -> a dedicated per-project DB). Performs a real "
         "migration (not a stub): reads from_project's registered state_dir "
         "(resolved via the shared project registry), heuristically matches "
         "records that look like they belong to to_project, copies them into "

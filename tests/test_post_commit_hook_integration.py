@@ -2,7 +2,7 @@
 """驗證由 `remagraph install-hooks` 安裝的 post-commit hook：commit 完成後
 應自動把摘要寫回 RemaGraph。
 
-移植自另一個專案（herdr-bridge）既有、已驗證過的 5 個整合測試情境，改為
+移植自另一個專案既有、已驗證過的 5 個整合測試情境，改為
 透過新的 `remagraph install-hooks` 子命令安裝 hook（而不是像原本測試那樣手動
 複製 hook 檔案），驗證安裝出來的 hook 行為與原本手動複製版本完全一致。
 
@@ -139,7 +139,7 @@ def test_post_commit_hook_project_id_is_worktree_safe(tmp_path, base_env):
     這裡刻意不在 worktree 目錄下重複執行 install-hooks，驗證這個共用承諾
     本身成立。
     """
-    main_repo = tmp_path / "herdr-bridge"
+    main_repo = tmp_path / "main-repo"
     _init_repo(main_repo, base_env, name="Tower", email="tower@example.com")
     _install_hooks(main_repo, base_env)
     init_commit = _run(
@@ -163,11 +163,11 @@ def test_post_commit_hook_project_id_is_worktree_safe(tmp_path, base_env):
     short_hash = _run(
         ["git", "rev-parse", "--short", "HEAD"], worktree_dir, base_env
     ).stdout.strip()
-    expected_task_id = f"herdr-bridge-commit-{short_hash}"
+    expected_task_id = f"main-repo-commit-{short_hash}"
 
-    results = _search("herdr-bridge", expected_task_id, base_env)
-    assert len(results) == 1, f"預期在主 repo project_id 'herdr-bridge' 下找到記錄: {results}"
-    assert results[0]["project_id"] == "herdr-bridge"
+    results = _search("main-repo", expected_task_id, base_env)
+    assert len(results) == 1, f"預期在主 repo project_id 'main-repo' 下找到記錄: {results}"
+    assert results[0]["project_id"] == "main-repo"
 
     wrong_project_results = _search(
         "some-unrelated-worktree-dirname", expected_task_id, base_env

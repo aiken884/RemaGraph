@@ -4,11 +4,13 @@
 嚴格遵守：
 - per-project state_dir 隔離
 - project_id 強制 + 所有操作過濾
-- 安全閥門阻擋不合規（herdr-* 不得用 default DB）
+- 安全閥門阻擋不合規（受限前綴專案不得用 default DB，前綴清單由部署方透過
+  REMAGRAPH_RESTRICTED_PREFIXES 環境變數自行設定，預設不限制任何前綴）
 - 最小干擾 + 可審計
 - 與 D01/D02/D04/arbitration/governance 對齊
 
-所有 herdr-bridge 相關啟動點必須先呼叫 _ensure_remagraph_project(project) 並通過 safety_validate。
+所有可能預先設定 REMAGRAPH_STATE_DIR 的外部呼叫端啟動點，慣例上應先完成
+專案綁定並通過 safety_validate。
 """
 
 from __future__ import annotations
@@ -56,7 +58,7 @@ def resolve_project_state_dir(project_id: str) -> pathlib.Path:
     下方解析邏輯與優先順序維持原樣未變動，僅重構為單一回傳點以承載上述
     登記副作用。
     """
-    # 優先使用當前 env（herdr-bridge _ensure 會設定）
+    # 優先使用當前 env（與外部呼叫端可能預先設定 REMAGRAPH_STATE_DIR 的慣例一致）
     if env_dir := os.environ.get("REMAGRAPH_STATE_DIR"):
         resolved = pathlib.Path(env_dir).resolve()
     else:
@@ -65,7 +67,7 @@ def resolve_project_state_dir(project_id: str) -> pathlib.Path:
         if meta.get("project_id") == project_id:
             resolved = get_state_dir().resolve()
         else:
-            # 預設規則（與 herdr-bridge _ensure 一致）
+            # 預設規則（與外部呼叫端可能預先設定 REMAGRAPH_STATE_DIR 的慣例一致）
             safe = (
                 "".join(c if c.isalnum() or c in "-_" else "-" for c in project_id) or "default"
             )
@@ -86,7 +88,7 @@ class SafetyValveError(RuntimeError):
 def safety_validate_project(project_id: str, *, require_env_match: bool = True) -> pathlib.Path:
     """單一權威安全閥門。
     - 驗證 project_id 與 state_dir 完全對映
-    - herdr-* 專案嚴禁使用 default DB
+    - 受限前綴的專案（見 REMAGRAPH_RESTRICTED_PREFIXES）嚴禁使用 default DB
     - 違規時寫 audit + discovered_constraint 並 raise
     """
     configured = resolve_project_state_dir(project_id)
@@ -97,7 +99,7 @@ def safety_validate_project(project_id: str, *, require_env_match: bool = True) 
         if not env_dir:
             _record_violation(project_id, "missing_remagraph_state_dir")
             raise SafetyValveError(
-                "REMAGRAPH_STATE_DIR is not set; herdr-* projects must set a correct state_dir"
+                "REMAGRAPH_STATE_DIR is not set; the project must set a correct state_dir"
             )
         if env_dir != configured:
             _record_violation(project_id, "state_dir_mismatch")
@@ -132,10 +134,24 @@ def safety_validate_project(project_id: str, *, require_env_match: bool = True) 
             f"state_dir={configured}: {e}"
         ) from e
 
-    if project_id.startswith("herdr-") and configured.name == "remagraph":
-        _record_violation(project_id, "herdr_using_default_db")
+    # 受限前綴清單由部署方透過 REMAGRAPH_RESTRICTED_PREFIXES（逗號分隔）自行
+    # 設定，例如 "team-a-,team-b-"；預設值是空字串，代表預設不限制任何前綴。
+    # RemaGraph 本身不寫死任何具體專案的命名慣例——是否有專案前綴不該使用
+    # default DB，完全由部署端自行決定。
+    restricted_prefixes = tuple(
+        p.strip()
+        for p in os.environ.get("REMAGRAPH_RESTRICTED_PREFIXES", "").split(",")
+        if p.strip()
+    )
+    if (
+        restricted_prefixes
+        and project_id.startswith(restricted_prefixes)
+        and configured.name == "remagraph"
+    ):
+        _record_violation(project_id, "restricted_prefix_using_default_db")
         raise SafetyValveError(
-            "herdr-* projects must not use the default DB; a separate state_dir is required"
+            "projects with a prefix listed in REMAGRAPH_RESTRICTED_PREFIXES must not use "
+            "the default DB; a separate state_dir is required"
         )
 
     return configured
@@ -199,7 +215,7 @@ def _record_violation(project_id: str, reason: str) -> None:
     # 的 append_event 稽核記錄（寫入 audit-*.jsonl 純文字日誌檔，不是
     # memories SQLite 資料庫本身），略過下方的 memory 寫入，不觸碰該資料庫。
     # 其餘既有的兩種違規原因（missing_remagraph_state_dir /
-    # herdr_using_default_db）解析出的 state_dir 在絕大多數情況下要嘛是
+    # restricted_prefix_using_default_db）解析出的 state_dir 在絕大多數情況下要嘛是
     # project_id 自己專屬的全新目錄、要嘛是尚未被任何其他 project 合法佔用的
     # 目錄，這裡的檢查對它們是不影響既有行為的 no-op（見本函式呼叫處測試）。
     try:

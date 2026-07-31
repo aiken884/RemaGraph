@@ -145,6 +145,7 @@ Point any MCP client at RemaGraph. Example configs for common clients follow.
 | `REMAGRAPH_PROJECT` | The current project binding (`remagraph serve` requires either this env var or `--project` at startup) | none |
 | `REMAGRAPH_FANOUT_CAP` | Max number of "other" project database connections `search --cross-project-label`/`--include-related` will open in a single call (`--fanout-cap` takes precedence over this env var) | `50` |
 | `REMAGRAPH_FANOUT_HARD_CAP` | Hard ceiling for the cap above, only meant for explicit opt-in increases (rarely needs adjusting) | `200` |
+| `REMAGRAPH_RESTRICTED_PREFIXES` | Comma-separated list of `project_id` prefixes (e.g. `"team-a-,team-b-"`) that a deployment wants to forbid from ever using the default DB; the safety valve raises `SafetyValveError` if a matching project_id resolves to the default state dir. Empty by default — RemaGraph imposes no naming convention of its own | none (no prefix restricted) |
 
 Directories are created automatically when missing (mode `0700`); DB files are created at mode `0600`. Paths are checked against a security denylist that rejects system directories.
 
@@ -479,6 +480,7 @@ remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
 | `REMAGRAPH_PROJECT` | 目前 project 綁定（`remagraph serve` 啟動時必須提供此環境變數或 `--project` 其中之一） | 無 |
 | `REMAGRAPH_FANOUT_CAP` | `search --cross-project-label`/`--include-related` 單次最多開幾個「其他」專案資料庫連線（`--fanout-cap` 優先於此環境變數） | `50` |
 | `REMAGRAPH_FANOUT_HARD_CAP` | 上述 cap 的硬性上限，僅供明確 opt-in 提高（一般不需調整） | `200` |
+| `REMAGRAPH_RESTRICTED_PREFIXES` | 逗號分隔的 `project_id` 前綴清單（例如 `"team-a-,team-b-"`），列出部署方認為不該使用 default DB 的專案命名前綴；符合前綴且解析出的 state_dir 是 default DB 時，安全閥門會拋出 `SafetyValveError`。預設空字串，RemaGraph 本身不強加任何命名慣例 | 無（不限制任何前綴） |
 
 目錄不存在時自動建立（權限 `0700`），DB 檔案權限 `0600`。路徑已加入安全性檢查（禁止系統目錄）。
 

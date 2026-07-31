@@ -24,8 +24,10 @@ _db.connect() 時從未傳入 project_id —— CLI 子命令（store/search/sta
    驗證的是 memories 表是否存在（不存在代表沒有任何完整的 db.connect()/
    process_store 曾經對這個檔案執行過 schema 初始化或寫入），而不是整個
    db 檔案是否存在。
-2. herdr-* project 搭配 basename 為 'remagraph' 的 state dir（既有的
-   herdr_using_default_db 檢查）現在也能經由 CLI 觸發。
+2. 設定 REMAGRAPH_RESTRICTED_PREFIXES 後，符合受限前綴的 project 搭配
+   basename 為 'remagraph' 的 state dir（既有的
+   restricted_prefix_using_default_db 檢查）現在也能經由 CLI 觸發；未設定
+   該環境變數時，同樣的 project_id 不會被這條規則攔下（新增的預設行為）。
 3. 完全不指定 project（沿用既有的『default』回退語意）時，行為完全不受
    影響 —— 這是 db.connect() 對 REMAGRAPH_PROJECT env 相容分支既有的
    'default 例外'，本次修復刻意延續，避免大量既有測試/既有合法用法出現
@@ -61,6 +63,7 @@ from remagraph.maintenance import SafetyValveError
 def fake_home(tmp_path, monkeypatch):
     monkeypatch.delenv("REMAGRAPH_STATE_DIR", raising=False)
     monkeypatch.delenv("REMAGRAPH_PROJECT", raising=False)
+    monkeypatch.delenv("REMAGRAPH_RESTRICTED_PREFIXES", raising=False)
     home = tmp_path / "fake-home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -148,23 +151,44 @@ def test_cmd_status_rejects_missing_state_dir_for_explicit_project(fake_home, ca
 
 
 # ---------------------------------------------------------------------------
-# 2. herdr-* project + basename 'remagraph' 的 state dir → 現在也能經由
-#    CLI 觸發既有的 herdr_using_default_db 檢查
+# 2. 設定 REMAGRAPH_RESTRICTED_PREFIXES 後，受限前綴 project + basename
+#    'remagraph' 的 state dir → 現在也能經由 CLI 觸發既有的
+#    restricted_prefix_using_default_db 檢查；未設定該環境變數時，同樣的
+#    project_id 不會被這條規則攔下（新增的預設行為）。
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_store_rejects_herdr_project_against_default_named_dir(
+def test_cmd_store_rejects_restricted_prefix_project_against_default_named_dir(
     tmp_path, fake_home, monkeypatch, capsys
 ):
     state_dir = tmp_path / "state" / "remagraph"  # basename 就是 'remagraph'
     monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("REMAGRAPH_RESTRICTED_PREFIXES", "herdr-,acme-")
 
     with pytest.raises(SystemExit) as ei:
         cli_mod.main(_store_args("herdr-foo", "herdr-foo-task-001"))
     assert ei.value.code == 1
 
     err = capsys.readouterr().err
-    assert "herdr" in err and ("default DB" in err or "獨立 state_dir" in err)
+    assert "REMAGRAPH_RESTRICTED_PREFIXES" in err and (
+        "default DB" in err or "獨立 state_dir" in err
+    )
+
+
+def test_cmd_store_allows_would_be_restricted_prefix_project_when_env_unset(
+    tmp_path, fake_home, monkeypatch, capsys
+):
+    """新增的預設行為：REMAGRAPH_RESTRICTED_PREFIXES 未設定時，即使
+    project_id 帶有 'herdr-' 這種前綴、且 state dir basename 為 'remagraph'，
+    也不會被這條規則攔下——沒有設定就不限制任何前綴。"""
+    state_dir = tmp_path / "state" / "remagraph"  # basename 就是 'remagraph'
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(state_dir))
+    monkeypatch.delenv("REMAGRAPH_RESTRICTED_PREFIXES", raising=False)
+
+    cli_mod.main(_store_args("herdr-foo", "herdr-foo-task-002"))
+    out = capsys.readouterr().out.strip()
+    payload = json.loads(out)
+    assert payload["status"] == "stored"
 
 
 # ---------------------------------------------------------------------------
