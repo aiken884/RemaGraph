@@ -728,7 +728,7 @@ def cmd_maintain(args: argparse.Namespace) -> None:
         print("[dry-run] 將執行：WAL/FTS/prune/vacuum/analyze")
         return
 
-    policy = MaintenancePolicy()  # type: ignore[no-untyped-call]
+    policy = MaintenancePolicy()
     try:
         stats = run_maintenance(policy, project, force=args.force)
         print("維護完成：")
