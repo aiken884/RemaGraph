@@ -225,9 +225,10 @@ def connect(
             state_dir = resolved
     else:
         # 相容舊呼叫，但記錄警告（未來可移除）
-        if os.environ.get("REMAGRAPH_PROJECT", "default") != "default":
+        env_project_id = os.environ.get("REMAGRAPH_PROJECT", "default")
+        if env_project_id != "default":
             # 若 env 有 project 但未傳，嘗試驗證
-            project_id = os.environ.get("REMAGRAPH_PROJECT")
+            project_id = env_project_id
             if not skip_safety_check:
                 resolved = safety_validate_project(project_id)
                 state_dir = resolved
