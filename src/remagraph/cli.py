@@ -591,7 +591,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Only recall prior memories; do not run a command or auto-store "
-            "(useful for checking memory before dispatching from a command tower)"
+            "(useful for checking memory before dispatching a task)"
         ),
     )
     p_auto.add_argument(
