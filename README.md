@@ -189,7 +189,7 @@ remagraph search --cross-project-label topic:how-to-contact-tower
 
 ### MCP Tools
 
-RemaGraph exposes three tools over MCP (stdio transport), compatible with Claude Desktop, Cursor, and other mainstream MCP clients:
+RemaGraph exposes five tools over MCP (stdio transport), compatible with Claude Desktop, Cursor, and other mainstream MCP clients: `remagraph_store`, `remagraph_search`, `remagraph_status`, `remagraph_maintain`, and `remagraph_migrate_project`.
 
 #### `remagraph_store` — write memory
 
@@ -230,6 +230,8 @@ FTS5 BM25 full-text search (trigram tokenizer, CJK-aware) plus tag/kind/agent_id
 | `task_id` | `str` | Filter by task (optional) |
 | `all_projects` | `bool` | Default `false`; when `true`, removes the `project_id` filter within "this one database file" — each project is its own independent SQLite file, and this flag never opens any other file |
 | `cross_project_label` | `str` | Optional. When provided, this switches entirely to the cross-project label search path: via the shared project registry, it runs an exact label match across the current project plus every other known project, each its own independent database file (full-text/filter params like `query`/`kind`/`tags` don't apply on this path). Orthogonal to `all_projects` — the two are independent dimensions. Fan-out is capped at 20 "other" known projects; beyond that, the response is flagged `cross_project_fanout_capped: true` (see response fields below) instead of silently truncating and pretending the result set is complete. See the "Cross-Project Collaboration" section of [`DESIGN.md`](./DESIGN.md) |
+| `include_related` | `bool` | Default `false`. A third, fully independent dimension from `cross_project_label`/`all_projects`: when `true`, fans out — in addition to the normal FTS query against the current project — to projects found within `related_hops` via a `project_edges` traversal (`db.recall_related()`), i.e. projects explicitly declared as related through the `remagraph link` CLI subcommand. Unlike `cross_project_label`, matching is still by the normal FTS query, not exact label match. Requires `project_id` as the traversal starting point; if `project_id` is omitted, this gracefully degrades to an ordinary search (no related fan-out) rather than raising an error |
+| `related_hops` | `int` | Default `1` (only directly-declared relations). Max **5**. BFS traversal depth used when `include_related=true`; has no effect otherwise |
 
 Short queries (≤2 characters) return an empty result set instead of raising an error. Beyond `results`/`has_more`, every response always carries `cross_project_fanout_capped` (`bool`; only meaningful when `cross_project_label` is used — ordinary queries always get `false`). When `cross_project_label` is used, each result also carries `source_project_id` marking which project it came from. Every result includes the full field set (`id`/`project_id`/`summary`/`agent_id`/`kind`/`task_id`/`timestamp`/`score`/`learnings`/`handoff_note`/`tags`/`status`/`created_at`/`updated_at` — everything except `embedding`).
 
@@ -253,6 +255,48 @@ Beyond the existing `latest` array, the response always includes these compatibi
 | `min_writer_version` | `int \| null` | Oldest code version allowed to write to this database; same `null` behavior as above |
 | `upgrade_hint` | `str \| null` | Upgrade guidance text embedded in the database; `null` if absent |
 | `read_only` | `bool` | Whether the current connection is in read-only degraded mode (see "Governance & Security" below) |
+
+#### `remagraph_maintain` — run DB maintenance
+
+Runs automatic database maintenance (WAL checkpoint, prune superseded/invalidated memories, FTS5 optimize, VACUUM, integrity check), gated by the same safety valve (`maintenance.safety_validate_project`) used by the CLI `maintain` subcommand.
+
+| Parameter | Type | Description |
+|------|------|------|
+| `project_id` | `str` | Project to run maintenance on (required) |
+| `force` | `bool` | Default `false`; when `true`, every maintenance step runs unconditionally instead of only the ones whose threshold has actually been crossed |
+
+Note: unlike the CLI `maintain` subcommand, this MCP tool has no `dry_run` option — every call executes for real.
+
+Response (success): `{"status": "ok", "stats": {...}}`. Response (failure): `{"status": "error", "reason": "..."}`.
+
+`stats` is produced by `maintenance.run_maintenance()`; most fields only appear when the corresponding step actually ran:
+
+| Field | Type | Description |
+|------|------|------|
+| `project_id` | `str` | Echoes the project maintained |
+| `started_at` | `str` | ISO-8601 UTC timestamp when maintenance started |
+| `wal_checkpoint` | `str` | `"done"` if `PRAGMA wal_checkpoint(TRUNCATE)` ran |
+| `pruned_count` | `int` | Number of superseded/invalidated memories deleted (older than `prune_superseded_age_days`, default 90 days; capped per task by `prune_superseded_max_per_task`, default 5) |
+| `fts_optimized` | `bool` | `true` if the FTS5 index was optimized |
+| `vacuum` | `str` | `"done"` if `VACUUM` ran (triggered once DB file size exceeds `vacuum_threshold_mb`, default 50 MB) |
+| `size_before_mb` | `float` | DB file size in MB immediately before VACUUM; only present when `vacuum` ran |
+| `integrity` | `str` | Result of `PRAGMA quick_check`; expected `"ok"` — any other value raises and is recorded as an audit violation |
+| `skipped` | `bool` | `true` when the connection was already downgraded to the read-only schema tier (see "Version Compatibility" in [`DESIGN.md`](./DESIGN.md)); every write step above is skipped entirely |
+| `skip_reason` | `str` | `"read_only_schema_tier"` when `skipped` is `true` |
+
+#### `remagraph_migrate_project` — one-time cross-project migration trigger
+
+One-time migration of memories from a source project to a target project's independent DB (e.g. `default` → `herdr-bridge`), marking the originals `invalidated` in the source.
+
+| Parameter | Type | Description |
+|------|------|------|
+| `from_project` | `str` | Source project (required) |
+| `to_project` | `str` | Target project (required) |
+| `dry_run` | `bool` | Default `false`; when `true`, only validates the target project without migrating |
+
+Response (success): `{"status": "ok" | "dry-run", "from": "...", "to": "...", "message": "..."}`. Response (failure): `{"status": "error", "reason": "..."}`.
+
+**Important**: this MCP tool only validates the target project (via the same `safety_validate_project` safety valve as the CLI) and returns an acknowledgment (`"Migration logic has been triggered (see CLI migrate-project for details)"`) — it does **not** itself copy any rows or mark any source memories `invalidated`. The full migration logic (heuristic row matching on `task_id`/`tags`/`agent_id`/`summary`, copying into the target DB, and marking originals `invalidated` in the source) lives only in the CLI's `migrate-project` subcommand (`cli.cmd_migrate_project`). Treat a `status: "ok"` response from this MCP tool as "target validated" rather than "migration completed" — to actually migrate data, run `remagraph migrate-project --from <from_project> --to <to_project>` from the CLI.
 
 ### Governance & Security
 
@@ -506,7 +550,7 @@ remagraph search --cross-project-label topic:how-to-contact-tower
 
 ### MCP 工具
 
-RemaGraph 透過 MCP（stdio transport）暴露三個 tool，相容 Claude Desktop、Cursor 等主流 MCP 客戶端：
+RemaGraph 透過 MCP（stdio transport）暴露五個 tool，相容 Claude Desktop、Cursor 等主流 MCP 客戶端：`remagraph_store`、`remagraph_search`、`remagraph_status`、`remagraph_maintain`、`remagraph_migrate_project`。
 
 #### `remagraph_store` — 寫入記憶
 
@@ -547,6 +591,8 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 | `task_id` | `str` | 過濾任務（選填） |
 | `all_projects` | `bool` | 預設 `false`；`true` 時移除「目前這一個資料庫檔案內」的 `project_id` 過濾（每個 project 各自是獨立 SQLite 檔案，此旗標從不開啟其他檔案） |
 | `cross_project_label` | `str` | 選填。提供時完全改走跨專案標籤搜尋路徑：透過共用的 project registry，對「目前專案 + 所有已知專案」各自獨立的資料庫檔案，依 label 精確比對（`query`/`kind`/`tags` 等全文檢索/過濾參數不適用）。與 `all_projects` 是互不相干的兩個維度。fan-out 上限 20 個「其他」已知專案，超過時回應會標記 `cross_project_fanout_capped: true`（見下方回應欄位），不悄悄截斷佯裝完整。詳見 [`DESIGN.md`](./DESIGN.md) 的「跨專案協作」章節 |
+| `include_related` | `bool` | 預設 `false`。與 `cross_project_label`/`all_projects` 完全獨立的第三個維度：`true` 時，除了對「目前專案」執行正常的 FTS 查詢外，會額外沿 `project_edges` traversal（`db.recall_related()`）fan out 到 `related_hops` 之內、透過 `remagraph link` CLI 子指令明確宣告為關聯的專案。與 `cross_project_label` 不同，比對方式仍是正常的 FTS 查詢，不是 label 精確比對。需要 `project_id` 作為 traversal 起點；`project_id` 為空時優雅退化為一般搜尋（不展開 related fan-out），不拋出例外 |
+| `related_hops` | `int` | 預設 `1`（僅限直接宣告的關聯）。上限 **5**。`include_related=true` 時的 BFS traversal 深度；否則此欄位無意義 |
 
 短查詢（≤2 字元）回傳空結果不拋錯。回應除 `results`/`has_more` 外，恆附加 `cross_project_fanout_capped`（`bool`，僅使用 `cross_project_label` 時有意義；一般查詢恆為 `false`）；使用 `cross_project_label` 時每筆結果另附 `source_project_id` 標示其來源專案。每筆結果涵蓋完整欄位（`id`/`project_id`/`summary`/`agent_id`/`kind`/`task_id`/`timestamp`/`score`/`learnings`/`handoff_note`/`tags`/`status`/`created_at`/`updated_at`，`embedding` 除外）。
 
@@ -570,6 +616,48 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 | `min_writer_version` | `int \| null` | 資料庫允許被寫入的最舊程式碼版本；同上，缺漏時為 `null` |
 | `upgrade_hint` | `str \| null` | 資料庫內建的升級指引文字；缺漏時為 `null` |
 | `read_only` | `bool` | 目前連線是否處於唯讀降級模式（見下方「治理與安全」） |
+
+#### `remagraph_maintain` — 執行 DB 維護
+
+執行自動化資料庫維護（WAL checkpoint、清除 superseded/invalidated 記憶、FTS5 optimize、VACUUM、完整性檢查），受與 CLI `maintain` 子指令相同的安全閥門（`maintenance.safety_validate_project`）把關。
+
+| 參數 | 型別 | 說明 |
+|------|------|------|
+| `project_id` | `str` | 要執行維護的專案（必填） |
+| `force` | `bool` | 預設 `false`；`true` 時無條件執行每一項維護步驟，不受各自門檻是否已被觸發影響 |
+
+注意：與 CLI `maintain` 子指令不同，此 MCP tool 沒有 `dry_run` 選項——每次呼叫都會實際執行。
+
+回應（成功）：`{"status": "ok", "stats": {...}}`。回應（失敗）：`{"status": "error", "reason": "..."}`。
+
+`stats` 由 `maintenance.run_maintenance()` 產生；多數欄位只在對應步驟實際執行時才會出現：
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `project_id` | `str` | 回顯本次維護的專案 |
+| `started_at` | `str` | 維護開始時間（ISO-8601 UTC） |
+| `wal_checkpoint` | `str` | 若執行了 `PRAGMA wal_checkpoint(TRUNCATE)` 則為 `"done"` |
+| `pruned_count` | `int` | 被刪除的 superseded/invalidated 記憶筆數（早於 `prune_superseded_age_days`，預設 90 天；每 task 上限 `prune_superseded_max_per_task`，預設 5） |
+| `fts_optimized` | `bool` | 若 FTS5 index 已被 optimize 則為 `true` |
+| `vacuum` | `str` | 若執行了 `VACUUM` 則為 `"done"`（DB 檔案大小超過 `vacuum_threshold_mb`，預設 50MB，時觸發） |
+| `size_before_mb` | `float` | VACUUM 執行前的 DB 檔案大小（MB）；只在 `vacuum` 有執行時出現 |
+| `integrity` | `str` | `PRAGMA quick_check` 的結果；預期為 `"ok"`，其餘任何值都會拋出例外並記一筆稽核違規 |
+| `skipped` | `bool` | 連線若已被降級為唯讀 schema tier（見 [`DESIGN.md`](./DESIGN.md) 的「版本相容性」）則為 `true`；此時上述所有寫入步驟一律跳過 |
+| `skip_reason` | `str` | `skipped` 為 `true` 時為 `"read_only_schema_tier"` |
+
+#### `remagraph_migrate_project` — 一次性跨專案遷移觸發器
+
+把記憶從來源 project 一次性遷移到目標 project 的獨立 DB（例如 `default` → `herdr-bridge`），並在來源標記 `invalidated`。
+
+| 參數 | 型別 | 說明 |
+|------|------|------|
+| `from_project` | `str` | 來源專案（必填） |
+| `to_project` | `str` | 目標專案（必填） |
+| `dry_run` | `bool` | 預設 `false`；`true` 時只驗證目標專案，不執行遷移 |
+
+回應（成功）：`{"status": "ok" | "dry-run", "from": "...", "to": "...", "message": "..."}`。回應（失敗）：`{"status": "error", "reason": "..."}`。
+
+**重要**：此 MCP tool 只驗證目標專案（透過與 CLI 相同的 `safety_validate_project` 安全閥門），並回傳一則確認訊息（`"Migration logic has been triggered (see CLI migrate-project for details)"`）——它本身**不會**複製任何記錄，也不會在來源標記任何記憶為 `invalidated`。完整的遷移邏輯（依 `task_id`/`tags`/`agent_id`/`summary` 啟發式比對記錄、複製到目標 DB、並在來源標記 `invalidated`）只存在於 CLI 的 `migrate-project` 子指令（`cli.cmd_migrate_project`）裡。請把此 MCP tool 回傳的 `status: "ok"` 理解為「目標已驗證」，而非「遷移已完成」——要真正遷移資料，請從 CLI 執行 `remagraph migrate-project --from <from_project> --to <to_project>`。
 
 ### 治理與安全
 

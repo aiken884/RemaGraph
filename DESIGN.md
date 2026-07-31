@@ -87,7 +87,7 @@ The following explicitly violate RemaGraph's boundary design:
 
 ### MCP Interface
 
-Three tools, called directly by the agent over MCP (v1 uses the stdio transport):
+Five tools, called directly by the agent over MCP (v1 uses the stdio transport): `remagraph_store`, `remagraph_search`, `remagraph_status`, `remagraph_maintain`, `remagraph_migrate_project`.
 
 #### `remagraph_store`
 
@@ -228,6 +228,85 @@ Queries a project's current state. Returns all active `status_update` memories, 
   - `upgrade_hint`: upgrade guidance text stored in the database; `null` when missing
   - `read_only`: whether the current connection is in read-only degraded mode (see "Version Compatibility" below)
   - These fields only appear on a successful response; in a tier-3 scenario (not even safe to read), `remagraph_status` cannot even open the connection, so it still returns the existing clean `{"status": "error", "reason": ...}` without any of the fields above mixed in
+
+#### `remagraph_maintain`
+
+Runs automatic DB maintenance (WAL checkpoint, prune superseded/invalidated memories, FTS5 optimize, VACUUM, integrity check). Gated by `maintenance.safety_validate_project()` — the same single-authority safety valve the CLI `maintain` subcommand uses — so calling this tool for a project whose `state_dir` doesn't resolve correctly, or that fails the `herdr-*`-must-not-use-the-default-DB rule, fails closed rather than silently maintaining the wrong database.
+
+**Request:**
+```json
+{ "project_id": "myproject", "force": false }
+```
+- `project_id` (required): the project to run maintenance on
+- `force` (`bool`, optional, default `false`): when `true`, every maintenance step below runs unconditionally, ignoring its own threshold check (`_should_checkpoint`/`_should_prune`/`_should_optimize_fts`/`_should_vacuum`)
+- Unlike the CLI `maintain` subcommand, this MCP tool exposes no `dry_run` — every call is a real maintenance run
+
+**Response (success):**
+```json
+{
+  "status": "ok",
+  "stats": {
+    "project_id": "myproject",
+    "started_at": "2026-07-21T14:30:00+00:00",
+    "wal_checkpoint": "done",
+    "pruned_count": 3,
+    "fts_optimized": true,
+    "vacuum": "done",
+    "size_before_mb": 62.4,
+    "integrity": "ok"
+  }
+}
+```
+`stats` is produced directly by `maintenance.run_maintenance()`; each field is only present when the corresponding step actually executed:
+- `wal_checkpoint`: `"done"` when `PRAGMA wal_checkpoint(TRUNCATE)` ran (triggered by `force` or by crossing `policy.wal_checkpoint_interval_ops`, default 1000 ops)
+- `pruned_count`: number of `status != 'active'` memories deleted, scoped to `project_id`; only those older than `policy.prune_superseded_age_days` (default 90 days) are eligible, and the delete is `LIMIT`-capped per task by `policy.prune_superseded_max_per_task` (default 5) as a throttle
+- `fts_optimized`: `true` when `INSERT INTO memories_fts(memories_fts) VALUES('optimize')` ran
+- `vacuum`/`size_before_mb`: `VACUUM` runs once the DB file size (measured before the run) exceeds `policy.vacuum_threshold_mb` (default 50 MB); `size_before_mb` is the pre-VACUUM size, and the post-VACUUM size is separately recorded as the baseline for the next `_should_vacuum` growth check
+- `integrity`: result of `PRAGMA quick_check` (runs when `policy.integrity_check_on_startup` — default `true` — or `force`); any value other than `"ok"` raises `RuntimeError` and is recorded as an `integrity_failed` audit violation via `_record_violation`
+
+**Response (skipped — read-only schema tier):**
+```json
+{
+  "project_id": "myproject",
+  "started_at": "2026-07-21T14:30:00+00:00",
+  "skipped": true,
+  "skip_reason": "read_only_schema_tier"
+}
+```
+- Maintenance is fundamentally a batch of write operations (WAL checkpoint, the prune `DELETE`, `VACUUM`, `ANALYZE`), none of which are safe to run against a database whose schema the currently running code doesn't fully understand yet. This check happens unconditionally — deliberately **not** overridable by `force`, since `force` expresses caller intent while this guards against a schema-compatibility risk; the two are orthogonal. See "Version Compatibility" below for how a connection gets flagged read-only in the first place.
+
+**Response (error):**
+```json
+{ "status": "error", "reason": "..." }
+```
+- Raised e.g. when `safety_validate_project()` rejects the project (mismatched `state_dir`, `herdr-*` pointed at the default DB, `project.json` metadata mismatch, etc.)
+
+#### `remagraph_migrate_project`
+
+One-time migration of memories from a source project to a target project's independent DB (e.g. `default` → `herdr-bridge`), marking the originals `invalidated` in the source.
+
+**Request:**
+```json
+{ "from_project": "default", "to_project": "herdr-bridge", "dry_run": false }
+```
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "from": "default",
+  "to": "herdr-bridge",
+  "message": "Migration logic has been triggered (see CLI migrate-project for details)"
+}
+```
+
+**This tool's implementation is intentionally a thin stub, not a full migration** — this is a real, currently-existing gap between the MCP surface and the CLI, documented here rather than papered over. `remagraph_migrate_project` only calls `safety_validate_project(to_project, require_env_match=False)` to validate the target project, then returns the acknowledgment above; it never opens the source DB, never copies a single row, and never marks anything `invalidated`. The actual migration — reading `from_project`'s rows out of the default DB with a heuristic match on `task_id`/`tags`/`agent_id`/`summary` containing the target project name, `INSERT OR IGNORE`-ing them into the target project's own DB with `project_id` forced to `to_project`, and marking the originals `invalidated` (with a `migrated-to:<to_project>` breadcrumb appended to `learnings`) — is implemented only in the CLI's `migrate-project` subcommand (`cli.cmd_migrate_project`). Callers must not treat this MCP tool's `status: "ok"`/`"dry-run"` as evidence that data was actually migrated; to perform a real migration, invoke `remagraph migrate-project --from <from_project> --to <to_project>` (optionally `--dry-run`/`--force`) via the CLI.
+
+**Response (error):**
+```json
+{ "status": "error", "reason": "..." }
+```
+- Raised when `safety_validate_project()` rejects the target project
 
 ---
 
@@ -707,7 +786,7 @@ RemaGraph 對外只暴露一個穩定的合約：**Audit Contract**（詳見下�
 
 ### MCP 介面
 
-三個 tool，agent 透過 MCP（v1 使用 stdio transport）直接呼叫：
+五個 tool，agent 透過 MCP（v1 使用 stdio transport）直接呼叫：`remagraph_store`、`remagraph_search`、`remagraph_status`、`remagraph_maintain`、`remagraph_migrate_project`。
 
 #### `remagraph_store`
 
@@ -848,6 +927,85 @@ agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
   - `upgrade_hint`：資料庫內建的升級指引文字，缺漏時為 `null`
   - `read_only`：目前連線是否處於唯讀降級模式（見下方「版本相容性」章節）
   - 這些欄位只在成功回應中出現；tier-3（連讀都不安全）情境下 `remagraph_status` 連線都開不起來，仍維持既有行為回傳乾淨的 `{"status": "error", "reason": ...}`，不會混入上述欄位
+
+#### `remagraph_maintain`
+
+執行 DB 自動維護（WAL checkpoint、清除 superseded/invalidated 記憶、FTS5 optimize、VACUUM、完整性檢查）。受 `maintenance.safety_validate_project()` 把關——與 CLI `maintain` 子指令使用同一個單一權威安全閥門——因此對一個 `state_dir` 解析不正確、或違反「`herdr-*` 專案不得使用 default DB」規則的專案呼叫此 tool，會直接 fail closed，而不是悄悄維護錯的資料庫。
+
+**Request：**
+```json
+{ "project_id": "myproject", "force": false }
+```
+- `project_id`（必填）：要執行維護的專案
+- `force`（`bool`，選填，預設 `false`）：`true` 時下方每一項維護步驟都無條件執行，忽略各自的門檻檢查（`_should_checkpoint`/`_should_prune`/`_should_optimize_fts`/`_should_vacuum`）
+- 與 CLI `maintain` 子指令不同，此 MCP tool 未提供 `dry_run`——每次呼叫都是真實維護執行
+
+**Response（成功）：**
+```json
+{
+  "status": "ok",
+  "stats": {
+    "project_id": "myproject",
+    "started_at": "2026-07-21T14:30:00+00:00",
+    "wal_checkpoint": "done",
+    "pruned_count": 3,
+    "fts_optimized": true,
+    "vacuum": "done",
+    "size_before_mb": 62.4,
+    "integrity": "ok"
+  }
+}
+```
+`stats` 直接由 `maintenance.run_maintenance()` 產生；每個欄位只在對應步驟實際執行時才會出現：
+- `wal_checkpoint`：執行了 `PRAGMA wal_checkpoint(TRUNCATE)` 時為 `"done"`（由 `force` 或超過 `policy.wal_checkpoint_interval_ops`，預設 1000 次操作，觸發）
+- `pruned_count`：被刪除的 `status != 'active'` 記憶筆數，限定 `project_id`；只有早於 `policy.prune_superseded_age_days`（預設 90 天）的記錄才符合資格，且刪除動作以 `LIMIT` 依 `policy.prune_superseded_max_per_task`（預設 5）做每 task 節流上限
+- `fts_optimized`：執行了 `INSERT INTO memories_fts(memories_fts) VALUES('optimize')` 時為 `true`
+- `vacuum`/`size_before_mb`：DB 檔案大小（執行前量測）超過 `policy.vacuum_threshold_mb`（預設 50MB）時執行 `VACUUM`；`size_before_mb` 為 VACUUM 前的大小，VACUUM 後的大小會另外記錄作為下次 `_should_vacuum` 成長幅度判斷的基準
+- `integrity`：`PRAGMA quick_check` 的結果（在 `policy.integrity_check_on_startup`，預設 `true`，或 `force` 時執行）；任何非 `"ok"` 的值都會拋出 `RuntimeError` 並透過 `_record_violation` 記一筆 `integrity_failed` 稽核違規
+
+**Response（跳過——唯讀 schema tier）：**
+```json
+{
+  "project_id": "myproject",
+  "started_at": "2026-07-21T14:30:00+00:00",
+  "skipped": true,
+  "skip_reason": "read_only_schema_tier"
+}
+```
+- 維護本質上是一整組寫入操作（WAL checkpoint、prune 的 `DELETE`、`VACUUM`、`ANALYZE`），對一個「目前執行中的程式碼尚未完全理解其 schema」的資料庫執行，沒有一項是安全的。此檢查無條件生效——刻意不受 `force` 影響，因為 `force` 表達的是呼叫端意願，而這裡防範的是 schema 相容性風險，兩者是正交的。見下方「版本相容性」了解連線如何一開始就被標記唯讀。
+
+**Response（錯誤）：**
+```json
+{ "status": "error", "reason": "..." }
+```
+- 例如 `safety_validate_project()` 拒絕該專案時觸發（`state_dir` 不符、`herdr-*` 指向 default DB、`project.json` metadata 不符等）
+
+#### `remagraph_migrate_project`
+
+把記憶從來源 project 一次性遷移到目標 project 的獨立 DB（例如 `default` → `herdr-bridge`），並在來源標記 `invalidated`。
+
+**Request：**
+```json
+{ "from_project": "default", "to_project": "herdr-bridge", "dry_run": false }
+```
+
+**Response：**
+```json
+{
+  "status": "ok",
+  "from": "default",
+  "to": "herdr-bridge",
+  "message": "Migration logic has been triggered (see CLI migrate-project for details)"
+}
+```
+
+**這個 tool 的實作刻意是個簡化 stub，不是完整遷移**——這是 MCP 介面與 CLI 之間目前真實存在的落差，這裡如實記錄而不是掩蓋。`remagraph_migrate_project` 只呼叫 `safety_validate_project(to_project, require_env_match=False)` 驗證目標專案，接著回傳上方的確認訊息；它從不開啟來源 DB、不複製任何一筆記錄、也不會標記任何東西為 `invalidated`。實際的遷移——從 default DB 依 `task_id`/`tags`/`agent_id`/`summary` 是否包含目標專案名稱做啟發式比對，取出 `from_project` 的記錄、以 `INSERT OR IGNORE` 強制 `project_id` 為 `to_project` 寫入目標專案自己的 DB、並在來源標記 `invalidated`（在 `learnings` 附加一筆 `migrated-to:<to_project>` 軌跡）——只在 CLI 的 `migrate-project` 子指令（`cli.cmd_migrate_project`）裡實作。呼叫端不應把這個 MCP tool 回傳的 `status: "ok"`/`"dry-run"` 當作資料已實際遷移的證據；要真正執行遷移，請透過 CLI 呼叫 `remagraph migrate-project --from <from_project> --to <to_project>`（可搭配 `--dry-run`/`--force`）。
+
+**Response（錯誤）：**
+```json
+{ "status": "error", "reason": "..." }
+```
+- `safety_validate_project()` 拒絕目標專案時觸發
 
 ---
 
