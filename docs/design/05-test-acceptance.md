@@ -497,7 +497,7 @@ jobs:
 - [x] 與現有 tests/*.py stub 對應關係（含建議新增檔案）
 - [x] CI 建議 job 行為（test.yml 補強 + mutmut.yml 新增 + 門檻總覽）
 - [x] 開放問題（8 題）與對齊聲明
-- [x] 驗證：全文無 `herdr-bridge`、`herdr-gov` 詞彙
+- [x] 驗證：全文無外部具名專案詞彙
 - [x] 驗證：所有約束以 `DESIGN.md` 為 SOT
 
 ---

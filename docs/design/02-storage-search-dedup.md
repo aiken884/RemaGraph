@@ -2,7 +2,7 @@
 
 > **艦隊任務 ID**：`T-RG-D02`
 > **狀態**：設計完成，尚未實作
-> **約束**：本文件僅為設計產出，不得引入 `herdr-bridge` / `herdr-gov` 耦合。以 `DESIGN.md` 為 SOT。所有模組（`store.py` / `search.py` / `dedup.py` / `db.py`）的實作目前皆為 `raise NotImplementedError`。
+> **約束**：本文件僅為設計產出，不得引入對特定外部專案的具名耦合。以 `DESIGN.md` 為 SOT。所有模組（`store.py` / `search.py` / `dedup.py` / `db.py`）的實作目前皆為 `raise NotImplementedError`。
 
 ---
 
@@ -1360,7 +1360,7 @@ And 資料庫保持 crash 前的一致狀態
 | D01 §3 | `status_update` supersede（同 task_id、單一 transaction） | §4.2：`supersede_status_updates()` 接受 `conn` 參數，由呼叫方控制 transaction 邊界 |
 | D01 §4 | `discovered_constraint` invalidates（驗證由 arbitration 負責、store 只做 UPDATE） | §4.2：`invalidate_constraints()` 不做驗證，職責分離 |
 | D01 §6 | Lazy Registration（v1 不做 `agents` 表） | 本文件不引入 `agents` 表，與 D01 一致 |
-| DESIGN.md §對外邊界 | 不認識 herdr-bridge / herdr-gov | 本文件無任何 herdr 相關詞彙，已驗證 |
+| DESIGN.md §對外邊界 | 不耦合任何特定外部系統 | 本文件無任何外部具名專案詞彙，已驗證 |
 
 本文件新增的設計（`db.py` 連線管理、migration 策略、`store.py`/`search.py`/`dedup.py` 完整 API、併發與失敗模式、FTS5 sanitization、embedding v2 路徑）**不違反** DESIGN.md 或 D01 中任何既有決策。本文件對 DESIGN.md 提出的兩個 schema 修正建議（補 `timestamp` 欄位、補 `memories_au` trigger）為**向下相容**的補充，不影響既有設計意圖。
 
@@ -1382,7 +1382,7 @@ And 資料庫保持 crash 前的一致狀態
 - [x] Given/When/Then 驗收條件（5 組場景：store CRUD、search BM25、dedup 去重、migration、併發）
 - [x] PPLX 審查裁決已定案（§12）
 - [x] 與 DESIGN.md 及 D01 對齊聲明
-- [x] 驗證：全文無 `herdr-bridge`、`herdr-gov` 詞彙
+- [x] 驗證：全文無外部具名專案詞彙
 
 ---
 

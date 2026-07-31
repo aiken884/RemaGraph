@@ -1,7 +1,7 @@
 # T-RG-D00：RemaGraph 設計文件索引
 
 > **艦隊任務 ID**：`T-RG-D00`
-> **狀態**：設計文件 2026-07-21 凍結；**v1 實作已落地**；**v2 治理/安全/可靠度/CLI 強化已實作**（0.2.0，見 [`docs/reviews/v2-release-prep.md`](../reviews/v2-release-prep.md)）；發行前準備進行中（Herdr Bridge 真實運作，暫不公開發布）
+> **狀態**：設計文件 2026-07-21 凍結；**v1 實作已落地**；**v2 治理/安全/可靠度/CLI 強化已實作**（0.2.0，見 [`docs/reviews/v2-release-prep.md`](../reviews/v2-release-prep.md)）；發行前準備進行中（已有真實使用場景實際運作中，暫不公開發布）
 > **用途**：索引全部設計文件、記錄 PPLX 共識裁決完成狀態、追蹤各文件與 `DESIGN.md` 的差異
 
 ---

@@ -2,7 +2,7 @@
 
 > **艦隊任務 ID**：`T-RG-D03`
 > **狀態**：設計完成，尚未實作
-> **約束**：本文件僅為設計產出，不得引入 `herdr-bridge` / `herdr-gov` 耦合。以 `DESIGN.md` 為 SOT。
+> **約束**：本文件僅為設計產出，不得引入對特定外部專案的具名耦合。以 `DESIGN.md` 為 SOT。
 
 ---
 
@@ -1158,7 +1158,7 @@ Then 日誌中不含 summary 的完整內容
 | 啟動方式（`pip install remagraph`，一行 MCP config） | §3 啟動參數、環境變數；§5 MCP config 範例（stdio 預設） |
 | 記憶 Schema / 仲裁規則 | 不重複，直接引用 DESIGN.md 及 01-data-model-arbitration.md；§6 定義 server.py 如何呼叫這些模組 |
 | 審計（Audit） | §6 定義 audit.py 的呼叫邊界；§10 函式簽名 |
-| 對外邊界（不認識 herdr-bridge / herdr-gov） | 本文件無任何 herdr 相關詞彙，已驗證 |
+| 對外邊界（不耦合任何特定外部系統） | 本文件無任何外部具名專案詞彙，已驗證 |
 | SQLite + FTS5 Schema | 實現層級（本文件不重複 SQL schema，見 DESIGN.md §儲存層） |
 
 本文件新增的設計（MCP JSON-RPC transport、生命週期、PID 鎖、日誌規範、錯誤映射、優雅關閉）**不違反** DESIGN.md 中任何既有決策。所有新增內容皆為 DESIGN.md 部署形態章節的具體化展開。
@@ -1180,7 +1180,7 @@ Then 日誌中不含 summary 的完整內容
 - [x] Given/When/Then 驗收條件（6 組場景，共 16 條）
 - [x] 開放問題（7 題）
 - [x] 與 DESIGN.md + 01-data-model-arbitration.md 對齊聲明
-- [x] 驗證：全文無 `herdr-bridge`、`herdr-gov` 詞彙
+- [x] 驗證：全文無外部具名專案詞彙
 
 ---
 

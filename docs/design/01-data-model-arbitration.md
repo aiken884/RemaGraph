@@ -2,7 +2,7 @@
 
 > **艦隊任務 ID**：`T-RG-D01`
 > **狀態**：設計完成，尚未實作
-> **約束**：本文件僅為設計產出，不得引入 `herdr-bridge` / `herdr-gov` 耦合。以 `DESIGN.md` 為 SOT。
+> **約束**：本文件僅為設計產出，不得引入對特定外部專案的具名耦合。以 `DESIGN.md` 為 SOT。
 
 ---
 
@@ -604,7 +604,7 @@ Then 回傳 status="rejected", reason="invalidates_not_found"
 | agent_id Lazy Registration | §6 補充格式規則、邊界案例 |
 | SQLite + FTS5 Schema | 實現層級（本文件不重複，直接引用 DESIGN.md §儲存層） |
 | Audit Contract | 本文件不重複（外部合約，見 `docs/audit.md`） |
-| 對外邊界（不認識 herdr-bridge / herdr-gov） | 本文件無任何 herdr 相關詞彙，已驗證 |
+| 對外邊界（不耦合任何特定外部系統） | 本文件無任何外部具名專案詞彙，已驗證 |
 
 本文件新增的設計（`invalidates` 機制、錯誤碼表、Python 介面草圖）**不違反** DESIGN.md 中任何既有決策，且可追溯至 DESIGN.md 的對應原則。
 
@@ -624,7 +624,7 @@ Then 回傳 status="rejected", reason="invalidates_not_found"
 - [x] Given/When/Then 驗收條件（7 組場景）
 - [x] PPLX 審查裁決已定案（§11）
 - [x] 與 DESIGN.md 對齊聲明
-- [x] 驗證：全文無 `herdr-bridge`、`herdr-gov` 詞彙
+- [x] 驗證：全文無外部具名專案詞彙
 
 ---
 

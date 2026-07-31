@@ -2,7 +2,7 @@
 
 > **艦隊任務 ID**：`T-RG-D04`
 > **狀態**：設計完成，尚未實作
-> **約束**：本文件僅為設計產出，不得引入 `herdr-bridge` / `herdr-gov` 耦合。以 `DESIGN.md` 與 `docs/audit.md` 為 SOT。
+> **約束**：本文件僅為設計產出，不得引入對特定外部專案的具名耦合。以 `DESIGN.md` 與 `docs/audit.md` 為 SOT。
 
 ---
 
@@ -86,9 +86,9 @@ class AuditEntry:
     error: str | None       # null when status="stored"
 ```
 
-### 1.5 與 herdr-bridge audit 格式的互通性
+### 1.5 與外部排程系統的 audit 格式相容性
 
-`ts` 欄位格式（ISO 8601 UTC，精確到毫秒）與 herdr-bridge 的 audit 格式一致。這是**刻意為之的格式相容**——兩個系統不需要知道對方的存在，但消費 audit 的外部排程系統可以用同一套 parser 處理兩邊的記錄。這不是耦合，是遵循相同慣例。
+`ts` 欄位格式（ISO 8601 UTC，精確到毫秒）採用業界常見的通用慣例。這是**刻意為之的格式相容**——RemaGraph 不需要知道消費方是誰，但只要多個獨立系統都遵循同一套格式慣例，消費 audit 的外部排程系統就能用同一套 parser 處理來自不同系統的記錄。這不是耦合，是遵循相同慣例。
 
 ---
 
@@ -114,7 +114,7 @@ class AuditEntry:
 
 ### 2.3 消費方 grep 範例
 
-外部排程系統（例如 herdr-gov）可用以下指令快速驗證 agent 是否完成記憶寫入：
+外部排程系統可用以下指令快速驗證 agent 是否完成記憶寫入：
 
 ```bash
 # 檢查 task-2026-07-21-003 是否有成功寫入
@@ -563,7 +563,7 @@ Then 無已知 CVE（或已知 CVE 已被評估為不影響 RemaGraph 且記錄�
 | DESIGN.md §審計 | Audit Contract | §2 逐字對齊並補充合約邊界、消費方 grep 範例 |
 | DESIGN.md §審計 | 不存 traceback | §3.2 原則說明 + 正確實作範例 |
 | DESIGN.md §CI/CD | gitleaks | §6.1 整合說明 |
-| DESIGN.md §專案基本資訊 | 獨立開源、不認識 herdr-* | 全文無 herdr-bridge / herdr-gov 詞彙 |
+| DESIGN.md §專案基本資訊 | 獨立專案、不耦合任何特定外部系統 | 全文無外部具名專案詞彙 |
 | DESIGN.md §儲存層 | SQLite + 零依賴（stdlib） | §5 依賴面分析確認無額外 runtime 依賴 |
 | docs/audit.md | Audit Contract 全文 | §2 逐字一致，補充設計細節 |
 | docs/design/01-data-model-arbitration.md | reason_code 表 | §3.1 寫入時機表中的 reason_code 與 01 的錯誤碼表一致 |
@@ -584,7 +584,7 @@ Then 無已知 CVE（或已知 CVE 已被評估為不影響 RemaGraph 且記錄�
 - [x] 驗收條件（audit 寫入、權限、no traceback、gitleaks、pip-audit）
 - [x] 開放問題（6 題）
 - [x] 與 DESIGN.md / docs/audit.md 對齊聲明
-- [x] 驗證：全文無 `herdr-bridge`、`herdr-gov` 詞彙
+- [x] 驗證：全文無外部具名專案詞彙
 
 ---
 
