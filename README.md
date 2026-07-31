@@ -1,11 +1,343 @@
 # RemaGraph
 
-> **凡走過必留下痕跡。** RemaGraph 是一把輕量的 MCP 工具，任何 AI coding agent 走過後自然留下的殘跡，後人可循跡。與 CodeGraph 互補：CodeGraph 記「這段程式碼有什麼已知問題」，RemaGraph 記「處理時留下了什麼痕跡」。
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](./LICENSE)
+[![CI](https://github.com/aiken884/RemaGraph/actions/workflows/test.yml/badge.svg)](https://github.com/aiken884/RemaGraph/actions/workflows/test.yml)
+[![Version](https://img.shields.io/github/v/tag/aiken884/RemaGraph?label=version&color=brightgreen)](https://github.com/aiken884/RemaGraph/tags)
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-support-F16061?logo=ko-fi&logoColor=white)](https://ko-fi.com/aikenlin)
+[![PayPal](https://img.shields.io/badge/PayPal-donate-00457C?logo=paypal&logoColor=white)](https://paypal.me/aikenlin)
+
+> **Every agent leaves a trace.** RemaGraph is a lightweight MCP tool that captures what an AI coding agent leaves behind while it works, so whoever picks up next can follow the trail.
+>
+> **凡走過必留下痕跡。** RemaGraph 是一套輕量的 MCP 工具，讓每一個經手的 AI coding agent 自然留下軌跡，後面接手的人有跡可循。
+
+---
+
+## English
+
+RemaGraph is a lightweight **MCP** (Model Context Protocol) tool built for AI coding agents that work across many tasks and hand-offs without a human in the loop for every step. Its job is simple: capture what an agent learned, decided, or ran into along the way, and make that trail retrievable later — by the same agent, or by a completely different one picking up the work. It complements **CodeGraph**: CodeGraph tracks what's structurally wrong with the code; RemaGraph tracks what happened while someone (or something) was working on it.
+
+| Item | Status |
+|------|--------|
+| **Version** | `0.2.0` (release prep in progress; **not yet** on PyPI — needs a human-in-the-loop tag) |
+| **Status** | v2: security / governance / reliability + CLI (init/auto/store/search/status) |
+| **Task memory convention** | [`docs/task-memory-convention.md`](./docs/task-memory-convention.md) |
+| **Release prep** | [`docs/reviews/v2-release-prep.md`](./docs/reviews/v2-release-prep.md) |
+| **Design SOT** | [`DESIGN.md`](./DESIGN.md) |
+| **v1 closeout status** | [`docs/reviews/v1-closeout-status.md`](./docs/reviews/v1-closeout-status.md) |
+| **Architecture** | [`docs/architecture.md`](./docs/architecture.md) |
+| **Audit contract** | [`docs/audit.md`](./docs/audit.md) |
+| **Governance checklist** | [`docs/governance/checklist.md`](./docs/governance/checklist.md) |
+| **Contributing** | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
+| **Changelog** | [`CHANGELOG.md`](./CHANGELOG.md) |
+
+### Installation (currently powering real-world Herdr Bridge operation)
+
+**Currently used primarily to run live inside Herdr Bridge; not yet published to PyPI.**
+
+Recommended install — a one-liner pinned to the latest internal alpha tag:
+
+```bash
+uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.3.1-alpha
+```
+
+Without a version pin, this installs whatever is currently on `main`:
+
+```bash
+uv tool install git+https://github.com/aiken884/RemaGraph.git
+```
+
+Or install from source for local development:
+
+```bash
+git clone https://github.com/aiken884/RemaGraph.git
+cd RemaGraph
+uv pip install -e .
+```
+
+Dependencies: Python ≥3.11, model2vec, mcp (FastMCP), pydantic.
+
+### Quick Start (5 minutes, no coding required)
+
+1. Install (see "Installation" above).
+2. Initialize:
+   ```bash
+   remagraph init --project myproject
+   source ~/.local/state/remagraph-myproject/env.sh
+   ```
+3. Run a task in one shot — reads memory, executes, writes memory back:
+   ```bash
+    remagraph auto --task-id fix-login-001 --agent-id my-ai -- echo "swap this for your actual command"
+    ```
+    or use the wrapper script:
+    ```bash
+    curl -O https://raw.githubusercontent.com/aiken884/RemaGraph/main/examples/simple/remagraph-task.sh
+    chmod +x remagraph-task.sh
+    TASK_ID=fix-login-001 AGENT_ID=my-ai ./remagraph-task.sh python my_agent.py
+    ```
+
+**If a command tower just wants to check memory first, with no execution and no writes:**
+```bash
+remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
+```
+
+No code required. Full plain-language walkthrough: [`docs/task-memory-convention.md`](./docs/task-memory-convention.md).
+
+New users may also find [`docs/internal/alpha-test-playbook.md`](./docs/internal/alpha-test-playbook.md) useful as an onboarding guide — it includes scenarios and a feedback template.
+
+**Note**: RemaGraph is already running in production inside Herdr Bridge. It hasn't been published publicly yet — current focus is release prep.
+
+### MCP Quick Start
+
+#### 1. MCP client configuration
+
+Point any MCP client at RemaGraph. Example configs for common clients follow.
+
+**Note (since the BUG 1 fix)**: `remagraph serve` now **must** be bound to a single project at startup — via either the `--project <id>` argument or the `REMAGRAPH_PROJECT` environment variable. If neither is set, it fails fast and never enters the MCP stdio loop, which prevents a process from silently reading and writing across projects if it happens to inherit another project's environment variables. Each project maps to its own dedicated `remagraph serve` process; a single running process cannot switch between projects dynamically.
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "remagraph": {
+      "command": "remagraph",
+      "args": ["serve", "--project", "myproject"],
+      "env": {
+        "REMAGRAPH_STATE_DIR": "/home/user/.local/state/remagraph-myproject"
+      }
+    }
+  }
+}
+```
+
+**Cursor** (`.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "remagraph": {
+      "command": "remagraph",
+      "args": ["serve"],
+      "env": {
+        "REMAGRAPH_PROJECT": "myproject"
+      }
+    }
+  }
+}
+```
+
+**OpenCode / Claude Code** — any client that supports stdio MCP works the same way as above.
+
+#### 2. Environment variables
+
+| Variable | Description | Default |
+|------|------|--------|
+| `REMAGRAPH_STATE_DIR` | Directory where the SQLite DB lives | `~/.local/state/remagraph/` |
+| `REMAGRAPH_PROJECT` | The current project binding (`remagraph serve` requires either this env var or `--project` at startup) | none |
+| `REMAGRAPH_FANOUT_CAP` | Max number of "other" project database connections `search --cross-project-label`/`--include-related` will open in a single call (`--fanout-cap` takes precedence over this env var) | `50` |
+| `REMAGRAPH_FANOUT_HARD_CAP` | Hard ceiling for the cap above, only meant for explicit opt-in increases (rarely needs adjusting) | `200` |
+
+Directories are created automatically when missing (mode `0700`); DB files are created at mode `0600`. Paths are checked against a security denylist that rejects system directories.
+
+#### 3. CLI basics
+
+```bash
+# Start the stdio MCP server (must be bound to a single project via --project or REMAGRAPH_PROJECT)
+remagraph serve --project myproject
+
+# Initialize / run a task in one shot
+remagraph init --project myproject
+remagraph auto --task-id T001 --agent-id my-agent -- make test
+
+# Query (task-id alone is fine)
+remagraph search --task-id T001
+remagraph search --query "FastMCP lifecycle" --top-k 5
+remagraph status --limit 10
+```
+
+### Integrating with herdr Bridge (command-tower dispatch with memory attached)
+
+**Current status**: the tooling layer (herdr-bridge hooks) and the governance layer are done; the organizational layer — formal herdr-org command-tower integration — is still design-only, with implementation to follow. RemaGraph's MemoryDispatcher is ready and waiting for herdr-org to wire in. Cross-project communication runs entirely over ACP.
+
+If you're already using herdr Bridge as a command tower dispatching work to headless agents:
+
+1. In your command-tower code, use the minimal helper we provide:
+   ```bash
+   # download
+   curl -O https://raw.githubusercontent.com/aiken884/RemaGraph/main/examples/herdr-bridge/simple-memory-helper.sh
+   chmod +x simple-memory-helper.sh
+   ```
+
+2. Call it before dispatch to fetch memory context, then fold that into the text you send the agent.
+
+Or, simplest of all: have the agent launch through the `remagraph-task.sh` wrapper shown above, wrapping your agent's own command.
+
+That way the tower only needs to pass a `task_id` to the agent, and the agent records memory automatically.
+
+(See `examples/herdr-bridge/` for full examples.)
+
+**Note**: full herdr-org workload validation has to wait until the organizational layer is actually built. Currently it's design-blueprint stage only.
+
+**Reaching another project's tower or agent**: for cross-project coordination — say, reporting a bug you found in another project's code that belongs to that project's own scope — write it into RemaGraph memory directly rather than reaching across and touching that project's files yourself. A full three-channel communication guide already lives in RemaGraph memory (maintained by the herdr-bridge tower); query it like this:
+
+```bash
+remagraph search --project herdr-bridge --task-id herdr-bridge-three-channel-usage-guide
+# or query by cross-project label, no need to know the exact project/task_id:
+remagraph search --cross-project-label topic:how-to-contact-tower
+```
+
+### MCP Tools
+
+RemaGraph exposes three tools over MCP (stdio transport), compatible with Claude Desktop, Cursor, and other mainstream MCP clients:
+
+#### `remagraph_store` — write memory
+
+An agent writes a memory record; it must pass five arbitration rules before landing in SQLite + the FTS5 index.
+
+| Parameter | Type | Description |
+|------|------|------|
+| `project_id` | `str` | Project identifier (same format rules as `task_id`, required) |
+| `task_id` | `str` | Task identifier (alphanumeric plus `-_`, max 64 characters) |
+| `agent_id` | `str` | Agent identifier (same format constraints as `task_id`) |
+| `kind` | `"task_handoff" \| "status_update" \| "discovered_constraint" \| "fleet_member"` | Memory kind (`fleet_member` is recorded/recycled by the tower) |
+| `summary` | `str` | One-line summary (indexed for FTS5 full-text search) |
+| `learnings` | `list[str]` | Key takeaways |
+| `handoff_note` | `str` | Hand-off note (required when `kind` is `task_handoff`) |
+| `tags` | `list[str]` | Free-form classification tags (optional) |
+| `invalidates` | `list[str]` | Memory IDs to invalidate (used with `discovered_constraint`) |
+| `labels` | `list[str]` | Namespaced labels (optional), in `namespace:value` form (e.g. `dep:opencode`, `topic:auth`, `kind:bug`). Convention is a small, controlled set of namespace prefixes such as `dep:`/`topic:`/`kind:`; max length 64 characters. This is a distinct concept from `tags` — `tags` is free-form, `labels` is a controlled vocabulary, and a batch with any malformed label is rejected outright (`reason: "invalid_label"`). Used for exact matching by `remagraph_search`'s `cross_project_label`; see the "Cross-Project Collaboration" section of [`DESIGN.md`](./DESIGN.md) |
+
+Behavior of the four `kind` values (PPLX Priority B):
+- **`task_handoff`** — a task hand-off record, carries `handoff_note`
+- **`status_update`** — a status update; automatically supersedes the prior record for the same `task_id`
+- **`discovered_constraint`** — a newly discovered constraint; can `invalidates` existing, now-wrong memories
+- **`fleet_member`** — owned by the tower (LightCommander/AcpRouter), records/recycles fleet members (`task_id=fleet` auto-supersedes)
+
+#### `remagraph_search` — query memory
+
+FTS5 BM25 full-text search (trigram tokenizer, CJK-aware) plus tag/kind/agent_id/task_id filtering.
+
+| Parameter | Type | Description |
+|------|------|------|
+| `query` | `str` | Search keywords (Chinese, English, Japanese, and Korean all supported) |
+| `top_k` | `int` | Max results to return (default 20, max 100) |
+| `kind` | `str` | Filter by memory kind (optional) |
+| `status` | `"active" \| "superseded" \| "invalidated"` | Filter by status (optional) |
+| `tags` | `list[str]` | Filter by tags (optional) |
+| `project_id` | `str` | Restrict to a single project (optional) |
+| `agent_id` | `str` | Filter by agent (optional) |
+| `task_id` | `str` | Filter by task (optional) |
+| `all_projects` | `bool` | Default `false`; when `true`, removes the `project_id` filter within "this one database file" — each project is its own independent SQLite file, and this flag never opens any other file |
+| `cross_project_label` | `str` | Optional. When provided, this switches entirely to the cross-project label search path: via the shared project registry, it runs an exact label match across the current project plus every other known project, each its own independent database file (full-text/filter params like `query`/`kind`/`tags` don't apply on this path). Orthogonal to `all_projects` — the two are independent dimensions. Fan-out is capped at 20 "other" known projects; beyond that, the response is flagged `cross_project_fanout_capped: true` (see response fields below) instead of silently truncating and pretending the result set is complete. See the "Cross-Project Collaboration" section of [`DESIGN.md`](./DESIGN.md) |
+
+Short queries (≤2 characters) return an empty result set instead of raising an error. Beyond `results`/`has_more`, every response always carries `cross_project_fanout_capped` (`bool`; only meaningful when `cross_project_label` is used — ordinary queries always get `false`). When `cross_project_label` is used, each result also carries `source_project_id` marking which project it came from. Every result includes the full field set (`id`/`project_id`/`summary`/`agent_id`/`kind`/`task_id`/`timestamp`/`score`/`learnings`/`handoff_note`/`tags`/`status`/`created_at`/`updated_at` — everything except `embedding`).
+
+#### `remagraph_status` — query a project's latest state
+
+Returns all active `status_update` memories, deduplicated by `task_id` (only the newest record per task survives). Also includes version-compatibility handshake info, so callers don't have to wait for a `remagraph_store` write to fail before learning about a version mismatch.
+
+| Parameter | Type | Description |
+|------|------|------|
+| `project_id` | `str` | Restrict to a single project (optional) |
+| `limit` | `int` | Max results to return (default 20, max 100) |
+| `all_projects` | `bool` | Default `false`; `true` removes the `project_id` filter |
+
+Beyond the existing `latest` array, the response always includes these compatibility handshake fields:
+
+| Field | Type | Description |
+|------|------|------|
+| `server_code_version` | `int` | Schema version of the code currently running |
+| `db_schema_version` | `int \| null` | The schema version actually recorded in the database's `_meta` table (a defensive read) |
+| `min_reader_version` | `int \| null` | Oldest code version allowed to read this database; `null` if the database predates this mechanism |
+| `min_writer_version` | `int \| null` | Oldest code version allowed to write to this database; same `null` behavior as above |
+| `upgrade_hint` | `str \| null` | Upgrade guidance text embedded in the database; `null` if absent |
+| `read_only` | `bool` | Whether the current connection is in read-only degraded mode (see "Governance & Security" below) |
+
+### Governance & Security
+
+- **Rate limiting** — per-agent token bucket (60 calls / 60 seconds) to prevent abuse
+- **Input validation** — `task_id` / `agent_id` are checked against format rules via Pydantic validators
+- **Path safety** — `REMAGRAPH_STATE_DIR` rejects system directory paths
+- **Audit rotation** — `audit-YYYYMM.jsonl`, split automatically by month
+- **DB size cap** — SQLite `max_page_count` set to a 100MB soft limit
+- **Migration** — built-in schema version tracking and a migration chain
+- **Version-compatibility degradation** — when a database's schema version is newer than the running code, the database's own `min_reader_version`/`min_writer_version` decide one of three outcomes: fully compatible (normal reads and writes), read-only degraded (writes rejected, reads unaffected), or refused outright. Callers can learn this ahead of time via `remagraph_status`'s compatibility handshake fields, without waiting for a write to fail. See the "Version Compatibility" section of [`DESIGN.md`](./DESIGN.md)
+- **Cross-project registry** — `project_registry` automatically records known projects and their `state_dir`, backing `remagraph_search`'s `cross_project_label` read-only cross-project lookups. See the "Cross-Project Collaboration" section of [`DESIGN.md`](./DESIGN.md)
+- **Stale-record cleanup** — `cleanup_superseded()` can purge non-active records older than 90 days
+
+### CLI Subcommands (for headless agents)
+
+Besides MCP mode, `remagraph` supports the following CLI subcommands (all with JSON output):
+
+```bash
+# One-shot, most recommended: read memory → run the command → write memory
+remagraph auto --task-id task-001 --agent-id my-agent -- make test
+
+# Initialize
+remagraph init --project myproject
+
+# Write memory
+remagraph store \
+  --task-id task-001 --agent-id my-agent --kind status_update \
+  --summary "Task complete, all tests passing, no regressions found" \
+  --learnings '["Watch out for FastMCP lifecycle handling"]' \
+  --tags '["python","mcp"]'
+
+# Query (task-id alone is fine, query is not required)
+remagraph search --task-id task-001
+remagraph search --query "FastMCP lifecycle" --top-k 5
+
+# Query latest status
+remagraph status --limit 10
+```
+
+Plain-language convention: [`docs/task-memory-convention.md`](./docs/task-memory-convention.md).
+Full spec: [`DESIGN.md`](./DESIGN.md); audit contract: [`docs/audit.md`](./docs/audit.md).
+
+### Development & Verification
+
+```bash
+# uv is recommended
+uv sync --all-extras
+uv run ruff check src tests
+uv run mypy src/
+uv run pytest -m 'not slow'
+REMAGRAPH_STATE_DIR=$(mktemp -d) uv run pytest tests/smoke
+```
+
+- CI pipeline: smoke → lint (ruff + mypy) → test (coverage ≥80%); plus gitleaks, pip-audit, and mutmut (non-blocking).
+- Never let tests default to writing production state — smoke tests must use `REMAGRAPH_STATE_DIR` or pytest's `tmp_path`.
+
+### Resources
+
+- [`DESIGN.md`](./DESIGN.md) — the design source of truth: schema, arbitration rules, cross-project collaboration, version compatibility
+- [`CHANGELOG.md`](./CHANGELOG.md) — version history
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — how to contribute
+- [`SECURITY.md`](./SECURITY.md) — how to report a vulnerability
+- [`docs/architecture.md`](./docs/architecture.md) — system architecture
+- [`docs/task-memory-convention.md`](./docs/task-memory-convention.md) — plain-language guide to the task-memory convention
+- [`docs/audit.md`](./docs/audit.md) — the audit log contract
+- [`docs/governance/checklist.md`](./docs/governance/checklist.md) — the governance checklist
+
+### Support
+
+If RemaGraph is quietly keeping your agents' memory straight, you can support its development on [Ko-fi](https://ko-fi.com/aikenlin) (card or PayPal) or directly via [PayPal](https://paypal.me/aikenlin). Entirely optional — RemaGraph is, and stays, free.
+
+### License
+
+[Apache-2.0](./LICENSE)
+
+---
+
+## 繁體中文
+
+RemaGraph 是一套輕量的 MCP（Model Context Protocol）工具，設計給需要跨多個任務、多次交接、自主運作的 AI coding agent 使用。它做的事很單純：把 agent 一路上學到的、決定的、踩過的坑記下來，讓這條軌跡日後能被查回來——不管是同一個 agent，還是完全不同的另一個 agent 接手。與 CodeGraph 互補：CodeGraph 記的是「這段程式碼有什麼已知問題」，RemaGraph 記的是「處理過程中留下了什麼痕跡」。
 
 | 項目 | 現況 |
 |------|------|
-| **版本** | `0.2.0`（發行準備中；**尚未** PyPI，需 HITL tag） |
-| **狀態** | v2：安全/治理/可靠度 + CLI（init/auto/store/search/status） |
+| **版本** | `0.2.0`（發行準備中；**尚未**上架 PyPI，需要 human-in-the-loop 手動打 tag） |
+| **狀態** | v2：安全 / 治理 / 可靠度 + CLI（init/auto/store/search/status） |
 | **任務記憶慣例** | [`docs/task-memory-convention.md`](./docs/task-memory-convention.md) |
 | **發行準備** | [`docs/reviews/v2-release-prep.md`](./docs/reviews/v2-release-prep.md) |
 | **設計 SOT** | [`DESIGN.md`](./DESIGN.md) |
@@ -16,7 +348,7 @@
 | **貢獻指南** | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
 | **變更日誌** | [`CHANGELOG.md`](./CHANGELOG.md) |
 
-## 安裝（目前主要用於 Herdr Bridge 真實運作）
+### 安裝（目前主要用於 Herdr Bridge 真實運作）
 
 **目前主要用於 Herdr Bridge 真實運作，尚未對外公開發布 PyPI。**
 
@@ -40,17 +372,17 @@ cd RemaGraph
 uv pip install -e .
 ```
 
-依賴：Python ≥3.11、model2vec、mcp (FastMCP)、pydantic。
+依賴：Python ≥3.11、model2vec、mcp（FastMCP）、pydantic。
 
-## 快速開始（非技術使用者，5 分鐘上手）
+### 快速開始（非技術使用者，5 分鐘上手）
 
-1. 安裝（見上方「目前主要用於 Herdr Bridge 真實運作」安裝方式）
+1. 安裝（見上方「安裝」方式）。
 2. 初始化：
    ```bash
    remagraph init --project myproject
    source ~/.local/state/remagraph-myproject/env.sh
    ```
-3. 一鍵跑任務（自動讀記憶 + 執行 + 寫記憶）：
+3. 一鍵跑任務（自動讀記憶 → 執行 → 寫記憶）：
    ```bash
     remagraph auto --task-id fix-login-001 --agent-id my-ai -- echo "這裡換成你的真正指令"
     ```
@@ -61,7 +393,7 @@ uv pip install -e .
     TASK_ID=fix-login-001 AGENT_ID=my-ai ./remagraph-task.sh python my_agent.py
     ```
 
-**指揮塔想先只查記憶（不執行不寫入）**：
+**指揮塔想先只查記憶（不執行、不寫入）**：
 ```bash
 remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
 ```
@@ -70,19 +402,15 @@ remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
 
 新使用者可參考 [`docs/internal/alpha-test-playbook.md`](./docs/internal/alpha-test-playbook.md) 作為上手指南（含場景與回饋模板）。
 
-**注意**：目前已在 Herdr Bridge 真實運作中使用。尚未對外公開發布，聚焦發行前準備。
+**注意**：目前已在 Herdr Bridge 真實運作中使用，尚未對外公開發布，現階段聚焦發行前準備。
 
-## MCP 快速開始
+### MCP 快速開始
 
-### 1. MCP Client 設定
+#### 1. MCP Client 設定
 
-將 RemaGraph 掛到 MCP client 即可。以下為常見 client 設定範例：
+將 RemaGraph 掛到 MCP client 即可運作。以下為常見 client 設定範例：
 
-**注意（自 BUG 1 修復起）**：`remagraph serve` 現在**必須**在啟動時明確綁定
-單一 project——透過 `--project <id>` 參數，或 `REMAGRAPH_PROJECT` 環境變數
-擇一提供，兩者皆缺席時會快速失敗、不啟動 MCP stdio 迴圈（避免行程在繼承了
-「別的專案」環境變數的情況下悄悄跨專案讀寫）。每個 project 各自對應一個
-獨立的 `remagraph serve` 行程，不支援單一行程動態切換多個 project。
+**注意（自 BUG 1 修復起）**：`remagraph serve` 現在**必須**在啟動時明確綁定單一 project——透過 `--project <id>` 參數，或 `REMAGRAPH_PROJECT` 環境變數擇一提供，兩者皆缺席時會快速失敗、不會啟動 MCP stdio 迴圈（避免行程在繼承了「別的專案」環境變數的情況下悄悄跨專案讀寫）。每個 project 各自對應一個獨立的 `remagraph serve` 行程，不支援單一行程動態切換多個 project。
 
 **Claude Desktop**（`claude_desktop_config.json`）：
 
@@ -118,7 +446,7 @@ remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
 
 **OpenCode / Claude Code** — 任何支援 stdio MCP 的 client 皆可，設定方式同上。
 
-### 2. 環境變數
+#### 2. 環境變數
 
 | 變數 | 說明 | 預設值 |
 |------|------|--------|
@@ -127,9 +455,9 @@ remagraph auto --recall-only --task-id fix-login-001 --agent-id my-ai
 | `REMAGRAPH_FANOUT_CAP` | `search --cross-project-label`/`--include-related` 單次最多開幾個「其他」專案資料庫連線（`--fanout-cap` 優先於此環境變數） | `50` |
 | `REMAGRAPH_FANOUT_HARD_CAP` | 上述 cap 的硬性上限，僅供明確 opt-in 提高（一般不需調整） | `200` |
 
-目錄不存在時自動建立（權限 0700），DB 檔案權限 0600。路徑已加入安全性檢查（禁止系統目錄）。
+目錄不存在時自動建立（權限 `0700`），DB 檔案權限 `0600`。路徑已加入安全性檢查（禁止系統目錄）。
 
-### 3. CLI 入門
+#### 3. CLI 入門
 
 ```bash
 # 啟動 stdio MCP server（必須以 --project 或 REMAGRAPH_PROJECT 綁定單一 project）
@@ -145,11 +473,11 @@ remagraph search --query "FastMCP 生命週期" --top-k 5
 remagraph status --limit 10
 ```
 
-## 與 herdr Bridge 整合（指揮塔派工自動帶記憶）
+### 與 herdr Bridge 整合（指揮塔派工自動帶記憶）
 
-**目前狀態**：工具層（herdr-bridge hooks）+ 治理層已完成；組織層（herdr-org 指揮塔正式接入）僅設計階段，開發稍後。RemaGraph MemoryDispatcher 已就緒，準備 herdr-org 對接。跨專案溝通全程使用 ACP。
+**目前狀態**：工具層（herdr-bridge hooks）+ 治理層已完成；組織層（herdr-org 指揮塔正式接入）僅設計階段，開發稍後進行。RemaGraph 的 MemoryDispatcher 已就緒，準備 herdr-org 對接。跨專案溝通全程使用 ACP。
 
-如果您已經用 herdr Bridge 當指揮塔派工給 headless agent：
+如果您已經用 herdr Bridge 當指揮塔，派工給 headless agent：
 
 1. 在您的指揮塔程式中，使用我們提供的極簡幫手：
    ```bash
@@ -158,17 +486,17 @@ remagraph status --limit 10
    chmod +x simple-memory-helper.sh
    ```
 
-2. 在派工前呼叫它來取得記憶上下文，然後塞進送給 agent 的文字裡。
+2. 派工前先呼叫它取得記憶上下文，再塞進送給 agent 的文字裡。
 
-或者最簡單：讓 agent 啟動時使用上面的 `remagraph-task.sh` 包裝您的 agent 指令。
+或者最簡單的做法：讓 agent 啟動時直接用上面的 `remagraph-task.sh` 包裝您的 agent 指令。
 
-這樣指揮塔只要傳 task_id 給 agent，agent 就會自動記錄。
+這樣一來，指揮塔只需要傳 `task_id` 給 agent，agent 就會自動記錄。
 
-（詳細範例見 examples/herdr-bridge/ ）
+（詳細範例見 `examples/herdr-bridge/`。）
 
-**注意**：完整 herdr-org workload 驗證需待組織層開發時進行。目前僅設計藍圖階段。
+**注意**：完整的 herdr-org workload 驗證，需等組織層真正開發時才能進行。目前僅止於設計藍圖階段。
 
-**如何聯絡其他專案的指揮塔/agent**：跨專案協調（例如回報一個發現於某專案程式碼裡、但屬於該專案自己職責的 bug）建議直接寫入 RemaGraph 記憶，而非跨專案操作對方的檔案。完整的三層溝通管道使用指南已存在 RemaGraph 記憶裡（由 herdr-bridge 指揮塔維護），查詢方式：
+**如何聯絡其他專案的指揮塔/agent**：跨專案協調（例如回報一個發現於某專案程式碼裡、但屬於該專案自己職責的 bug）建議直接寫入 RemaGraph 記憶，而不是跨專案動手改對方的檔案。完整的三層溝通管道使用指南已存在 RemaGraph 記憶裡（由 herdr-bridge 指揮塔維護），查詢方式如下：
 
 ```bash
 remagraph search --project herdr-bridge --task-id herdr-bridge-three-channel-usage-guide
@@ -176,13 +504,13 @@ remagraph search --project herdr-bridge --task-id herdr-bridge-three-channel-usa
 remagraph search --cross-project-label topic:how-to-contact-tower
 ```
 
-## MCP 工具
+### MCP 工具
 
 RemaGraph 透過 MCP（stdio transport）暴露三個 tool，相容 Claude Desktop、Cursor 等主流 MCP 客戶端：
 
-### `remagraph_store` — 寫入記憶
+#### `remagraph_store` — 寫入記憶
 
-agent 寫入記憶，通過五條仲裁規則後寫入 SQLite + FTS5 index。
+agent 寫入記憶，通過五條仲裁規則後才會寫入 SQLite + FTS5 index。
 
 | 參數 | 型別 | 說明 |
 |------|------|------|
@@ -200,10 +528,10 @@ agent 寫入記憶，通過五條仲裁規則後寫入 SQLite + FTS5 index。
 四種 `kind` 的行為（PPLX Priority B）：
 - **`task_handoff`**：任務交接記錄，附 `handoff_note`
 - **`status_update`**：狀態更新，同 `task_id` 自動 supersede 舊記錄
-- **`discovered_constraint`**：發現的限制，可 `invalidates` 既有錯誤記憶
+- **`discovered_constraint`**：發現的限制，可 `invalidates` 既有的錯誤記憶
 - **`fleet_member`**：由 tower（LightCommander/AcpRouter）擁有，record/recycle 艦隊成員（task_id=fleet 自動 supersede）
 
-### `remagraph_search` — 查詢記憶
+#### `remagraph_search` — 查詢記憶
 
 FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/task_id 過濾。
 
@@ -222,9 +550,9 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 
 短查詢（≤2 字元）回傳空結果不拋錯。回應除 `results`/`has_more` 外，恆附加 `cross_project_fanout_capped`（`bool`，僅使用 `cross_project_label` 時有意義；一般查詢恆為 `false`）；使用 `cross_project_label` 時每筆結果另附 `source_project_id` 標示其來源專案。每筆結果涵蓋完整欄位（`id`/`project_id`/`summary`/`agent_id`/`kind`/`task_id`/`timestamp`/`score`/`learnings`/`handoff_note`/`tags`/`status`/`created_at`/`updated_at`，`embedding` 除外）。
 
-### `remagraph_status` — 查詢專案最新現況
+#### `remagraph_status` — 查詢專案最新現況
 
-回傳所有 active 的 `status_update` 記憶，以 `task_id` 去重（每 task 只留最新一筆）。同時附上版本相容性 handshake 資訊，讓呼叫端不必等 `remagraph_store` 寫入失敗才第一次得知是否有版本落差。
+回傳所有 active 的 `status_update` 記憶，以 `task_id` 去重（每個 task 只留最新一筆）。同時附上版本相容性 handshake 資訊，讓呼叫端不必等 `remagraph_store` 寫入失敗才第一次得知有版本落差。
 
 | 參數 | 型別 | 說明 |
 |------|------|------|
@@ -243,7 +571,7 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 | `upgrade_hint` | `str \| null` | 資料庫內建的升級指引文字；缺漏時為 `null` |
 | `read_only` | `bool` | 目前連線是否處於唯讀降級模式（見下方「治理與安全」） |
 
-## 治理與安全
+### 治理與安全
 
 - **Rate limiting**：per-agent token bucket（60 calls/60 秒），防止濫用
 - **輸入驗證**：`task_id` / `agent_id` 經 Pydantic validator 檢核格式
@@ -255,7 +583,7 @@ FTS5 BM25 全文檢索（trigram tokenizer，支援 CJK）+ tag/kind/agent_id/ta
 - **跨專案登記表**：`project_registry` 自動記錄已知 project 及其 state_dir，供 `remagraph_search` 的 `cross_project_label` 跨專案唯讀查詢使用，見 [`DESIGN.md`](./DESIGN.md) 的「跨專案協作」章節
 - **超期清理**：`cleanup_superseded()` 可清理 90 天前的非 active 記錄
 
-## CLI 子命令（headless agent 用）
+### CLI 子命令（headless agent 用）
 
 除 MCP mode 外，`remagraph` 支援以下 CLI 子命令（JSON 輸出）：
 
@@ -281,10 +609,10 @@ remagraph search --query "FastMCP 生命週期" --top-k 5
 remagraph status --limit 10
 ```
 
-白話慣例：[`docs/task-memory-convention.md`](./docs/task-memory-convention.md)  
+白話慣例：[`docs/task-memory-convention.md`](./docs/task-memory-convention.md)
 詳細規格：[`DESIGN.md`](./DESIGN.md)；Audit 合約：[`docs/audit.md`](./docs/audit.md)。
 
-## 開發與驗證
+### 開發與驗證
 
 ```bash
 # 建議使用 uv
@@ -296,8 +624,23 @@ REMAGRAPH_STATE_DIR=$(mktemp -d) uv run pytest tests/smoke
 ```
 
 - CI：smoke → lint（ruff + mypy）→ test（coverage ≥80）；另有 gitleaks、pip-audit、mutmut（非 blocking）。
-- 勿在測試中預設寫入生產 state；冒煙必須使用 `REMAGRAPH_STATE_DIR` 或 pytest `tmp_path`。
+- 勿在測試中預設寫入生產 state；冒煙測試必須使用 `REMAGRAPH_STATE_DIR` 或 pytest 的 `tmp_path`。
 
-## 授權
+### 資源
 
-Apache-2.0
+- [`DESIGN.md`](./DESIGN.md) — 設計 SOT：schema、仲裁規則、跨專案協作、版本相容性
+- [`CHANGELOG.md`](./CHANGELOG.md) — 版本變更歷史
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — 貢獻指南
+- [`SECURITY.md`](./SECURITY.md) — 安全漏洞回報方式
+- [`docs/architecture.md`](./docs/architecture.md) — 系統架構文件
+- [`docs/task-memory-convention.md`](./docs/task-memory-convention.md) — 任務記憶慣例白話說明
+- [`docs/audit.md`](./docs/audit.md) — Audit 日誌合約
+- [`docs/governance/checklist.md`](./docs/governance/checklist.md) — 治理檢查清單
+
+### 贊助支持
+
+如果 RemaGraph 默默幫您的 agent 群把記憶顧好了，歡迎到 [Ko-fi](https://ko-fi.com/aikenlin)（信用卡或 PayPal 皆可）或直接透過 [PayPal](https://paypal.me/aikenlin) 贊助它的後續開發。完全自由心證——RemaGraph 現在是、以後也會是免費的。
+
+### 授權
+
+[Apache-2.0](./LICENSE)
