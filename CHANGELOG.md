@@ -108,8 +108,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Apache-2.0** license and SPDX headers on `src/remagraph/*.py`.
 - **Test suite**: unit tests for models, DB, arbitration, dedup, store, search, audit, server; smoke tests under `tests/smoke/` with isolated temp state.
 
-[Unreleased]: https://github.com/aiken884/RemaGraph/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/aiken884/RemaGraph/compare/v0.1.0...v0.2.0
+[Unreleased]: https://github.com/aiken884/RemaGraph/compare/v0.3.1-alpha...HEAD
+[0.3.1-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.3.0-alpha...v0.3.1-alpha
+[0.3.0-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.2.0-alpha...v0.3.0-alpha
+[0.2.0-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.1.0...v0.2.0-alpha
 [0.1.0]: https://github.com/aiken884/RemaGraph/releases/tag/v0.1.0
 
 ## 繁體中文
@@ -220,6 +222,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Apache-2.0** 授權與 `src/remagraph/*.py` 的 SPDX headers。
 - **測試套件**：models、DB、arbitration、dedup、store、search、audit、server 的單元測試；`tests/smoke/` 下的獨立 temp state smoke tests。
 
-[Unreleased]: https://github.com/aiken884/RemaGraph/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/aiken884/RemaGraph/compare/v0.1.0...v0.2.0
+[Unreleased]: https://github.com/aiken884/RemaGraph/compare/v0.3.1-alpha...HEAD
+[0.3.1-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.3.0-alpha...v0.3.1-alpha
+[0.3.0-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.2.0-alpha...v0.3.0-alpha
+[0.2.0-alpha]: https://github.com/aiken884/RemaGraph/compare/v0.1.0...v0.2.0-alpha
 [0.1.0]: https://github.com/aiken884/RemaGraph/releases/tag/v0.1.0

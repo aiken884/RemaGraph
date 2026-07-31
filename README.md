@@ -19,8 +19,8 @@ RemaGraph is a lightweight **MCP** (Model Context Protocol) tool built for AI co
 
 | Item | Status |
 |------|--------|
-| **Version** | `0.2.0` (release prep in progress; **not yet** on PyPI — needs a human-in-the-loop tag) |
-| **Status** | v2: security / governance / reliability + CLI (init/auto/store/search/status) |
+| **Version** | `0.3.1-alpha` (internal alpha; **not yet** on PyPI — install via the git tag pin below) |
+| **Status** | v2: security / governance / reliability + cross-project collaboration + CLI (init/auto/store/search/status/maintain/link/migrate-project/install-hooks/serve) |
 | **Task memory convention** | [`docs/task-memory-convention.md`](./docs/task-memory-convention.md) |
 | **Release prep** | [`docs/reviews/v2-release-prep.md`](./docs/reviews/v2-release-prep.md) |
 | **Design SOT** | [`DESIGN.md`](./DESIGN.md) |
@@ -336,8 +336,8 @@ RemaGraph 是一套輕量的 MCP（Model Context Protocol）工具，設計給�
 
 | 項目 | 現況 |
 |------|------|
-| **版本** | `0.2.0`（發行準備中；**尚未**上架 PyPI，需要 human-in-the-loop 手動打 tag） |
-| **狀態** | v2：安全 / 治理 / 可靠度 + CLI（init/auto/store/search/status） |
+| **版本** | `0.3.1-alpha`(內部 alpha 階段;**尚未**上架 PyPI,安裝方式見下方的 git tag pin) |
+| **狀態** | v2:安全 / 治理 / 可靠度 + 跨專案協作 + CLI(init/auto/store/search/status/maintain/link/migrate-project/install-hooks/serve) |
 | **任務記憶慣例** | [`docs/task-memory-convention.md`](./docs/task-memory-convention.md) |
 | **發行準備** | [`docs/reviews/v2-release-prep.md`](./docs/reviews/v2-release-prep.md) |
 | **設計 SOT** | [`DESIGN.md`](./DESIGN.md) |
