@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [0.4.0-beta] - 2026-07-31
 
-> **Note**: This release marks RemaGraph's move from alpha to **beta**, and the **first time this repository itself is made public** — until now it only ran internally inside Herdr Bridge. This is **not** a 1.0 release: per [`BOUNDARIES.md`](./BOUNDARIES.md), pre-1.0 still means no frozen public API, and "beta" here means the feature set has stabilized enough for wider testing, not that MCP tool parameters or CLI subcommands are locked. The PyPI package itself is still not published — install via the git tag below (`uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.4.0-beta`).
+> **Note**: This release marks RemaGraph's move from alpha to **beta**, and the **first time this repository itself is made public** — until now it only ran internally as part of another project's internal tooling. This is **not** a 1.0 release: per [`BOUNDARIES.md`](./BOUNDARIES.md), pre-1.0 still means no frozen public API, and "beta" here means the feature set has stabilized enough for wider testing, not that MCP tool parameters or CLI subcommands are locked. The PyPI package itself is still not published — install via the git tag below (`uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.4.0-beta`).
 
 #### Changed
 - **Full pre-publication review cycle**: a dedicated documentation and hygiene pass ahead of making the repo public. Highlights:
@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Note**: This release is for internal use only and has not been published to PyPI. See the "Installation" section of the README for setup (`uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.3.1-alpha`).
 
 #### Fixed
-- **Security: `project_id` never actually drove `state_dir` resolution, so the safety valve never fired.** Real production incident: herdr-bridge's actual project directory was mistakenly connected to and continuously written/maintained by a different project (MegaNote's `remagraph serve`) — the audit log accumulated 24,974 `maintenance_completed` events but only 294 genuine `remagraph_store` events, and the `memories` table got pruned down to single digits. Root cause: neither the CLI subcommands nor `remagraph serve` passed the caller's actual `project_id` through to `_db.connect()`, so the built-in `safety_validate_project()` safety valve was never invoked. Which physical SQLite file got connected to depended entirely on the process's ambient `REMAGRAPH_STATE_DIR`/`REMAGRAPH_PROJECT` environment variables at the time, completely decoupled from any explicitly supplied `--project`/`project_id`. Fixed per the PPLX architecture-review consensus: the CLI now passes `project_id` through to activate the existing safety valve; `remagraph serve` now enforces binding at startup — exactly one of `--project` / `REMAGRAPH_PROJECT` is required, and the process fails fast (never enters the MCP loop) if both are missing — and any tool call carrying a mismatched `project_id` is rejected outright. Dynamic multi-project routing within a single process is deliberately not supported (explicitly rejected by PPLX; see DESIGN.md for the rationale). Two rounds of independent adversarial review turned up and fixed further issues: the safety valve's core comparison logic was itself tautological — `resolve_project_state_dir()` echoed the env value back verbatim whenever the env var was already set, making the comparison always evaluate to False, so the real incident scenario would never have been caught — it is now wired to the existing `db.validate_project_metadata()` to perform genuine identity verification against `project.json`; a bug where `_record_violation`'s best-effort violation logging itself wrote into the victim directory; a liveness-check failure mode for "directory deleted externally" (POSIX unlinked-inode semantics); and a gap where the existing top-level CLI guard (`8edb739e`) correctly blocked the write but left no audit trail behind.
+- **Security: `project_id` never actually drove `state_dir` resolution, so the safety valve never fired.** Real production incident: a real, actively-used project's actual project directory was mistakenly connected to and continuously written/maintained by a different project's `remagraph serve` process — the audit log accumulated 24,974 `maintenance_completed` events but only 294 genuine `remagraph_store` events, and the `memories` table got pruned down to single digits. Root cause: neither the CLI subcommands nor `remagraph serve` passed the caller's actual `project_id` through to `_db.connect()`, so the built-in `safety_validate_project()` safety valve was never invoked. Which physical SQLite file got connected to depended entirely on the process's ambient `REMAGRAPH_STATE_DIR`/`REMAGRAPH_PROJECT` environment variables at the time, completely decoupled from any explicitly supplied `--project`/`project_id`. Fixed per the PPLX architecture-review consensus: the CLI now passes `project_id` through to activate the existing safety valve; `remagraph serve` now enforces binding at startup — exactly one of `--project` / `REMAGRAPH_PROJECT` is required, and the process fails fast (never enters the MCP loop) if both are missing — and any tool call carrying a mismatched `project_id` is rejected outright. Dynamic multi-project routing within a single process is deliberately not supported (explicitly rejected by PPLX; see DESIGN.md for the rationale). Two rounds of independent adversarial review turned up and fixed further issues: the safety valve's core comparison logic was itself tautological — `resolve_project_state_dir()` echoed the env value back verbatim whenever the env var was already set, making the comparison always evaluate to False, so the real incident scenario would never have been caught — it is now wired to the existing `db.validate_project_metadata()` to perform genuine identity verification against `project.json`; a bug where `_record_violation`'s best-effort violation logging itself wrote into the victim directory; a liveness-check failure mode for "directory deleted externally" (POSIX unlinked-inode semantics); and a gap where the existing top-level CLI guard (`8edb739e`) correctly blocked the write but left no audit trail behind.
 - **Fan-out cap truncation was indistinguishable from an empty result.** When `cross_project_label`/`include_related` hit the candidate-project cap (previously hardcoded at 20), the response came back as `results: []` plus `cross_project_fanout_capped: true`, but the exit code stayed 0 — a caller that only inspects `results` could easily read that as "no memory found." The cap is now configurable (`--fanout-cap` / `REMAGRAPH_FANOUT_CAP`, default raised to 50, hard ceiling of 200 unless raised further via `REMAGRAPH_FANOUT_HARD_CAP` — no unlimited escape hatch is provided), the response now includes `candidates_total` / `candidates_searched` / `candidates_skipped` (`total == searched + skipped` always holds), and the CLI now exits with code 2 on truncation (distinct from 0 = complete, 1 = genuine error). While fixing this, also found and fixed a bug in `_cross_project_fanout()` where results were duplicated whenever the caller's own project happened to be physically the same SQLite file as an already-registered project — it now compares physical paths via `PRAGMA database_list` instead of comparing `project_id` strings alone.
 
 ### [0.3.0-alpha] - 2026-07-25 (internal alpha)
@@ -47,10 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`REMAGRAPH_HOME` environment variable**: lets external subprocess consumers (e.g. integration tests driving the actually-installed remagraph CLI) also isolate where the shared `project_registry`/`project_edges` registries land, closing a gap that was previously only coverable via Python-level monkeypatching (limited to a single process); independent of, and non-interfering with, the existing `REMAGRAPH_STATE_DIR` (a single project's own state dir).
 
 #### Changed
-- **herdr integration tier clarified**: PPLX Priority B complete: recall/store enforced across every ACP dispatch path; MemoryDispatcher / hooks unified.
+- **Downstream integration tier clarified**: PPLX Priority B complete: recall/store enforced across every ACP dispatch path; MemoryDispatcher / hooks unified.
 - All related docs aligned (`dispatch_with_memory.py`, README, `task-memory-convention.md`, DESIGN.md).
 - Cross-project communication continues to go through direct ACP coordination; fleet management is recorded by the tower via RemaGraph.
-- Release-readiness docs updated to reflect the real-world state of Herdr Bridge operations; no tag cut yet.
+- Release-readiness docs updated to reflect the real-world state of downstream integration operations; no tag cut yet.
 
 #### Fixed
 - **`remagraph_search` / `remagraph_status` responses were missing fields**: `search._row_to_result()` previously assembled only 8 fields — `id`/`project_id`/`summary`/`agent_id`/`kind`/`task_id`/`timestamp`/`score` — omitting `handoff_note`/`learnings`/`tags`/`status`/`created_at`/`updated_at` even though they existed in the database. Now included, and `get_status()` reuses the fixed `_row_to_result()` so the same class of field omission can't recur independently in two places.
@@ -63,7 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [0.2.0-alpha] - 2026-07-22 (internal alpha)
 
-> **Note**: This release is for internal use only and has not been published to PyPI. Used solely for internal herdr Bridge testing and standalone headless-agent testing.
+> **Note**: This release is for internal use only and has not been published to PyPI. Used solely for internal downstream integration testing and standalone headless-agent testing.
 
 #### Added
 
@@ -74,12 +74,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`remagraph store` / `search` / `status`**: CLI subcommands, JSON to stdout (argparse, zero new dependencies); MCP mode remains `remagraph serve`
 - **`search`** now supports passing **only `--task-id`** (no `--query` required), for reviewing a task's trajectory
 - **Minimal wrapper script**: `examples/simple/remagraph-task.sh`
-- **herdr Bridge examples**: `examples/herdr-bridge/dispatch_with_memory.py`, `simple-memory-helper.sh`
+- **Downstream integration examples**: `examples/herdr-bridge/dispatch_with_memory.py`, `simple-memory-helper.sh`
 - **Plain-language conventions doc**: `docs/task-memory-convention.md`
 - **Internal test playbook**: `docs/internal/alpha-test-playbook.md` (test scenarios, naming rules, feedback template)
 - **Tower automation prompt doc**: `docs/internal/指揮塔自動化提示詞.md` (for another agent's implementation)
 - **One-key install script**: `scripts/one-key-install.sh`
-- init and quickstart substantially expanded with guidance for non-technical users and herdr usage
+- init and quickstart substantially expanded with guidance for non-technical users and downstream integration usage
 
 ##### Security / governance / reliability (v2 Phase 1-2)
 - **Path traversal defense (A3)**: `REMAGRAPH_STATE_DIR` regex validation + forbidden-system-directory check after `resolve()`
@@ -135,7 +135,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [0.4.0-beta] — 2026-07-31
 
-> **注意**：此版本是 RemaGraph 從 alpha 進入 **beta** 的里程碑，也是**這個 repo 本身第一次對外公開**——在此之前僅在 Herdr Bridge 內部真實運作使用。這**不是** 1.0 發行：依 [`BOUNDARIES.md`](./BOUNDARIES.md)，pre-1.0 期間依然沒有凍結的公開 API，這裡的「beta」指的是功能集已相對穩定、可開始更廣泛測試，不代表 MCP tool 參數或 CLI 子指令已經鎖定不變。PyPI 套件本身仍未發布——安裝方式請透過下方 git tag（`uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.4.0-beta`）。
+> **注意**：此版本是 RemaGraph 從 alpha 進入 **beta** 的里程碑，也是**這個 repo 本身第一次對外公開**——在此之前僅作為其他專案內部工具的一部分真實運作使用。這**不是** 1.0 發行：依 [`BOUNDARIES.md`](./BOUNDARIES.md)，pre-1.0 期間依然沒有凍結的公開 API，這裡的「beta」指的是功能集已相對穩定、可開始更廣泛測試，不代表 MCP tool 參數或 CLI 子指令已經鎖定不變。PyPI 套件本身仍未發布——安裝方式請透過下方 git tag（`uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.4.0-beta`）。
 
 #### Changed
 - **一次完整的發行前審查週期**：正式公開前的文件與清理專項審查，重點如下：
@@ -149,7 +149,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **注意**：此版本僅供內部使用，尚未對外發布 PyPI。安裝方式見 README「安裝」章節（`uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.3.1-alpha`）。
 
 #### Fixed
-- **安全性：`project_id` 未真正驅動 state_dir 解析，安全閥從未被觸發**：真實生產事故——herdr-bridge 的真實 project 目錄被其他專案（MegaNote 的 `remagraph serve`）誤連並持續寫入/維護，audit log 累積 24974 次 `maintenance_completed` 但只有 294 次真正的 `remagraph_store`，`memories` 表被清到只剩個位數。根因：CLI 各子命令與 `remagraph serve` 呼叫 `_db.connect()` 時皆未傳入呼叫端實際拿到的 `project_id`，導致內建的 `safety_validate_project()` 安全閥從未被觸發，實際連到哪個實體 SQLite 檔案只看 process 環境當下的 `REMAGRAPH_STATE_DIR`/`REMAGRAPH_PROJECT`，與明確傳入的 `--project`/`project_id` 完全脫鉤。依 PPLX 架構審查共識修復：CLI 補傳 `project_id` 啟用既有安全閥；`remagraph serve` 新增啟動時強制綁定（`--project`/`REMAGRAPH_PROJECT` 二擇一，皆缺席即 fail-fast，不進入 MCP 迴圈），任何 tool call 帶不同 `project_id` 一律拒絕；刻意不支援單一 process 動態多專案路由（PPLX 明確否決，理由見 DESIGN.md）。兩輪獨立對抗式審查發現並修復：安全閥核心比較邏輯原是套套邏輯（`resolve_project_state_dir()` 在 env 已設定時逐字回傳該值，導致比較恆為 False，真實事故情境完全沒被擋下）——已接上既有的 `db.validate_project_metadata()` 讀取 `project.json` 做真正身分比對；`_record_violation` 的 best-effort 違規記錄本身誤寫進受害目錄的問題；liveness check 對「目錄被外部刪除」場景失效的問題（POSIX unlinked-inode 語意）；CLI 頂層既有守衛（`8edb739e`）正確擋下寫入但未留 audit trail 的缺口。
+- **安全性：`project_id` 未真正驅動 state_dir 解析，安全閥從未被觸發**：真實生產事故——一個真實使用中的專案目錄被另一個專案的 `remagraph serve` 行程誤連並持續寫入/維護，audit log 累積 24974 次 `maintenance_completed` 但只有 294 次真正的 `remagraph_store`，`memories` 表被清到只剩個位數。根因：CLI 各子命令與 `remagraph serve` 呼叫 `_db.connect()` 時皆未傳入呼叫端實際拿到的 `project_id`，導致內建的 `safety_validate_project()` 安全閥從未被觸發，實際連到哪個實體 SQLite 檔案只看 process 環境當下的 `REMAGRAPH_STATE_DIR`/`REMAGRAPH_PROJECT`，與明確傳入的 `--project`/`project_id` 完全脫鉤。依 PPLX 架構審查共識修復：CLI 補傳 `project_id` 啟用既有安全閥；`remagraph serve` 新增啟動時強制綁定（`--project`/`REMAGRAPH_PROJECT` 二擇一，皆缺席即 fail-fast，不進入 MCP 迴圈），任何 tool call 帶不同 `project_id` 一律拒絕；刻意不支援單一 process 動態多專案路由（PPLX 明確否決，理由見 DESIGN.md）。兩輪獨立對抗式審查發現並修復：安全閥核心比較邏輯原是套套邏輯（`resolve_project_state_dir()` 在 env 已設定時逐字回傳該值，導致比較恆為 False，真實事故情境完全沒被擋下）——已接上既有的 `db.validate_project_metadata()` 讀取 `project.json` 做真正身分比對；`_record_violation` 的 best-effort 違規記錄本身誤寫進受害目錄的問題；liveness check 對「目錄被外部刪除」場景失效的問題（POSIX unlinked-inode 語意）；CLI 頂層既有守衛（`8edb739e`）正確擋下寫入但未留 audit trail 的缺口。
 - **fan-out cap 截斷語意誤讀為空結果**：`cross_project_label`/`include_related` 達到候選專案上限（原寫死 20）時，回應 `results: []` + `cross_project_fanout_capped: true` 但 exit code 仍是 0，容易被只看 `results` 的呼叫端誤判為「查無此記憶」。改為 cap 可設定（`--fanout-cap`/`REMAGRAPH_FANOUT_CAP`，預設提高為 50，硬上限 200，`REMAGRAPH_FANOUT_HARD_CAP` 才可再提高，不提供無上限逃生口），回應新增 `candidates_total`/`candidates_searched`/`candidates_skipped`（`total == searched + skipped` 恆成立），CLI 於截斷時 exit code 改為 2（有別於 0=完整、1=真正錯誤）。修復過程一併發現並修好 `_cross_project_fanout()` 對「呼叫端自己與某個已註冊專案物理上是同一份 SQLite 檔案」時重複回傳結果的 bug（改用 `PRAGMA database_list` 取得實體路徑比對，而非僅比對 `project_id` 字串）。
 
 ### [0.3.0-alpha] — 2026-07-25（內部 Alpha 測試版）
@@ -173,10 +173,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`REMAGRAPH_HOME` 環境變數**：讓外部 subprocess 消費端（例如透過真正安裝的 remagraph CLI 做整合測試）也能隔離共用 `project_registry`/`project_edges` 登記表的落地位置，補齊過去只有 Python 層級 monkeypatch（僅限同一 process 內）才能隔離的缺口，與既有 `REMAGRAPH_STATE_DIR`（單一專案自己的 state dir）是獨立、互不干擾的兩個機制。
 
 #### Changed
-- **herdr 整合層級澄清**：PPLX Priority B 完成：recall/store 在所有 ACP 派工路徑強制；MemoryDispatcher / hooks 統一。
+- **下游整合層級澄清**：PPLX Priority B 完成：recall/store 在所有 ACP 派工路徑強制；MemoryDispatcher / hooks 統一。
 - 所有相關文件已對齊（dispatch_with_memory.py、README、task-memory-convention.md、DESIGN.md）。
 - 跨專案溝通持續使用 ACP 直接協調；fleet 管理由 tower 透過 RemaGraph 記錄。
-- 發行準備文件更新：反映 Herdr Bridge 真實運作現況，暫不 tag 發布。
+- 發行準備文件更新：反映下游整合真實運作現況，暫不 tag 發布。
 
 #### Fixed
 - **`remagraph_search` / `remagraph_status` 回傳結果漏欄位**：`search._row_to_result()` 先前只組裝 `id`/`project_id`/`summary`/`agent_id`/`kind`/`task_id`/`timestamp`/`score` 8 個欄位，遺漏 `handoff_note`/`learnings`/`tags`/`status`/`created_at`/`updated_at`，即使資料庫裡確實存在。已補齊，且 `get_status()` 改為重用修好後的 `_row_to_result()`，避免同一類欄位遺漏日後在兩處各自重複發生。
@@ -189,7 +189,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [0.2.0-alpha] — 2026-07-22（內部 Alpha 測試版）
 
-> **注意**：此版本僅供內部使用，尚未對外發布 PyPI。僅用於 herdr Bridge 內部測試與獨立 headless agent 測試。
+> **注意**：此版本僅供內部使用，尚未對外發布 PyPI。僅用於下游整合內部測試與獨立 headless agent 測試。
 
 #### Added
 
@@ -200,12 +200,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`remagraph store` / `search` / `status`**：CLI 子命令，JSON 輸出到 stdout（argparse、零新依賴）；MCP 模式維持 `remagraph serve`
 - **`search` 支援只帶 `--task-id`**（不必 `--query`），方便任務軌跡回顧
 - **極簡包裝腳本**：`examples/simple/remagraph-task.sh`
-- **herdr Bridge 範例**：`examples/herdr-bridge/dispatch_with_memory.py`、`simple-memory-helper.sh`
+- **下游整合範例**：`examples/herdr-bridge/dispatch_with_memory.py`、`simple-memory-helper.sh`
 - **白話慣例文件**：`docs/task-memory-convention.md`
 - **內部測試 Playbook**：`docs/internal/alpha-test-playbook.md`（含測試場景、命名規則、回饋模板）
 - **指揮塔自動化提示詞**：`docs/internal/指揮塔自動化提示詞.md`（供另一 Agent 實作）
 - **一鍵安裝腳本**：`scripts/one-key-install.sh`
-- init 與 quickstart 大幅強化非技術使用者與 herdr 使用說明
+- init 與 quickstart 大幅強化非技術使用者與下游整合使用說明
 
 ##### 安全 / 治理 / 可靠度（v2 Phase 1–2）
 - **路徑穿越防禦 (A3)**：`REMAGRAPH_STATE_DIR` 字元正則驗證 + `resolve()` 後禁止系統目錄
