@@ -7,9 +7,26 @@ All notable changes to RemaGraph will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### [Unreleased]
+
+#### Added
+- **RemaGraph is now published on PyPI**: `pip install remagraph` / `uv tool install remagraph`. The `publish.yml` OIDC Trusted Publishing pipeline, previously configured but never verified end-to-end, produced its first confirmed successful publish. Installation docs now recommend the PyPI install; the git-tag-pinned install remains available for pinning a specific release or tracking `main`.
+
+#### Changed
+- **RemaGraph no longer references any other specific downstream project by name**, in either its documentation or its code. Previously, README.md, DESIGN.md, ADOPTERS.md, GOVERNANCE.md, MAINTAINERS.md, BOUNDARIES.md, and a dozen internal design/planning/review documents under `docs/` described integration with, or cited real usage by, one particular downstream orchestration project. All of that has been anonymized or removed so RemaGraph reads as, and functions as, a fully standalone tool — this was an explicit design requirement, not just a documentation cleanup. Concretely:
+  - Removed the `examples/herdr-bridge/` example directory and two internal planning documents whose entire content was specific to that integration (their content couldn't be meaningfully generalized without becoming vacuous).
+  - Genericized every remaining mention across the files listed above, replacing named references with generic language (e.g. "a downstream orchestration system") while preserving the underlying technical rationale — no explanatory content was lost, only the specific external project's identity.
+  - Anonymized the real production-incident narrative in this file's own `[0.3.1-alpha]` entry below (root cause, numbers, and fix remain fully documented; only the two external project names were removed).
+
+#### Security
+- **The safety valve's `herdr-*` project-prefix restriction is now a configurable allowlist, not a hardcoded string.** `maintenance.safety_validate_project()` previously refused any `project_id` starting with the literal prefix `"herdr-"` from using the default database — a hardcoded dependency on one specific project's naming convention. It's now driven by the `REMAGRAPH_RESTRICTED_PREFIXES` environment variable (comma-separated prefix list, default empty = no restriction), so any deployment can opt into the same protection for its own naming convention. Behavior is unchanged for anyone who sets the equivalent prefix; the only new behavior is that, by default (unset), no prefix is restricted. Verified via independent adversarial review, including the empty-string-prefix edge case (confirmed it cannot accidentally match every project).
+
+#### CI
+- Reduced GitHub Actions consumption: the `smoke`/`test` job matrix now runs macOS on a single Python version instead of three (macOS runner-minutes are billed at a 10x multiplier over Linux), and `mutmut` (mutation testing, already non-blocking) was moved off the push/pull_request trigger onto a weekly schedule, then disabled entirely pending future re-enablement — running a full mutation-testing pass on every single push was disproportionately expensive for a purely informational, non-gating signal.
+
 ### [0.4.0-beta] - 2026-07-31
 
-> **Note**: This release marks RemaGraph's move from alpha to **beta**, and the **first time this repository itself is made public** — until now it only ran internally as part of another project's internal tooling. This is **not** a 1.0 release: per [`BOUNDARIES.md`](./BOUNDARIES.md), pre-1.0 still means no frozen public API, and "beta" here means the feature set has stabilized enough for wider testing, not that MCP tool parameters or CLI subcommands are locked. The PyPI package itself is still not published — install via the git tag below (`uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.4.0-beta`).
+> **Note**: This release marks RemaGraph's move from alpha to **beta**, and the **first time this repository itself is made public** — until now it only ran internally as part of another project's internal tooling. This is **not** a 1.0 release: per [`BOUNDARIES.md`](./BOUNDARIES.md), pre-1.0 still means no frozen public API, and "beta" here means the feature set has stabilized enough for wider testing, not that MCP tool parameters or CLI subcommands are locked. The PyPI package itself was not yet published at the time this version was tagged — it was published shortly after, see [Unreleased] below.
 
 #### Changed
 - **Full pre-publication review cycle**: a dedicated documentation and hygiene pass ahead of making the repo public. Highlights:
@@ -133,9 +150,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 格式依循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 版本號依循 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
 
+### [Unreleased]
+
+#### Added
+- **RemaGraph 已正式上架 PyPI**：`pip install remagraph` / `uv tool install remagraph`。`publish.yml` 的 OIDC Trusted Publishing 發布流程先前已設定但從未真正驗證跑通過，這次第一次確認成功發布。安裝文件已改為推薦 PyPI 安裝方式；git tag pin 安裝方式仍保留，供釘住特定版本或追蹤 `main` 分支使用。
+
+#### Changed
+- **RemaGraph 的文件與程式碼裡不再具名指涉任何其他特定的下游專案**。先前 README.md、DESIGN.md、ADOPTERS.md、GOVERNANCE.md、MAINTAINERS.md、BOUNDARIES.md，以及 `docs/` 底下十幾份內部設計/規劃/審查文件，都描述了與某個特定下游協調系統的整合細節或真實採用案例。這些內容全部經過匿名化或移除，讓 RemaGraph 讀起來、也真正能夠作為一個完全獨立的工具存在——這是明確的設計要求，不只是文件整理。具體來說：
+  - 移除了 `examples/herdr-bridge/` 範例目錄與兩份整篇內容都專屬於該整合的內部規劃文件（這些內容無法在保留意義的前提下泛化，強行改寫只會變得空洞）。
+  - 對上述所有檔案裡其餘的具名提及做了泛化改寫，改成通用措辭（例如「某個下游協調系統」），同時保留背後完整的技術理由——沒有遺失任何說明內容，只是拿掉了外部專案的具體身份。
+  - 匿名化了本檔案下方 `[0.3.1-alpha]` 條目裡描述的真實生產事故敘述（根因、數字、修復方式完整保留，只移除了兩個外部專案的名稱）。
+
+#### Security
+- **安全閥門裡的 `herdr-*` 專案前綴限制規則，改成可設定的允許清單，不再寫死字串。** `maintenance.safety_validate_project()` 先前會拒絕任何以字面字串 `"herdr-"`開頭的 `project_id` 使用 default 資料庫——這是寫死綁定另一個特定專案命名慣例的做法。現在改由環境變數 `REMAGRAPH_RESTRICTED_PREFIXES` 驅動（逗號分隔的前綴清單，預設空字串＝不限制），讓任何部署都能為自己的命名慣例選擇啟用同樣的保護。對於有設定對應前綴的使用者，行為完全不變；唯一的新行為是預設（未設定）時不限制任何前綴。已經獨立對抗式審查驗證，包含空字串前綴這個邊界案例（確認不會意外比對到所有專案）。
+
+#### CI
+- 降低 GitHub Actions 消耗：`smoke`/`test` job 的矩陣現在 macOS 只跑單一 Python 版本而非三個（macOS runner 分鐘數是 Linux 的 10 倍計費）；`mutmut`（mutation testing，本來就是 non-blocking）從 push/pull_request 觸發改成每週排程，之後又整個關閉,待未來需要時再重新啟用——對一個純參考、不 gate 任何東西的指標來說，每次 push 都跑一次完整 mutation testing 太不成比例地昂貴。
+
 ### [0.4.0-beta] — 2026-07-31
 
-> **注意**：此版本是 RemaGraph 從 alpha 進入 **beta** 的里程碑，也是**這個 repo 本身第一次對外公開**——在此之前僅作為其他專案內部工具的一部分真實運作使用。這**不是** 1.0 發行：依 [`BOUNDARIES.md`](./BOUNDARIES.md)，pre-1.0 期間依然沒有凍結的公開 API，這裡的「beta」指的是功能集已相對穩定、可開始更廣泛測試，不代表 MCP tool 參數或 CLI 子指令已經鎖定不變。PyPI 套件本身仍未發布——安裝方式請透過下方 git tag（`uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.4.0-beta`）。
+> **注意**：此版本是 RemaGraph 從 alpha 進入 **beta** 的里程碑，也是**這個 repo 本身第一次對外公開**——在此之前僅作為其他專案內部工具的一部分真實運作使用。這**不是** 1.0 發行：依 [`BOUNDARIES.md`](./BOUNDARIES.md)，pre-1.0 期間依然沒有凍結的公開 API，這裡的「beta」指的是功能集已相對穩定、可開始更廣泛測試，不代表 MCP tool 參數或 CLI 子指令已經鎖定不變。這個版本打 tag 的當下 PyPI 套件本身還沒發布——稍後即發布成功，見下方 [Unreleased]。
 
 #### Changed
 - **一次完整的發行前審查週期**：正式公開前的文件與清理專項審查，重點如下：
