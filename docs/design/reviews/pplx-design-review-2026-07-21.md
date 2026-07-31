@@ -3,7 +3,6 @@ type: design-review
 status: approve_with_changes
 date: 2026-07-21
 reviewer: PPLX/claude-sonnet-4-6
-orchestrated_by: CommandTower
 ---
 
 # RemaGraph 設計階段 — PPLX 對抗式審查報告
@@ -18,7 +17,7 @@ orchestrated_by: CommandTower
 
 ### **APPROVE_WITH_CHANGES**
 
-設計整體品質高，結構清晰，跨文件內部一致性良好，邊界設計（不耦合 herdr-*）執行徹底。但有 **3 個 Blocking Issues** 必須在設計文件定案前解決，另有數個值得修正的非阻塞問題。
+設計整體品質高，結構清晰，跨文件內部一致性良好，邊界設計（核心工具層與外部整合方案解耦）執行徹底。但有 **3 個 Blocking Issues** 必須在設計文件定案前解決，另有數個值得修正的非阻塞問題。
 
 ---
 

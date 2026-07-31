@@ -7,7 +7,7 @@
 | **套件版本** | `0.1.0`（`pyproject.toml` / `src/remagraph/__init__.py`） |
 | **證據 commit** | `ef666a5`（polish：mutmut / Dependabot / SPDX）及之前 WU 實作鏈 |
 | **遠端** | `origin/main` private `aiken884/RemaGraph` |
-| **Orchestrated-by** | CommandTower（fleet 實作；本檔為指揮塔收斂紀錄） |
+| **Orchestrated-by** | 多 agent 協作實作；本檔為收斂紀錄 |
 
 > **活清單**：治理勾選以 [`docs/governance/checklist.md`](../governance/checklist.md) 為準。  
 > **對抗審查摘要**：[`v1-adversarial-dispatch-summary.md`](./v1-adversarial-dispatch-summary.md)。  
@@ -36,7 +36,7 @@ RemaGraph v1 已可在本機 editable install 後，以 **stdio MCP** 提供三�
 | CI | smoke → lint → test；另 gitleaks / pip-audit / mutmut（mutmut 非 blocking） |
 | 依賴掃描 | Dependabot（pip + github-actions）已設定 |
 
-### 本機驗收快照（指揮塔 2026-07-21 重跑）
+### 本機驗收快照（2026-07-21 重跑）
 
 | Gate | 結果 |
 |------|------|
@@ -82,4 +82,4 @@ RemaGraph v1 已可在本機 editable install 後，以 **stdio MCP** 提供三�
 - `README.md` — 補現況／版本／文件索引
 - `docs/design/00-index.md` — 補「設計已落地 v0.1.0」一行
 
-**不進 git**：`.omo/`、`.command-tower/tasks/prompts/*`（派工暫存）。
+**不進 git**：`.omo/`、任務派工暫存目錄（如 `.tasks/prompts/*`）。

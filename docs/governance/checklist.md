@@ -3,7 +3,7 @@
 | 項目 | 內容 |
 |------|------|
 | **來源** | Vault《通用專案治理框架與檢查清單》（P0／P1／P2） |
-| **專案適配** | RemaGraph v2 工具層+治理層已完成（herdr-bridge ACP hooks + RemaGraph MemoryDispatcher）；組織層（herdr-org）僅設計階段，開發稍後；內部 Alpha |
+| **專案適配** | RemaGraph v2 工具層+治理層已完成（下游整合專案的 hooks + RemaGraph MemoryDispatcher）；上層協調機制僅設計階段，開發稍後；內部 Alpha |
 | **對應計畫** | [`docs/plans/implementation-plan-v1.md`](../plans/implementation-plan-v1.md) §11 |
 | **收斂狀態** | [`docs/reviews/v1-closeout-status.md`](../reviews/v1-closeout-status.md) |
 | **標記** | `[x]` 已完成 · `[~]` 進行中／部分 · `[ ]` 未做 · `[-]` 刻意延後（附理由） |
@@ -59,7 +59,7 @@
 
 ### P0-4 代碼審查與對抗式驗證
 
-- [x] 指揮塔章程：每機制對抗式審查、route() 四眼 — 見 `docs/reviews/v1-adversarial-dispatch-summary.md`
+- [x] 治理章程：每機制對抗式審查、四眼審核機制 — 見 `docs/reviews/v1-adversarial-dispatch-summary.md`
 - [x] 每個功能 WU 合入前：實作 agent ≠ 審查 agent — 見 `docs/reviews/v1-adversarial-dispatch-summary.md`
 - [x] 對抗審查發現寫入 `docs/reviews/` 或 PR 註記 — 見 `docs/reviews/v1-adversarial-dispatch-summary.md`
 - [x] 問題關閉前不得標 WU done — v1 已完成
@@ -150,4 +150,4 @@
 - 2026-07-21：v1 收尾 — mutmut 降版 2.5.1（Python 3.12 + src-layout 相容，避開 v3 bug）、Dependabot 建立、SPDX 標頭補完、P0-4 全勾（指向 v1-adversarial-dispatch-summary）。仍開著的 `[ ]`：廢分支清理、branch protection（需人類 GitHub 設定）。
 - 2026-07-22：ship 前準備 — branch protection 設定完成、廢分支清理完成；全部 P0 項 `[x]`。
 - 2026-07-22：v2 完成 — Phase 1+2 全項實作（A3/A1/A2/D1/O5/O1/O3/O2 + 治理 CONTRIBUTING/PR/PyPI/ADR/Dependabot）；mypy strict 全過；ruff 全綠；216 tests passed。
-- 2026-07-22（後續）：發行前準備 — 更新 release-prep、README、CHANGELOG 以反映 Herdr Bridge 真實運作現況；暫不 tag 發布；開始進行 migration 驗證與營運準備。
+- 2026-07-22（後續）：發行前準備 — 更新 release-prep、README、CHANGELOG 以反映下游整合專案真實運作現況；暫不 tag 發布；開始進行 migration 驗證與營運準備。
