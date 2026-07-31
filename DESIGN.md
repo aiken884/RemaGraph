@@ -23,26 +23,23 @@ This document exists in two full, structurally-parallel versions: [English](#eng
 | **PyPI** | Target `pip install remagraph`; **v1 not yet published** (currently `pip install -e .` / install from source) |
 | **Package version** | `0.3.1` (see `pyproject.toml`); implementation closeout tracked in [`docs/reviews/v1-closeout-status.md`](docs/reviews/v1-closeout-status.md) |
 | **Python** | 3.11+, dependencies managed with uv |
-| **Relationship to external projects** | Fully independent (no code coupling). Coordinates directly with herdr-bridge via ACP, plus an example integration. The organization layer (herdr-org) is still design-stage only. The tool layer and governance layer are both complete today, and any AI coding agent can use RemaGraph directly. |
+| **Relationship to external projects** | Fully independent (no code coupling), and fully usable standalone by any AI coding agent today. It also exposes one stable external contract (the Audit Contract, see "External Boundaries" below) so that a higher-level orchestration or scheduling system covering multiple agents/projects can integrate with it without RemaGraph needing any project-specific knowledge; an example integration is provided under `examples/` for reference. |
 
 ---
 
 ### External Boundaries
 
-RemaGraph is an independent project; it is not aware of any external system. This section defines its relationship to commonly related projects, to prevent future maintainers from mistakenly assuming a dependency direction.
+RemaGraph is an independent project; it is not aware of any external system. This section defines how it relates to any project that might build on top of it, to prevent future maintainers from mistakenly assuming a dependency direction.
 
-#### Projects RemaGraph does not know about
+#### RemaGraph does not know its consumers
 
-RemaGraph **does not know** the following projects exist. Their names **must not appear** in RemaGraph's code, README, CHANGELOG, or API documentation:
+RemaGraph **does not know**, and must never encode, the identity of any project that consumes it — whether that's a single calling agent, a fleet of coding agents sharing one memory store, or a higher-level orchestration/scheduling layer sitting on top of several agents or projects. This holds no matter how tightly, or how officially, a given deployment happens to integrate with RemaGraph in practice: no consumer's name **may appear** in RemaGraph's code, README, CHANGELOG, or API documentation.
 
-| Project | Relationship |
-|------|------|
-| herdr-bridge | No code/API coupling. Coordinates directly via ACP, plus an example integration under `examples/herdr-bridge/`. herdr-bridge provides hooks; RemaGraph provides `MemoryDispatcher`. The organization layer (herdr-org) is currently in the design stage. |
-| herdr-gov | Same as above — RemaGraph does not know herdr-gov exists. |
+This isn't a hypothetical concern — RemaGraph's own memory model exists precisely because this kind of multi-agent, multi-project setup is common: several agents (or several related projects) may want one agent's discoveries to become visible to another, or a higher-level scheduler may want to confirm a memory write actually happened before treating a task as complete. RemaGraph supports these use cases through its own generic, stable contracts (below), never through project-specific integration code.
 
 #### How external scheduling systems consume RemaGraph
 
-RemaGraph exposes exactly one stable external contract: the **Audit Contract** (see the "Audit Contract" subsection under "Audit" below). Any scheduling system (e.g., herdr-gov) only needs to know two things:
+RemaGraph exposes exactly one stable external contract: the **Audit Contract** (see the "Audit Contract" subsection under "Audit" below). Any scheduling system built on top of RemaGraph only needs to know two things:
 
 1. The audit file path: `~/.local/state/remagraph/audit.jsonl`
 2. Look up, keyed by `task_id`, records where `action="remagraph_store"` and `status="stored"`
@@ -53,10 +50,10 @@ This document is the single source of truth (SOT) for the contract. If RemaGraph
 
 The following explicitly violate RemaGraph's boundary design:
 
-- ❌ Importing herdr-bridge inside RemaGraph's code
-- ❌ Describing RemaGraph in its README as "designed specifically for Herdr"
-- ❌ Mentioning RemaGraph in herdr-bridge's README or API documentation
-- ❌ Giving any RemaGraph MCP tool a Herdr-prefixed name
+- ❌ Importing any downstream/consumer project's code inside RemaGraph
+- ❌ Describing RemaGraph in its README as "designed specifically for [some particular downstream project]"
+- ❌ Naming or describing RemaGraph inside a downstream project's own README or API documentation as though it were a built-in component of that project
+- ❌ Giving any RemaGraph MCP tool a name prefixed with a downstream project's brand
 
 ---
 
@@ -231,7 +228,7 @@ Queries a project's current state. Returns all active `status_update` memories, 
 
 #### `remagraph_maintain`
 
-Runs automatic DB maintenance (WAL checkpoint, prune superseded/invalidated memories, FTS5 optimize, VACUUM, integrity check). Gated by `maintenance.safety_validate_project()` — the same single-authority safety valve the CLI `maintain` subcommand uses — so calling this tool for a project whose `state_dir` doesn't resolve correctly, or that fails the `herdr-*`-must-not-use-the-default-DB rule, fails closed rather than silently maintaining the wrong database.
+Runs automatic DB maintenance (WAL checkpoint, prune superseded/invalidated memories, FTS5 optimize, VACUUM, integrity check). Gated by `maintenance.safety_validate_project()` — the same single-authority safety valve the CLI `maintain` subcommand uses — so calling this tool for a project whose `state_dir` doesn't resolve correctly, or that fails the naming-convention check blocking certain reserved project-id prefixes from using the default DB, fails closed rather than silently maintaining the wrong database.
 
 **Request:**
 ```json
@@ -279,15 +276,15 @@ Runs automatic DB maintenance (WAL checkpoint, prune superseded/invalidated memo
 ```json
 { "status": "error", "reason": "..." }
 ```
-- Raised e.g. when `safety_validate_project()` rejects the project (mismatched `state_dir`, `herdr-*` pointed at the default DB, `project.json` metadata mismatch, etc.)
+- Raised e.g. when `safety_validate_project()` rejects the project (mismatched `state_dir`, a reserved-prefix project pointed at the default DB, `project.json` metadata mismatch, etc.)
 
 #### `remagraph_migrate_project`
 
-One-time migration of memories from a source project to a target project's independent DB (e.g. `default` → `herdr-bridge`), marking the originals `invalidated` in the source. This tool and the CLI's `migrate-project` subcommand (`cli.cmd_migrate_project`) both call the same shared core implementation — `store.migrate_project_memories(from_project, to_project, dry_run=...)` — so the two entry points always produce the same end state for the same inputs; neither has its own separate copy of the migration logic.
+One-time migration of memories from a source project to a target project's independent DB (e.g. `default` → `otherproject`), marking the originals `invalidated` in the source. This tool and the CLI's `migrate-project` subcommand (`cli.cmd_migrate_project`) both call the same shared core implementation — `store.migrate_project_memories(from_project, to_project, dry_run=...)` — so the two entry points always produce the same end state for the same inputs; neither has its own separate copy of the migration logic.
 
 **Request:**
 ```json
-{ "from_project": "default", "to_project": "herdr-bridge", "dry_run": false }
+{ "from_project": "default", "to_project": "otherproject", "dry_run": false }
 ```
 
 **Response:**
@@ -295,7 +292,7 @@ One-time migration of memories from a source project to a target project's indep
 {
   "status": "ok",
   "from": "default",
-  "to": "herdr-bridge",
+  "to": "otherproject",
   "dry_run": false,
   "migrated_count": 3,
   "skipped_ids": []
@@ -303,7 +300,7 @@ One-time migration of memories from a source project to a target project's indep
 ```
 
 **What it actually does:**
-1. Validates the target project via `safety_validate_project(to_project, require_env_match=False)` — the same safety valve used everywhere else (herdr-* rules, `project.json` metadata consistency, etc).
+1. Validates the target project via `safety_validate_project(to_project, require_env_match=False)` — the same safety valve used everywhere else (reserved-prefix rules, `project.json` metadata consistency, etc).
 2. Resolves the *source* project's `state_dir` through the shared project registry, `db.get_registered_state_dir(from_project)` — not a hardcoded path. If `from_project` has never been registered (no prior `remagraph` invocation ever resolved a state_dir for it), the call raises `store.ProjectNotRegisteredError` rather than silently treating it as zero migratable records — this closes the historical bug where `from_project` was implicitly assumed to always be `"default"`. `from_project == "default"` is the one deliberate exception: it resolves via `db.get_state_dir()` (respecting the ambient `REMAGRAPH_STATE_DIR`/`REMAGRAPH_HOME`), because `"default"` is, by design, never registered during normal use (see `cli._project_id_for_conn`).
 3. Reads `from_project`'s rows with a heuristic match on `task_id`/`tags`/`agent_id`/`summary` containing the target project name, `INSERT OR IGNORE`-ing matches into the target project's own DB with `project_id` forced to `to_project`, and marks the originals `invalidated` in the source (with a `migrated-to:<to_project>` breadcrumb appended to `learnings`). Both connections are opened via `db.connect_at_state_dir()`, which bypasses `REMAGRAPH_STATE_DIR` environment-variable resolution entirely and operates on the already-resolved, explicit paths — necessary because a long-lived MCP server process is bound to its own project's `state_dir` (see `server._bind_project`), and going through the ordinary env-var-driven `connect()` path here would silently open the *server's own* project DB instead of the actual migration source/target.
 4. `dry_run=True` runs the exact same match query used by a real migration and reports the resulting count in `migrated_count` without writing anything — so a dry run and a subsequent real run always agree on the count, for the same underlying data.
@@ -573,7 +570,7 @@ This safety valve only takes effect when the caller explicitly passes `project_i
 
 #### Design principles
 
-RemaGraph manages its own audit trail and does not depend on any external system. herdr-gov (or any other scheduling system) verifies whether an agent completed a memory write by reading this file.
+RemaGraph manages its own audit trail and does not depend on any external system. An external scheduling system, if one exists, verifies whether an agent completed a memory write by reading this file.
 
 #### Path
 
@@ -587,7 +584,7 @@ RemaGraph manages its own audit trail and does not depend on any external system
 
 | Field | Description |
 |------|------|
-| `ts` | ISO 8601 UTC (`Z` suffix, local time not supported), consistent with herdr-bridge's audit format |
+| `ts` | ISO 8601 UTC (`Z` suffix, local time not supported), consistent with common external audit-log timestamp conventions |
 | `actor_id` | Composite form `{agent_id}/{task_id}` |
 | `action` | Fixed to `remagraph_store` for a `remagraph_store` transaction (see the publicly announced Audit Contract below — this value does not change); the same `audit-YYYYMM.jsonl` file is also written to by `append_event` for maintenance/lifecycle events with different `action` values (e.g., `safety_violation`, `maintenance_completed`, `maintenance_light_failed`) — these records have a different, simpler structure (no `task_id`, `agent_id`, `kind`, `status`, `mem_id` fields) |
 | `mem_id` | The memory id after a successful write, for external systems to cross-reference |
@@ -610,7 +607,7 @@ The contract RemaGraph publishes externally (this subsection is citable independ
 
 ### CI/CD Quality Gates
 
-Follows the herdr-bridge standard:
+Follows a standard, widely-adopted open-source CI/CD gate set:
 
 | Gate | Configuration |
 |------|------|
@@ -663,12 +660,12 @@ remagraph/
 
 ### Design Decision History
 
-Full planning discussion records are in the `herdr-planner-discussion` project, including:
+Full planning discussion records are kept in the project's internal design-review archive (not part of this public specification), including:
 
-1. Requirements clarification: multi-agent shared memory, agents writing and reading their own memories, no intervention from a command tower
+1. Requirements clarification: multi-agent shared memory, agents writing and reading their own memories, with no centralized orchestrator gating individual writes
 2. Technology selection: four rounds of PPLX adversarial review (dedup approach, lifecycle management, behavior guidance, audit architecture, storage layer evaluation)
 3. Naming iteration: five rounds of PPLX discussion, ultimately settling on RemaGraph (Remanent)
-4. Architectural positioning: moving from being "a sub-tool of the herdr ecosystem" to an independent, general-purpose MCP server
+4. Architectural positioning: moving from being conceived as a sub-tool inside a larger, closed multi-project ecosystem, to a fully independent, general-purpose MCP server usable by any AI coding agent
 
 ---
 
@@ -732,26 +729,23 @@ Each stage's trigger is actual usage and user feedback, not pre-planning.
 | **PyPI** | 目標 `pip install remagraph`；**v1 尚未 publish**（目前 `pip install -e .`／原始碼安裝） |
 | **套件版本** | `0.3.1`（見 `pyproject.toml`）；實作收斂 [`docs/reviews/v1-closeout-status.md`](docs/reviews/v1-closeout-status.md) |
 | **Python** | 3.11+，uv 管理依賴 |
-| **與外部專案的關係** | 完全獨立（無程式碼耦合）。與 herdr-bridge 透過 ACP 直接協調 + 範例整合；組織層（herdr-org）僅設計階段。目前工具層+治理層已完成，任何 AI coding agent 都可直接使用 |
+| **與外部專案的關係** | 完全獨立（無程式碼耦合），今天就能被任何 AI coding agent 直接、獨立使用。同時對外暴露一個穩定合約（Audit Contract，見下方「對外邊界」），讓涵蓋多個 agent／專案的上層協調或排程系統可以與它整合，而不需要 RemaGraph 具備任何特定專案的知識；範例整合見 `examples/` |
 
 ---
 
 ### 對外邊界
 
-RemaGraph 是獨立專案，不認識任何外部系統。以下界定它與常見相關專案的關係，防止未來維護者誤設依賴方向。
+RemaGraph 是獨立專案，不認識任何外部系統。本節界定它與任何架構在它之上的專案的關係，防止未來維護者誤設依賴方向。
 
-#### RemaGraph 不認識的專案
+#### RemaGraph 不認識自己的使用方
 
-RemaGraph **不知道**以下專案的存在，它的程式碼、README、CHANGELOG、API 文件中**不應出現**以下名稱：
+RemaGraph **不知道**、也絕不應該寫死任何消費它的專案身分——不論那是單一呼叫 agent、一組共用同一份記憶庫的 agent 艦隊，還是架在多個 agent／專案之上的上層協調或排程系統。不論實務上某個部署與 RemaGraph 整合得多緊密、多正式，這件事都成立：任何使用方的名稱**都不應出現**在 RemaGraph 的程式碼、README、CHANGELOG、API 文件中。
 
-| 專案 | 關係 |
-|------|------|
-| herdr-bridge | 無程式碼/API 耦合。透過 ACP 直接跨專案溝通 + examples/herdr-bridge/ 範例對接。herdr-bridge 提供 hooks，RemaGraph 提供 MemoryDispatcher。目前組織層（herdr-org）設計階段 |
-| herdr-gov | 同上，RemaGraph 不認識 herdr-gov |
+這不是憑空的顧慮——RemaGraph 自己的記憶模型之所以存在，正是因為這種多 agent、多專案的情境很常見：多個 agent（或多個相關專案）可能希望一個 agent 的發現能被另一個看見，或者上層排程系統可能想在把任務判定為完成之前，先確認記憶確實被寫入了。RemaGraph 是透過自己通用、穩定的合約（見下方）支援這些情境，而不是靠針對特定專案的整合程式碼。
 
 #### 外部排程系統如何消費 RemaGraph
 
-RemaGraph 對外只暴露一個穩定的合約：**Audit Contract**（詳見下方「審計」章節的「Audit Contract」小節）。任何排程系統（例如 herdr-gov）只需要知道兩件事：
+RemaGraph 對外只暴露一個穩定的合約：**Audit Contract**（詳見下方「審計」章節的「Audit Contract」小節）。任何架在 RemaGraph 之上的排程系統只需要知道兩件事：
 
 1. audit 檔案路徑：`~/.local/state/remagraph/audit.jsonl`
 2. 以 `task_id` 為 key 查 `action="remagraph_store"` 且 `status="stored"` 的記錄
@@ -762,10 +756,10 @@ RemaGraph 對外只暴露一個穩定的合約：**Audit Contract**（詳見下�
 
 以下行為明確違反 RemaGraph 的邊界設計：
 
-- ❌ 在 RemaGraph 的程式碼中 import herdr-bridge
-- ❌ 在 RemaGraph 的 README 中提及「專為 Herdr 設計」
-- ❌ 在 herdr-bridge 的 README 或 API 文件中提及 RemaGraph
-- ❌ 讓 RemaGraph 的 MCP tool 名稱帶有 Herdr 前綴
+- ❌ 在 RemaGraph 的程式碼中 import 任何下游／消費方專案的程式碼
+- ❌ 在 RemaGraph 的 README 中提及「專為〔某個特定下游專案〕設計」
+- ❌ 在某個下游專案自己的 README 或 API 文件中，把 RemaGraph 描述成該專案的內建元件
+- ❌ 讓 RemaGraph 的 MCP tool 名稱帶有下游專案品牌前綴
 
 ---
 
@@ -940,7 +934,7 @@ agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
 
 #### `remagraph_maintain`
 
-執行 DB 自動維護（WAL checkpoint、清除 superseded/invalidated 記憶、FTS5 optimize、VACUUM、完整性檢查）。受 `maintenance.safety_validate_project()` 把關——與 CLI `maintain` 子指令使用同一個單一權威安全閥門——因此對一個 `state_dir` 解析不正確、或違反「`herdr-*` 專案不得使用 default DB」規則的專案呼叫此 tool，會直接 fail closed，而不是悄悄維護錯的資料庫。
+執行 DB 自動維護（WAL checkpoint、清除 superseded/invalidated 記憶、FTS5 optimize、VACUUM、完整性檢查）。受 `maintenance.safety_validate_project()` 把關——與 CLI `maintain` 子指令使用同一個單一權威安全閥門——因此對一個 `state_dir` 解析不正確、或違反「特定保留前綴專案不得使用 default DB」這條命名慣例檢查的專案呼叫此 tool，會直接 fail closed，而不是悄悄維護錯的資料庫。
 
 **Request：**
 ```json
@@ -988,15 +982,15 @@ agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
 ```json
 { "status": "error", "reason": "..." }
 ```
-- 例如 `safety_validate_project()` 拒絕該專案時觸發（`state_dir` 不符、`herdr-*` 指向 default DB、`project.json` metadata 不符等）
+- 例如 `safety_validate_project()` 拒絕該專案時觸發（`state_dir` 不符、某個保留前綴專案指向 default DB、`project.json` metadata 不符等）
 
 #### `remagraph_migrate_project`
 
-把記憶從來源 project 一次性遷移到目標 project 的獨立 DB（例如 `default` → `herdr-bridge`），並在來源標記 `invalidated`。此 tool 與 CLI 的 `migrate-project` 子指令（`cli.cmd_migrate_project`）共用同一個核心實作——`store.migrate_project_memories(from_project, to_project, dry_run=...)`——因此兩個入口對同一組輸入必然產生一致的最終結果，彼此都沒有各自獨立的一份遷移邏輯。
+把記憶從來源 project 一次性遷移到目標 project 的獨立 DB（例如 `default` → `otherproject`），並在來源標記 `invalidated`。此 tool 與 CLI 的 `migrate-project` 子指令（`cli.cmd_migrate_project`）共用同一個核心實作——`store.migrate_project_memories(from_project, to_project, dry_run=...)`——因此兩個入口對同一組輸入必然產生一致的最終結果，彼此都沒有各自獨立的一份遷移邏輯。
 
 **Request：**
 ```json
-{ "from_project": "default", "to_project": "herdr-bridge", "dry_run": false }
+{ "from_project": "default", "to_project": "otherproject", "dry_run": false }
 ```
 
 **Response：**
@@ -1004,7 +998,7 @@ agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
 {
   "status": "ok",
   "from": "default",
-  "to": "herdr-bridge",
+  "to": "otherproject",
   "dry_run": false,
   "migrated_count": 3,
   "skipped_ids": []
@@ -1012,7 +1006,7 @@ agent 查詢記憶。FTS5 BM25 全文檢索 + tag/kind 過濾 + 時間排序。
 ```
 
 **實際運作方式：**
-1. 透過 `safety_validate_project(to_project, require_env_match=False)` 驗證目標專案——與其他地方使用的是同一個安全閥門（herdr-* 規則、`project.json` metadata 一致性等）。
+1. 透過 `safety_validate_project(to_project, require_env_match=False)` 驗證目標專案——與其他地方使用的是同一個安全閥門（保留前綴規則、`project.json` metadata 一致性等）。
 2. 透過共用的 project registry——`db.get_registered_state_dir(from_project)`——解析**來源**專案的 `state_dir`，而不是寫死的路徑。若 `from_project` 從未被登記過（沒有任何一次 `remagraph` 呼叫曾對它解析出 state_dir），會拋出 `store.ProjectNotRegisteredError`，而不是靜默當作 0 筆可遷移記錄——這正是修復了「隱含假設 `from_project` 永遠是 `"default"`」這個歷史 bug。`from_project == "default"` 是唯一刻意保留的例外：改用 `db.get_state_dir()`（尊重目前環境的 `REMAGRAPH_STATE_DIR`/`REMAGRAPH_HOME`）解析，因為 `"default"` 在正常使用情境下本來就刻意不會被登記進 registry（見 `cli._project_id_for_conn`）。
 3. 依 `task_id`/`tags`/`agent_id`/`summary` 是否包含目標專案名稱做啟發式比對，取出 `from_project` 的記錄，以 `INSERT OR IGNORE` 強制 `project_id` 為 `to_project` 寫入目標專案自己的 DB，並在來源標記 `invalidated`（在 `learnings` 附加一筆 `migrated-to:<to_project>` 軌跡）。兩邊連線都透過 `db.connect_at_state_dir()` 開啟，完全繞過 `REMAGRAPH_STATE_DIR` 環境變數解析，直接對已經解析好的明確路徑操作——這是必要的，因為長駐的 MCP server 行程會綁定自己專案的 `state_dir`（見 `server._bind_project`），若這裡沿用一般、走環境變數的 `connect()` 路徑，會悄悄打開「server 自己的專案資料庫」，而不是真正的遷移來源/目標。
 4. `dry_run=True` 會執行與真正遷移完全相同的比對查詢，把結果筆數放進 `migrated_count`、不寫入任何資料——因此在資料未變動的前提下，dry run 與之後真的執行時的筆數必然一致。
@@ -1282,7 +1276,7 @@ RemaGraph 每個 `project_id` 對應完全獨立的 state_dir / SQLite 檔案（
 
 #### 設計原則
 
-RemaGraph 自管 audit，不依賴任何外部系統。herdr-gov（或其他排程系統）透過讀取此檔案驗證 agent 是否完成記憶寫入。
+RemaGraph 自管 audit，不依賴任何外部系統。若存在外部排程系統，會透過讀取此檔案驗證 agent 是否完成記憶寫入。
 
 #### 路徑
 
@@ -1296,7 +1290,7 @@ RemaGraph 自管 audit，不依賴任何外部系統。herdr-gov（或其他排�
 
 | 欄位 | 說明 |
 |------|------|
-| `ts` | ISO 8601 UTC（`Z` 後綴，不支援 local time），與 herdr-bridge audit 格式一致 |
+| `ts` | ISO 8601 UTC（`Z` 後綴，不支援 local time），與常見外部 audit log 的時間戳慣例一致 |
 | `actor_id` | `{agent_id}/{task_id}` 複合形式 |
 | `action` | 對 `remagraph_store` 交易固定為 `remagraph_store`（見下方對外公告的 Audit Contract，此值不變）；同一份 audit-YYYYMM.jsonl 另外也由 `append_event` 寫入維護／生命週期事件的 action 值（例如 `safety_violation`、`maintenance_completed`、`maintenance_light_failed`），這些記錄是不同、更簡單的結構（不含 `task_id`、`agent_id`、`kind`、`status`、`mem_id` 等欄位） |
 | `mem_id` | 寫入成功後的 memory id，外部系統比對用 |
@@ -1319,7 +1313,7 @@ RemaGraph 對外公告的合約（本節可獨立引用）：
 
 ### CI/CD 品質門檻
 
-沿用 herdr-bridge 標準：
+沿用一套標準、廣泛採用的開源 CI/CD 門檻組合：
 
 | 門檻 | 設定 |
 |------|------|
@@ -1372,12 +1366,12 @@ remagraph/
 
 ### 設計決策歷程
 
-完整規劃討論記錄見 `herdr-planner-discussion` 專案，包含：
+完整規劃討論記錄保存在專案內部的設計審查存檔中（不屬於本份公開規格書），包含：
 
-1. 需求釐清：多 agent 共享記憶、agent 自寫自查、指揮塔不介入
+1. 需求釐清：多 agent 共享記憶、agent 自寫自查、不受任何中央協調者把關個別寫入
 2. 技術選型：PPLX 對抗式審查四輪（去重方案、生命週期管理、行為引導、audit 架構、儲存層評估）
 3. 命名迭代：五輪 PPLX 討論，最終選定 RemaGraph（Remanent，殘磁）
-4. 架構定位：從「herdr 生態系子工具」獨立為通用 MCP server
+4. 架構定位：從「構思於某個較大、封閉的多專案生態系底下的子工具」獨立為任何 AI coding agent 都能使用的通用 MCP server
 
 ---
 
