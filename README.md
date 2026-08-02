@@ -1,8 +1,8 @@
 # RemaGraph
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](./LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/remagraph.svg)](https://pypi.org/project/remagraph/)
 [![CI](https://github.com/aiken884/RemaGraph/actions/workflows/test.yml/badge.svg)](https://github.com/aiken884/RemaGraph/actions/workflows/test.yml)
-[![Version](https://img.shields.io/github/v/tag/aiken884/RemaGraph?label=version&color=brightgreen)](https://github.com/aiken884/RemaGraph/tags)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](./pyproject.toml)
 
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -350,7 +350,7 @@ REMAGRAPH_STATE_DIR=$(mktemp -d) uv run pytest tests/smoke
 
 ## License
 
-[Apache-2.0](./LICENSE)
+[Apache-2.0](./LICENSE). RemaGraph is an independent project — its source code is entirely self-authored and does not contain or derive from any other project's code.
 
 ## Support
 
