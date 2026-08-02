@@ -348,10 +348,10 @@ REMAGRAPH_STATE_DIR=$(mktemp -d) uv run pytest tests/smoke
 - [`docs/audit.md`](./docs/audit.md) — the audit log contract
 - [`docs/governance/checklist.md`](./docs/governance/checklist.md) — the governance checklist
 
-## Support
-
-If RemaGraph is quietly keeping your agents' memory straight, you can support its development on [Ko-fi](https://ko-fi.com/aikenlin) (card or PayPal) or directly via [PayPal](https://paypal.me/aikenlin). Entirely optional — RemaGraph is, and stays, free.
-
 ## License
 
 [Apache-2.0](./LICENSE)
+
+## Support
+
+If RemaGraph is quietly keeping your agents' memory straight, you can support its development on [Ko-fi](https://ko-fi.com/aikenlin) (card or PayPal) or directly via [PayPal](https://paypal.me/aikenlin). Entirely optional — RemaGraph is, and stays, free.
