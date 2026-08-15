@@ -954,7 +954,9 @@ def main(argv: list[str] | None = None) -> None:
 def cmd_doctor(args: argparse.Namespace) -> None:
     from remagraph.doctor import format_text, run_doctor
 
-    project = args.project or os.environ.get("REMAGRAPH_PROJECT")
+    # 空字串 env（REMAGRAPH_PROJECT=""）不得被當有效 project（對抗式
+    # 審查修復 F4）——or 鏈對空字串已是 falsy，最後再 or None 收斂型別。
+    project = args.project or os.environ.get("REMAGRAPH_PROJECT") or None
     report = run_doctor(
         project,
         all_projects=args.all_projects,

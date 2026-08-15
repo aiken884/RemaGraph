@@ -380,3 +380,101 @@ def test_pypi_5xx_is_skip(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _Resp())
     assert check_cli_version().status == "skip"
+
+
+# ---------------------------------------------------------------------------
+# 對抗式審查修復（F1–F5）
+# ---------------------------------------------------------------------------
+
+
+def _tree_snapshot(root: Path) -> dict[str, float]:
+    return {
+        str(p.relative_to(root)): p.stat().st_mtime
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
+
+
+class TestReadOnlyPromise:
+    def test_doctor_creates_nothing_on_a_clean_machine(self, isolated, tmp_path):
+        """F1：乾淨機器（從未跑過 remagraph）上執行 doctor 不得建立任何
+        檔案——registry 讀取先前走了會 mkdir+CREATE TABLE 的內部函式。"""
+        plain = tmp_path / "not-a-repo"
+        plain.mkdir()
+        before = _tree_snapshot(isolated)
+        run_doctor("ghostproj", all_projects=True, cwd=plain, skip_network=True)
+        after = _tree_snapshot(isolated)
+        assert after == before, (
+            f"doctor 改動了檔案系統: {set(after) ^ set(before)}"
+        )
+
+    def test_doctor_leaves_no_side_files_on_existing_project(self, isolated, tmp_path):
+        """F2：對既有專案跑 doctor 不得留下 -wal/-shm side files，也不得
+        改動任何既有檔案的 mtime。"""
+        _init_project(isolated, "quietproj")
+        # checkpoint 清掉 init 產生的 side files，取得乾淨基準
+        import sqlite3 as _sq
+
+        db_path = (
+            isolated / ".local" / "state" / "remagraph-quietproj"
+            / db_mod.DB_FILENAME
+        )
+        c = _sq.connect(str(db_path))
+        c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        c.close()
+        for suffix in ("-wal", "-shm"):
+            Path(str(db_path) + suffix).unlink(missing_ok=True)
+        before = _tree_snapshot(isolated)
+        run_doctor("quietproj", cwd=tmp_path, skip_network=True)
+        after = _tree_snapshot(isolated)
+        assert after == before, (
+            f"doctor 留下了 side files 或改動 mtime: {set(after) ^ set(before)}"
+        )
+
+
+class TestAdversarialFixes:
+    def test_stray_check_for_default_project_is_ok(self, isolated):
+        """F3：--project default 時，共用 db 裡 default 自己的記錄是「家」
+        不是 stray——不得誤報並給出危險的 migrate 建議。"""
+        shared = Path(db_mod.DEFAULT_STATE_DIR)
+        db_mod.connect_at_state_dir(shared).close()
+        _insert_memory(shared / db_mod.DB_FILENAME, "default")
+        result = check_stray_records("default", all_projects=False)
+        assert result.status == "ok"
+
+    def test_empty_env_project_falls_back_to_derivation(
+        self, isolated, tmp_path, monkeypatch, capsys
+    ):
+        """F4：REMAGRAPH_PROJECT 為空字串時不得被當有效 project。"""
+        from remagraph.cli import main as cli_main
+
+        monkeypatch.setenv("REMAGRAPH_PROJECT", "")
+        plain = tmp_path / "not-a-repo"
+        plain.mkdir()
+        monkeypatch.chdir(plain)
+        with pytest.raises(SystemExit):
+            cli_main(["doctor", "--json", "--offline"])
+        payload = json.loads(capsys.readouterr().out)
+        by_name = {c["name"]: c for c in payload["checks"]}
+        # 空字串 project 應等同無 project → state_dir 檢查 skip，
+        # 絕不出現 "project ''" 這種殘缺輸出
+        assert "''" not in by_name["state_dir"]["message"]
+
+    def test_legacy_db_without_meta_is_warn_not_unopenable(self, isolated):
+        """F5：無 _meta 表的老 db 開得起來——必須是 warn（legacy），不得
+        誤報 database unopenable 的 fail。"""
+        state_dir = isolated / ".local" / "state" / "remagraph-legacyproj"
+        state_dir.mkdir(parents=True)
+        (state_dir / "project.json").write_text(
+            json.dumps({"project_id": "legacyproj"}), encoding="utf-8"
+        )
+        import sqlite3 as _sq
+
+        conn = _sq.connect(str(state_dir / db_mod.DB_FILENAME))
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE memories (id TEXT)")
+        conn.commit()
+        conn.close()
+        result = check_database("legacyproj")
+        assert result.status == "warn"
+        assert "unopenable" not in result.message

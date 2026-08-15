@@ -42,6 +42,67 @@ from remagraph.prompt_hook import resolve_conventional_state_dir
 SCHEMA_VERSION = 1
 
 _PYPI_TIMEOUT_S = 3
+
+
+def _readonly_conn(db_path: Path) -> sqlite3.Connection | None:
+    """doctor 專用唯讀連線：mode=ro + immutable=1 + query_only。
+
+    對抗式審查修復（F1/F2）：mode=ro 仍會建立 -wal/-shm side files（且
+    重置 stale 偵測的 mtime 基準）；immutable=1 完全不碰 side files。
+    代價：immutable 下 `PRAGMA journal_mode` 失真（回 delete）——
+    journal mode 一律改讀 db 檔 header（見 _journal_mode_from_header）；
+    對正被寫入的 db，immutable 讀取可能撞到不一致而拋錯——所有呼叫端
+    都以 except → skip 容錯（診斷快照允許輕微 stale）。
+    """
+    if not db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(
+            f"file:{db_path}?mode=ro&immutable=1", uri=True, timeout=1
+        )
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA query_only=1")
+        return conn
+    except sqlite3.Error:
+        return None
+
+
+def _journal_mode_from_header(db_path: Path) -> str | None:
+    """讀 SQLite 檔頭 bytes 18–19（file format write/read version）：
+    0x02 = WAL，0x01 = rollback journal。immutable 連線的 PRAGMA
+    journal_mode 失真，必須從檔案本體判定。"""
+    try:
+        with open(db_path, "rb") as f:
+            header = f.read(20)
+    except OSError:
+        return None
+    if len(header) < 20 or header[:16] != b"SQLite format 3\x00":
+        return None
+    return "wal" if header[18] == 2 and header[19] == 2 else "delete"
+
+
+def _registry_entries_readonly() -> list[dict[str, str]] | None:
+    """唯讀讀取共用 registry（對抗式審查修復 F1：先前走
+    db.get_registered_state_dir/list_known_projects，其內部
+    _connect_default_registry_db 會 mkdir + CREATE TABLE——在乾淨機器上
+    憑空建庫，直接違反 doctor 的唯讀承諾）。registry db 不存在或無
+    project_registry 表 → 回傳 None（視為空 registry）。"""
+    reg_db = Path(_db._resolve_default_state_dir()) / _db.DB_FILENAME
+    conn = _readonly_conn(reg_db)
+    if conn is None:
+        return None
+    try:
+        rows = conn.execute(
+            "SELECT project_id, state_dir FROM project_registry"
+        ).fetchall()
+        return [
+            {"project_id": r["project_id"], "state_dir": r["state_dir"]}
+            for r in rows
+        ]
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
 _POISON_SHOWN_LIMIT = 50
 _WAL_STALE_AGE_S = 7 * 24 * 3600
 
@@ -267,8 +328,15 @@ def check_registry(project: str, *, all_projects: bool) -> CheckResult:
         except OSError:
             return False
 
+    entries = _registry_entries_readonly()
+
     if not all_projects:
-        registered = _db.get_registered_state_dir(project)
+        registered = None
+        if entries is not None:
+            for entry in entries:
+                if entry["project_id"] == project:
+                    registered = entry["state_dir"]
+                    break
         if registered is None:
             return CheckResult(
                 "registry", "ok",
@@ -288,21 +356,18 @@ def check_registry(project: str, *, all_projects: bool) -> CheckResult:
             {"registered": registered},
         )
 
-    # --all-projects：全表污染掃描（本機 registry 本地資料）
-    try:
-        known = _db.list_known_projects()
-    except Exception as e:
+    # --all-projects：全表污染掃描（本機 registry 本地資料，唯讀）
+    if entries is None:
         return CheckResult(
-            "registry", "skip", f"registry unreadable ({type(e).__name__})"
+            "registry", "ok", "no registry database on this machine yet"
         )
+    known = entries
     poisoned: list[dict[str, str]] = []
     for entry in known:
-        pid = entry.get("project_id") if isinstance(entry, dict) else str(entry)
-        reg = entry.get("state_dir") if isinstance(entry, dict) else None
+        pid = entry["project_id"]
+        reg = entry["state_dir"]
         if not pid or pid == _db.DEFAULT_PROJECT_ID:
             continue
-        if reg is None:
-            reg = _db.get_registered_state_dir(pid)
         if reg and _is_shared_default(reg):
             poisoned.append({"project_id": pid, "registered": reg})
     data = {
@@ -330,15 +395,22 @@ def check_registry(project: str, *, all_projects: bool) -> CheckResult:
 
 
 def check_stray_records(project: str, *, all_projects: bool) -> CheckResult:
+    # F3（對抗式審查修復）：default 專案的記錄在共用 db 本來就是「家」，
+    # 不是 stray——單專案模式下對 default 一律 ok，與 --all-projects
+    # 分支的排除邏輯一致，避免自相矛盾的訊息與危險的 migrate 建議。
+    if not all_projects and project == _db.DEFAULT_PROJECT_ID:
+        return CheckResult(
+            "stray_records", "ok",
+            "default project's records live in the shared db by design",
+        )
     shared_db = Path(_db.DEFAULT_STATE_DIR) / _db.DB_FILENAME
-    if not shared_db.exists():
+    conn = _readonly_conn(shared_db)
+    if conn is None:
         return CheckResult(
             "stray_records", "ok", "no shared default db on this machine"
         )
     try:
-        conn = sqlite3.connect(f"file:{shared_db}?mode=ro", uri=True, timeout=1)
-        conn.row_factory = sqlite3.Row
-        try:
+        if True:
             if all_projects:
                 rows = conn.execute(
                     "SELECT project_id, COUNT(*) AS n FROM memories "
@@ -354,12 +426,12 @@ def check_stray_records(project: str, *, all_projects: bool) -> CheckResult:
                     (project,),
                 ).fetchone()
                 strays = {project: row["n"]} if row["n"] else {}
-        finally:
-            conn.close()
     except sqlite3.Error as e:
         return CheckResult(
             "stray_records", "skip", f"shared db unreadable ({e})"
         )
+    finally:
+        conn.close()
     if not strays:
         return CheckResult(
             "stray_records", "ok", "no stray project records in the shared db"
@@ -393,12 +465,21 @@ def check_database(project: str) -> CheckResult:
             "database", "warn", f"state dir exists but no database at {db_path}"
         )
     data: dict[str, Any] = {"db_path": str(db_path)}
+    # journal mode 從檔案 header 判定（immutable 連線的 PRAGMA 失真，F2）
+    data["journal_mode"] = _journal_mode_from_header(db_path)
+    conn = _readonly_conn(db_path)
+    if conn is None:
+        return CheckResult(
+            "database", "fail", f"database unopenable at {db_path}", data
+        )
+    legacy_no_meta = False
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1)
-        conn.row_factory = sqlite3.Row
         try:
-            journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
-            data["journal_mode"] = journal_mode
+            conn.execute("SELECT 1").fetchone()
+        except sqlite3.Error as e:
+            return CheckResult("database", "fail", f"database unreadable: {e}", data)
+        # _meta 缺失（pre-_meta 老 db）不是「開不起來」——分開容錯（F5）
+        try:
             row = conn.execute(
                 "SELECT value FROM _meta WHERE key='schema_version'"
             ).fetchone()
@@ -407,12 +488,19 @@ def check_database(project: str) -> CheckResult:
                 "SELECT value FROM _meta WHERE key='min_writer_version'"
             ).fetchone()
             data["min_writer_version"] = int(mw[0]) if mw else None
-        finally:
-            conn.close()
-    except sqlite3.Error as e:
-        return CheckResult("database", "fail", f"database unopenable: {e}", data)
+        except sqlite3.Error:
+            legacy_no_meta = True
+            data["schema_version"] = None
+            data["min_writer_version"] = None
+    finally:
+        conn.close()
 
     issues: list[str] = []
+    if legacy_no_meta:
+        issues.append(
+            "no _meta table (legacy pre-versioning database) — open any "
+            "remagraph write command once to migrate it"
+        )
     if str(data.get("journal_mode", "")).lower() != "wal":
         issues.append(
             f"journal_mode is {data.get('journal_mode')!r}, expected WAL"
@@ -476,7 +564,7 @@ def run_doctor(
 
     report.checks.append(check_post_commit_hook(cwd_path))
 
-    effective_project = project
+    effective_project = project or None  # 空字串視同未指定（F4 防護）
     if effective_project is None:
         from remagraph.prompt_hook import derive_project_candidates_from_cwd
 
