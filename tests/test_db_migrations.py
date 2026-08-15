@@ -203,7 +203,11 @@ def test_fresh_database_gets_forward_compat_meta_keys(tmp_path):
 
     assert _meta("schema_version") == str(db.SCHEMA_VERSION)
     assert _meta("min_reader_version") == "1"
-    assert _meta("min_writer_version") == str(db.SCHEMA_VERSION)
+    # 與 migration 路徑（_migrate_v4_to_v5 種下、_migrate_v5_to_v6 刻意保留
+    # 的 "5"）一致——全新 DB 過去種 SCHEMA_VERSION，同一 schema 兩種相容性
+    # 判定會讓 v5 釘版消費端對 v6 程式「新建」的 DB 被錯誤降級唯讀
+    # （診斷修復，見 db._MIN_WRITER_VERSION_DEFAULT）。
+    assert _meta("min_writer_version") == db._MIN_WRITER_VERSION_DEFAULT
     hint = _meta("upgrade_hint")
     assert hint is not None
     assert hint.strip() != ""

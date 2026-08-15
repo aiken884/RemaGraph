@@ -41,6 +41,14 @@ DEFAULT_PROJECT_ID = "default"
 # ---------------------------------------------------------------------------
 _MIN_READER_VERSION_DEFAULT = "1"
 
+# 全新資料庫與 migration 路徑必須種下同一個 min_writer_version（診斷發現的
+# 不一致：全新 DB 過去種 SCHEMA_VERSION=6，但 _migrate_v5_to_v6 刻意保留 5
+# ——其 docstring 論證 v5 舊程式寫 v6 DB 完全安全，因為 memory_labels 是純
+# 新增的獨立表。同一 schema 兩種相容性判定，會讓 v6 程式「新建」的資料庫
+# 把仍在跑 v5 釘版程式的消費端錯誤降級成唯讀）。未來若有真正修改 memories
+# 表結構的 migration，兩處要一起升。
+_MIN_WRITER_VERSION_DEFAULT = "5"
+
 _UPGRADE_HINT_TEXT = (
     "This database's schema version is newer than the currently running "
     "remagraph code; to avoid data corruption, the code has refused to open "
@@ -280,10 +288,17 @@ def connect(
     # 對已是目前 SCHEMA_VERSION 的資料庫：_run_migrations() 判定版本相符後
     # 直接 no-op 返回；隨後 _init_schema() 的每一條 IF NOT EXISTS 語句也都
     # 是 no-op —— 同樣與修復前的行為完全一致。
-    _run_migrations(conn)
+    needs_fts_rebuild = _run_migrations(conn)
     # 執行 schema 初始化（見上方說明：此時 memories 表若曾是舊版，已由
     # migration chain 補齊必要欄位/約束，以下皆為安全的冪等 IF NOT EXISTS）
     _init_schema(conn)
+    if needs_fts_rebuild:
+        # v1/v2/v3 起點的資料庫在 migration 後 rowid 位移或 FTS 索引尚未
+        # 建立過內容——此時 memories_fts 已由 _init_schema 保證存在，
+        # rebuild 一次讓全文索引與 memories 表重新對齊（見 _run_migrations
+        # docstring 的診斷修復說明）。
+        conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
+        conn.commit()
 
     # 設定 DB 檔案權限
     try:
@@ -363,8 +378,13 @@ def connect_at_state_dir(state_dir: Path) -> sqlite3.Connection:
     max_pages = (MAX_DB_SIZE_MB * 1024 * 1024) // page_size
     conn.execute(f"PRAGMA max_page_count={max_pages}")
 
-    _run_migrations(conn)
+    needs_fts_rebuild = _run_migrations(conn)
     _init_schema(conn)
+    if needs_fts_rebuild:
+        # 與 connect() 相同的 migration 後 FTS rebuild（見 _run_migrations
+        # docstring 的診斷修復說明）。
+        conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
+        conn.commit()
 
     try:
         db_path.chmod(0o600)
@@ -1021,10 +1041,16 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     """)
 
 
-def _run_migrations(conn: sqlite3.Connection) -> None:
+def _run_migrations(conn: sqlite3.Connection) -> bool:
     """檢查 _meta.schema_version 並執行 migration chain。
 
-    目前只有 v1（初始版本），未來版本在此新增 migration 函式。
+    回傳值：是否需要在 _init_schema() 之後 rebuild memories_fts——起始版本
+    < 4 時為 True（診斷修復）：(a) v3 起點經 _migrate_v3_to_v4 重建 memories
+    表，rowid 位移使既有 FTS 索引指向錯誤的列；(b) v1/v2 起點在整條鏈中
+    memories_fts 根本尚未存在（稍後才由 _init_schema 建立），external-content
+    FTS 虛擬表建立時不會自動索引既有列，不 rebuild 的話全文檢索永遠是空的。
+    兩種情況都必須在 memories_fts 確定存在（_init_schema 之後）rebuild 一次，
+    因此交由呼叫端（connect()/connect_at_state_dir()）依本回傳值執行。
     """
     # 確保 _meta 表存在（_init_schema 已建立，但以防萬一）
     conn.execute("""
@@ -1050,19 +1076,21 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         )
         conn.execute(
             "INSERT OR REPLACE INTO _meta (key, value) VALUES ('min_writer_version', ?)",
-            (str(SCHEMA_VERSION),),
+            (_MIN_WRITER_VERSION_DEFAULT,),
         )
         conn.execute(
             "INSERT OR REPLACE INTO _meta (key, value) VALUES ('upgrade_hint', ?)",
             (_UPGRADE_HINT_TEXT,),
         )
-        return
+        return False
 
     current_version = int(row[0])
 
     if current_version == SCHEMA_VERSION:
         # 已是最新版本
-        return
+        return False
+
+    initial_version = current_version
 
     # 未來版本 migration chain：
     # if current_version == 1:
@@ -1086,6 +1114,8 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
 
     if current_version > SCHEMA_VERSION:
         _handle_newer_than_code_schema(conn, current_version)
+
+    return initial_version < 4
 
 
 def _handle_newer_than_code_schema(conn: sqlite3.Connection, current_version: int) -> None:
@@ -1301,6 +1331,14 @@ def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
         COMMIT;
         PRAGMA foreign_keys=ON;
     """)
+    # 注意：上方 INSERT INTO memories_new ... SELECT 不帶 rowid，新表的列
+    # 取得「連續」的新 rowid；v3 時代只要發生過任何 DELETE，舊 rowid 就有
+    # 空洞，重建後全面位移——external-content 的 memories_fts 以 rowid 為
+    # 索引 key，因此本 migration 執行後 FTS 索引必須 rebuild。rebuild 不在
+    # 此處做（貨真價實的 v1/v2 起點資料庫走到這裡時 memories_fts 尚不存在
+    # ——該虛擬表由 _init_schema 建立，而 connect() 是先跑 migration chain
+    # 才跑 _init_schema），統一由 connect()/connect_at_state_dir() 在
+    # _init_schema 之後依 _run_migrations 的回傳值執行（診斷修復）。
     conn.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', '4')")
 
 

@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import sys
 from dataclasses import dataclass, field
@@ -73,6 +74,33 @@ def generate_memory_id(
     max_nnn = row[0] if row[0] is not None else 0
     nnn = max_nnn + 1
     return f"mem-{date_str}-{nnn:03d}"
+
+
+def _remap_collided_memory_id(conn_tgt: sqlite3.Connection, original_id: str) -> str:
+    """在目標資料庫為一個 id 已碰撞的遷移記錄配置新 id。
+
+    標準格式（mem-YYYYMMDD-NNN）保留原日期段、取目標庫該日期的 MAX+1
+    （與 generate_memory_id 同一取號邏輯）；非標準格式退回附加序號後綴。
+    應在目標庫的 transaction 內呼叫。
+    """
+    m = re.fullmatch(r"(mem-\d{8})-(\d+)", original_id)
+    if m:
+        date_prefix = m.group(1)
+        row = conn_tgt.execute(
+            "SELECT MAX(CAST(SUBSTR(id, 14) AS INTEGER)) FROM memories WHERE id LIKE ?",
+            (f"{date_prefix}-%",),
+        ).fetchone()
+        nnn = (row[0] if row[0] is not None else 0) + 1
+        return f"{date_prefix}-{nnn:03d}"
+    suffix = 2
+    while True:
+        candidate = f"{original_id}-{suffix}"
+        exists = conn_tgt.execute(
+            "SELECT 1 FROM memories WHERE id = ?", (candidate,)
+        ).fetchone()
+        if exists is None:
+            return candidate
+        suffix += 1
 
 
 # ---------------------------------------------------------------------------
@@ -284,8 +312,13 @@ def process_store(
 
     now = datetime.now(timezone.utc)
 
-    # 開始 transaction
-    conn.execute("BEGIN")
+    # 開始 transaction。BEGIN IMMEDIATE 而非 deferred BEGIN：
+    # generate_memory_id 的 SELECT MAX 在 deferred 交易下不取寫鎖，兩個
+    # process 併發 store 會讀到相同 MAX、算出相同 id，後寫入者撞 PRIMARY
+    # KEY 而整筆失敗（診斷發現；MemoryIDGenerationError docstring 宣稱的
+    # 重試機制實際上不存在）。IMMEDIATE 讓寫鎖在交易一開始就取得，
+    # 序列化整段「取號 + 插入」。
+    conn.execute("BEGIN IMMEDIATE")
 
     try:
         # guardrail: 跨 project 碰撞偵測
@@ -381,7 +414,15 @@ def process_store(
         return response
 
     except Exception as e:
-        conn.execute("ROLLBACK")
+        # ROLLBACK 需保護：SQLite 在 SQLITE_FULL / SQLITE_IOERR / SQLITE_NOMEM
+        # 等錯誤下會自動回滾交易，此時再執行 ROLLBACK 會拋出
+        # "cannot rollback - no transaction is active"——若不攔截，原始錯誤
+        # （例如撞到 max_page_count 的 disk-full）會被這個誤導的次生例外
+        # 遮蔽，且本函式「一律回傳 StoreResponse」的契約被打破（診斷發現）。
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
         response = StoreResponse(
             status="error",
             reason="db_error",
@@ -622,42 +663,68 @@ def migrate_project_memories(
             migrated = 0
             skipped_ids: list[str] = []
 
-            conn_tgt.execute("BEGIN")
-            conn_src.execute("BEGIN")
+            conn_tgt.execute("BEGIN IMMEDIATE")
+            conn_src.execute("BEGIN IMMEDIATE")
             try:
                 for row in rows:
                     try:
                         # 先完成所有「純運算、可能失敗」的步驟（例如
                         # learnings 欄位若含壞掉的 JSON，json.loads 會在
                         # 這裡拋例外），確保接下來的 INSERT 是這個迴圈裡
-                        # 唯一、且是最後一步會產生外部副作用（寫入
-                        # conn_tgt）的操作。若這裡拋例外，整批直接跳過這筆
-                        # ——conn_tgt 完全不會被寫入，不會出現「目標已寫入
-                        # active 副本，但因後續步驟失敗而被回報成
-                        # skipped」的矛盾狀態（同一筆記憶同時以 active
-                        # 存在於來源與目標兩邊）。
+                        # 第一個會產生外部副作用（寫入 conn_tgt）的操作。
                         learn = json.loads(row["learnings"] or "[]")
-                        learn.append(
-                            f"migrated-to:{to_project} at "
-                            f"{datetime.now(timezone.utc).isoformat()}"
-                        )
-                        updated_learnings = json.dumps(learn, ensure_ascii=False)
 
                         cols = [k for k in row.keys() if k != "project_id"]
                         vals = [row[k] for k in cols]
                         placeholders = ",".join("?" for _ in cols)
                         cols_str = ",".join(cols)
-                        sql = (
-                            f"INSERT OR IGNORE INTO memories (project_id, {cols_str}) "
-                            f"VALUES (?, {placeholders})"
-                        )
-                        conn_tgt.execute(sql, [to_project] + vals)
 
-                        conn_src.execute(
-                            "UPDATE memories SET status='invalidated', "
-                            "learnings=? WHERE id=?",
-                            (updated_learnings, row["id"]),
+                        # memory id（mem-YYYYMMDD-NNN）是每個 DB 各自獨立的
+                        # 日序列——兩個專案只要同一天各自存過記憶，id 幾乎
+                        # 必然碰撞。修復前用 INSERT OR IGNORE：碰撞時靜默
+                        # 不插入，卻仍把來源標 invalidated、migrated += 1，
+                        # 構成靜默資料遺失（診斷發現）。現在改為：碰撞時在
+                        # 目標庫重新配一個不衝突的 id（保留原日期段），
+                        # 確定插入成功才繼續。
+                        target_id = row["id"]
+                        cur = conn_tgt.execute(
+                            f"INSERT OR IGNORE INTO memories (project_id, {cols_str}) "
+                            f"VALUES (?, {placeholders})",
+                            [to_project] + vals,
                         )
+                        if cur.rowcount == 0:
+                            target_id = _remap_collided_memory_id(conn_tgt, row["id"])
+                            vals[cols.index("id")] = target_id
+                            conn_tgt.execute(
+                                f"INSERT INTO memories (project_id, {cols_str}) "
+                                f"VALUES (?, {placeholders})",
+                                [to_project] + vals,
+                            )
+
+                        # 來源標記寫在 INSERT 之後：記錄實際抵達的 target_id
+                        # （re-id 時與原 id 不同），供日後追蹤。
+                        learn.append(
+                            f"migrated-to:{to_project} as {target_id} at "
+                            f"{datetime.now(timezone.utc).isoformat()}"
+                        )
+                        updated_learnings = json.dumps(learn, ensure_ascii=False)
+                        try:
+                            conn_src.execute(
+                                "UPDATE memories SET status='invalidated', "
+                                "learnings=? WHERE id=?",
+                                (updated_learnings, row["id"]),
+                            )
+                        except Exception:
+                            # 來源 UPDATE 失敗（SQLITE_BUSY、disk full 等）
+                            # ——把剛插入目標的那筆撤掉再記 skipped，否則
+                            # 迴圈結束後兩邊照樣 COMMIT，同一筆記憶會同時
+                            # 以 active 存在於來源與目標（診斷發現的矛盾
+                            # 狀態，正是上方註解宣稱要避免的）。
+                            conn_tgt.execute(
+                                "DELETE FROM memories WHERE project_id=? AND id=?",
+                                (to_project, target_id),
+                            )
+                            raise
                         migrated += 1
                     except Exception:
                         skipped_ids.append(row["id"])
@@ -665,8 +732,15 @@ def migrate_project_memories(
                 conn_tgt.execute("COMMIT")
                 conn_src.execute("COMMIT")
             except Exception:
-                conn_tgt.execute("ROLLBACK")
-                conn_src.execute("ROLLBACK")
+                # ROLLBACK 各自保護：SQLite 在某些錯誤下會自動回滾（此時
+                # ROLLBACK 拋 "cannot rollback"）；conn_tgt 也可能已經
+                # COMMIT 成功（是 conn_src 的 COMMIT 失敗）——不能讓
+                # 清理動作自己拋出新例外遮蔽原始錯誤（診斷發現）。
+                for _c in (conn_tgt, conn_src):
+                    try:
+                        _c.execute("ROLLBACK")
+                    except sqlite3.Error:
+                        pass
                 raise
         finally:
             conn_tgt.close()

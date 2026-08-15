@@ -96,7 +96,9 @@ def test_status_tier1_full_compat_returns_all_new_fields():
     assert result["db_schema_version"] == db.SCHEMA_VERSION
     assert isinstance(result["db_schema_version"], int)
     assert result["min_reader_version"] == 1
-    assert result["min_writer_version"] == db.SCHEMA_VERSION
+    # 全新 DB 的 min_writer_version 與 migration 路徑一致（"5"，見
+    # db._MIN_WRITER_VERSION_DEFAULT 的診斷修復說明）
+    assert result["min_writer_version"] == int(db._MIN_WRITER_VERSION_DEFAULT)
     assert isinstance(result["upgrade_hint"], str)
     assert result["upgrade_hint"].strip() != ""
     assert result["read_only"] is False
@@ -256,7 +258,7 @@ def test_cli_status_subcommand_includes_same_compat_fields(capsys):
     assert payload["server_code_version"] == db.SCHEMA_VERSION
     assert payload["db_schema_version"] == db.SCHEMA_VERSION
     assert payload["min_reader_version"] == 1
-    assert payload["min_writer_version"] == db.SCHEMA_VERSION
+    assert payload["min_writer_version"] == int(db._MIN_WRITER_VERSION_DEFAULT)
     assert isinstance(payload["upgrade_hint"], str)
     assert payload["upgrade_hint"].strip() != ""
     assert payload["read_only"] is False
