@@ -74,7 +74,7 @@ jobs:
           pytest tests/test_fuzz_regressions.py tests/test_adversarial_state_tamper.py tests/test_embedding_and_errors.py -q --junitxml=adversarial-results.xml || true
 
       - name: Upload adversarial results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: adversarial-results
           path: adversarial-results.xml
@@ -137,7 +137,7 @@ jobs:
 
       - name: Upload coverage report
         if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage.xml
