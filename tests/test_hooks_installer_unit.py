@@ -45,7 +45,7 @@ def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 
 def _init_repo(repo_dir: Path) -> None:
     repo_dir.mkdir(parents=True, exist_ok=True)
-    result = _run_git(["init", "-q"], repo_dir)
+    result = _run_git(["init", "-q", "--template="], repo_dir)
     assert result.returncode == 0, result.stderr
     _run_git(["config", "user.name", "Test Committer"], repo_dir)
     _run_git(["config", "user.email", "test@example.com"], repo_dir)

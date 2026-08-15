@@ -80,7 +80,7 @@ def _init_repo(
     email: str = "test@example.com",
 ) -> None:
     repo_dir.mkdir(parents=True, exist_ok=True)
-    _run(["git", "init", "-q"], repo_dir, env)
+    _run(["git", "init", "-q", "--template="], repo_dir, env)
     _run(["git", "config", "user.name", name], repo_dir, env)
     _run(["git", "config", "user.email", email], repo_dir, env)
 

@@ -104,6 +104,29 @@ def _parse_json_list(raw: str | None) -> list[str] | None:
         sys.exit(1)
 
 
+def _maybe_adopt_conventional_state_dir(project: str | None) -> str | None:
+    """REMAGRAPH_STATE_DIR 未設定、project 明確且非 default 時，自動採用
+    conventional state dir（~/.local/state/remagraph-<project>，若存在）。
+
+    比照 v2 post-commit hook 的自動解析（診斷需求「坑 a」）：修復前
+    search/store/status 在裸環境 + 明確 --project 時一律被安全閥拒絕，
+    hook 與腳本都得自己 export REMAGRAPH_STATE_DIR。回傳權威 project 名
+    （project.json 記載值，處理大小寫 slug 與 init 原名的差異）；找不到
+    conventional 目錄時回傳原值、不動 env——後續安全閥行為與過去完全相同。
+    """
+    if not project or project == "default" or os.environ.get("REMAGRAPH_STATE_DIR"):
+        return project
+    from remagraph.prompt_hook import resolve_conventional_state_dir
+
+    resolved = resolve_conventional_state_dir(project)
+    if resolved is None:
+        return project
+    state_dir, authoritative = resolved
+    os.environ["REMAGRAPH_STATE_DIR"] = str(state_dir)
+    os.environ["REMAGRAPH_PROJECT"] = authoritative
+    return authoritative
+
+
 def _print_json(payload: dict[str, Any]) -> None:
     json.dump(payload, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
@@ -125,6 +148,7 @@ def _pad_summary(text: str, min_len: int = 30) -> str:
 
 def cmd_store(args: argparse.Namespace) -> None:
     project = args.project or os.environ.get("REMAGRAPH_PROJECT") or "default"
+    project = _maybe_adopt_conventional_state_dir(project) or "default"
     if project and project != "default" and project not in (args.task_id or "").lower():
         print(
             f"WARNING: task_id '{args.task_id}' does not include the project "
@@ -201,6 +225,7 @@ def cmd_search(args: argparse.Namespace) -> None:
         project = None
     elif not project:
         project = "default"
+    project = _maybe_adopt_conventional_state_dir(project)
     if (
         not args.query
         and not args.task_id
@@ -263,6 +288,7 @@ def cmd_status(args: argparse.Namespace) -> None:
         project = None
     elif not project:
         project = "default"
+    project = _maybe_adopt_conventional_state_dir(project)
     try:
         conn = _get_conn(_project_id_for_conn(project))
     except Exception as e:
@@ -733,6 +759,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Project to bind this serve process to (falls back to REMAGRAPH_PROJECT)",
     )
 
+    # prompt-hook（Claude Code UserPromptSubmit 自動記憶召回）
+    sub.add_parser(
+        "prompt-hook",
+        help=(
+            "Claude Code UserPromptSubmit hook: read the hook JSON from "
+            "stdin, recall the most relevant project memories, and print "
+            "them as additionalContext (always exits 0; silent on no "
+            "match or any error)"
+        ),
+    )
+
     # install-hooks
     p_install_hooks = sub.add_parser(
         "install-hooks",
@@ -778,6 +815,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "prompt-hook":
+        # UserPromptSubmit 同步 hook：必須完全靜默（stderr 警告也不行）、
+        # 不經過頂層守門的 default-state-dir 警告與 metadata 驗證——所有
+        # 解析、降級與唯讀保證都在 prompt_hook 模組內自理。
+        from remagraph.prompt_hook import main as prompt_hook_main
+
+        prompt_hook_main()
+        return
 
     if args.command != "init":
         if _db.is_using_default_state_dir() and not getattr(args, "allow_default_state_dir", False):
@@ -847,6 +893,7 @@ def main(argv: list[str] | None = None) -> None:
         cmd_link(args)
     elif args.command == "install-hooks":
         cmd_install_hooks(args)
+
     elif args.command == "serve":
         # 正常入口（server.main()）會在進到本函式之前就攔截 "serve"；這個
         # 分支只在 cli_main 被直接以 ["serve", ...] 呼叫時生效，委派回

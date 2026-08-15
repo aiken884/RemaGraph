@@ -77,7 +77,7 @@ def _init_repo(
     email: str = "test@example.com",
 ) -> None:
     repo_dir.mkdir(parents=True, exist_ok=True)
-    _run(["git", "init", "-q"], repo_dir, env)
+    _run(["git", "init", "-q", "--template="], repo_dir, env)
     _run(["git", "config", "user.name", name], repo_dir, env)
     _run(["git", "config", "user.email", email], repo_dir, env)
 
@@ -418,6 +418,9 @@ def test_global_install_no_prior_template_dir_new_repo_gets_working_hook(tmp_pat
 
     new_repo = tmp_path / "new-repo-after-global"
     new_repo.mkdir()
+    # 這裡刻意「不」隔離 template：本測試驗證的正是 --global 設定的
+    # init.templateDir 會讓新 repo 自動帶 hook（HOME 已隔離到 tmp，
+    # 吃到的是測試自己設定的 templateDir，不是真實使用者的）。
     init = _run(["git", "init", "-q"], new_repo, env)
     assert init.returncode == 0, init.stderr
 

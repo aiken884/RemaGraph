@@ -51,7 +51,7 @@ def _run(cmd: list[str], cwd: Path, env: dict[str, str]) -> subprocess.Completed
 
 def _init_repo(repo_dir: Path, env: dict[str, str]) -> None:
     repo_dir.mkdir(parents=True, exist_ok=True)
-    _run(["git", "init", "-q"], repo_dir, env)
+    _run(["git", "init", "-q", "--template="], repo_dir, env)
     _run(["git", "config", "user.name", "Test Committer"], repo_dir, env)
     _run(["git", "config", "user.email", "test@example.com"], repo_dir, env)
 
