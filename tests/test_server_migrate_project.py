@@ -172,7 +172,9 @@ def test_migrate_tool_returns_clean_error_for_read_only_target(tmp_path, monkeyp
     ro_conn.commit()
     ro_conn.close()
 
-    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(to_state))
+    # env 綁架修復後 to 解析走 registry 優先（無視 REMAGRAPH_STATE_DIR），
+    # 用明確登記讓目標指到唯讀降級的目錄。
+    db_mod.register_known_project("proj-ro", to_state)
 
     result = server.remagraph_migrate_project(from_project="proj-a", to_project="proj-ro")
     assert result["status"] == "error"

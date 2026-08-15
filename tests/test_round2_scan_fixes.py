@@ -422,3 +422,57 @@ def test_task_id_prefix_warning_not_false_positive_for_mixed_case(
     ])
     err = capsys.readouterr().err
     assert "does not include the project" not in err, f"誤發前綴警告: {err}"
+
+
+# ---------------------------------------------------------------------------
+# 11. migrate --to 不得被 REMAGRAPH_STATE_DIR 綁架（linedb 實戰回報）
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_from_default_env_does_not_hijack_target_resolution(
+    tmp_path, monkeypatch, fake_home
+):
+    """實戰情境（linedb 回報）：記憶漏寫進共用 db，要用
+    `REMAGRAPH_STATE_DIR=<共用db> migrate-project --from default --to X`
+    撈回 X 的專屬庫。修復前：to_project 的解析也被 env 綁架、解析到共用
+    db → from==to 觸發別名防護 ValueError，官方遷移路徑對這個它本該服務
+    的場景完全跑不通。to 的解析必須優先用該 project 的 conventional/
+    registry 路徑，不受 ambient env 影響。"""
+    import json as _json
+
+    # 共用 db：有一筆屬於 linedb 的漏寫記憶
+    shared_dir = fake_home / ".local" / "state" / "remagraph"
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(shared_dir))
+    conn = db_mod.connect()
+    _insert_memory(
+        conn, mem_id="mem-20260814-001", project_id="linedb",
+        task_id="linedb-pc-push-v1", labels=["topic:infra-health"],
+    )
+    conn.commit()
+    conn.close()
+
+    # linedb 的專屬 conventional dir（已 init 過的狀態）
+    linedb_dir = fake_home / ".local" / "state" / "remagraph-linedb"
+    linedb_dir.mkdir(parents=True)
+    (linedb_dir / "project.json").write_text(
+        _json.dumps({"project_id": "linedb", "state_dir": str(linedb_dir)}),
+        encoding="utf-8",
+    )
+    db_mod.connect_at_state_dir(linedb_dir).close()
+
+    # env 仍指向共用 db（重現 linedb 的實際指令）
+    result = store_mod.migrate_project_memories("default", "linedb")
+
+    assert result.migrated_count == 1
+    moved = _rows(
+        linedb_dir / db_mod.DB_FILENAME,
+        "SELECT * FROM memories WHERE task_id='linedb-pc-push-v1'",
+    )
+    assert len(moved) == 1
+    assert moved[0]["project_id"] == "linedb"
+    # 共用 db 的來源必須被標 invalidated（污染清除）
+    src = _rows(
+        shared_dir / db_mod.DB_FILENAME,
+        "SELECT status FROM memories WHERE task_id='linedb-pc-push-v1'",
+    )[0]
+    assert src["status"] == "invalidated"

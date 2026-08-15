@@ -287,7 +287,6 @@ def process_store(
         )
 
     # 安全閥門（PPLX 共識版）：強制 project + state_dir 對映
-    from remagraph.maintenance import safety_validate_project
 
     if request.project_id and not skip_safety_check:
         safety_validate_project(request.project_id)  # 違規直接 raise SafetyValveError
@@ -514,6 +513,41 @@ _MIGRATE_MATCH_WHERE = (
 )
 
 
+def _resolve_migration_target_state_dir(to_project: str) -> Path:
+    """解析遷移『目標』專案的 state_dir——刻意無視 REMAGRAPH_STATE_DIR。
+
+    resolve_project_state_dir 的 env 最高優先權對「目前行程自己的專案」是
+    正確語意，但 migrate 的 to_project 是『另一個』專案：呼叫端把 env 指向
+    來源 db 時（`REMAGRAPH_STATE_DIR=<共用db> migrate-project --from
+    default --to X` 撈回漏寫記憶，正是本功能要服務的場景），to 的解析若也
+    被 env 綁架，會與來源解析為同一實體目錄、觸發別名防護的 ValueError——
+    官方遷移路徑對它本該服務的場景反而跑不通（linedb 實戰回報，2026-08-15）。
+
+    解析順序：registry 登記 → conventional 目錄（~/.local/state/
+    remagraph-<to>）；都沒有時明確要求先 init，絕不猜測。解析結果仍經
+    validate_project_metadata 驗證歸屬（防 registry/目錄被誤指到別的專案），
+    通過後 best-effort 登記。
+    """
+    registered = _db.get_registered_state_dir(to_project)
+    if registered is not None:
+        candidate = Path(registered)
+    else:
+        # conventional 路徑（與 resolve_project_state_dir 預設分支同一組法，
+        # 含 safe 字元清洗）；刻意不要求目錄已存在——「遷入尚未建立的目標
+        # 專案」是既有合法語意，connect_at_state_dir 會建庫。
+        safe = (
+            "".join(c if c.isalnum() or c in "-_" else "-" for c in to_project)
+            or "default"
+        )
+        candidate = (Path.home() / ".local" / "state" / f"remagraph-{safe}").resolve()
+    _db.validate_project_metadata(to_project, candidate)
+    try:
+        _db.register_known_project(to_project, candidate)
+    except Exception:
+        pass
+    return candidate
+
+
 def _resolve_migration_source_state_dir(from_project: str) -> Path:
     """解析遷移『來源』專案實際登記的 state_dir。
 
@@ -592,7 +626,7 @@ def migrate_project_memories(
         raise ValueError("from_project and to_project must not be the same")
 
     # 步驟 1：驗證目標合法性（不要求呼叫端目前環境已經切換過去）。
-    to_state = safety_validate_project(to_project, require_env_match=False)
+    to_state = _resolve_migration_target_state_dir(to_project)
 
     # 步驟 2：解析來源 state_dir。
     from_state = _resolve_migration_source_state_dir(from_project)

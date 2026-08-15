@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [Unreleased]
 
+### [0.6.2-beta] - 2026-08-15
+
+#### Fixed
+- **`migrate-project` could not recover memories stranded in the shared default DB** — the exact scenario it exists to serve. With `REMAGRAPH_STATE_DIR` pointed at the shared DB (`--from default`), the *target* project's path resolution was also hijacked by the env var, so source and target resolved to the same physical directory and the alias guard rejected the migration (`refusing to migrate a project into itself`). Target resolution now deliberately ignores the ambient env: it uses the target's registry entry first, then its conventional directory (`~/.local/state/remagraph-<project>`), with `project.json` identity validation — reported from the field by a downstream project recovering a pre-0.6.1 stranded record.
+
 ### [0.6.1-beta] - 2026-08-15
 
 #### Fixed

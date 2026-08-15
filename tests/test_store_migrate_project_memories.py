@@ -284,10 +284,10 @@ def test_read_only_degraded_target_rejects_migration_cleanly(tmp_path, monkeypat
     db_mod.connect_at_state_dir(to_state).close()
     _force_tier2(to_state / "remagraph.db", db_mod.SCHEMA_VERSION + 1)
 
-    # 讓 safety_validate_project("proj-ro", ...) 解析出同一個目錄：直接把
-    # 目前 ambient REMAGRAPH_STATE_DIR 指到它（resolve_project_state_dir
-    # 對已設定的 REMAGRAPH_STATE_DIR 有最高優先權，逐字回傳）。
-    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(to_state))
+    # 讓目標解析指到這個目錄：明確登記 registry（env 綁架修復後，
+    # migrate 的 to 解析無視 REMAGRAPH_STATE_DIR，改走 registry 優先——
+    # 見 store._resolve_migration_target_state_dir）。
+    db_mod.register_known_project("proj-ro", to_state)
 
     with pytest.raises(store_mod.MigrationReadOnlyError, match="proj-ro"):
         store_mod.migrate_project_memories("proj-a", "proj-ro")
@@ -307,14 +307,15 @@ def test_from_project_equals_to_project_raises_value_error(tmp_path, monkeypatch
 def test_aliased_from_and_to_resolving_to_same_physical_dir_raises_clear_error(
     tmp_path, monkeypatch
 ):
-    """from_project != to_project 字面上不同，但目前 ambient
-    REMAGRAPH_STATE_DIR 剛好讓兩者都解析到同一個物理目錄（見
-    maintenance.resolve_project_state_dir 對已設定 REMAGRAPH_STATE_DIR 的
-    最高優先權語意）——必須明確拒絕，而不是悄悄對同一份 db 檔案自我碰撞。
+    """from_project != to_project 字面上不同，但兩者的解析結果（from 經
+    registry、to 也經 registry——env 綁架修復後 to 不再吃
+    REMAGRAPH_STATE_DIR，构造同目錄要靠明確登記）指向同一個物理目錄——
+    必須明確拒絕，而不是悄悄對同一份 db 檔案自我碰撞。
     """
     shared_dir = tmp_path / "shared-state-dir"
     monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(shared_dir))
     conn = db_mod.connect(project_id="proj-x")
+    db_mod.register_known_project("proj-y", shared_dir)
     _insert_memory(
         conn,
         mem_id="mem-x-1",
