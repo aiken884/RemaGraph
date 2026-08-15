@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [Unreleased]
 
+### [0.7.1-beta] - 2026-08-15
+
+#### Fixed
+- **`doctor` no longer prints the "using the default shared state dir" warning** when run in a shared-state-dir context (field feedback from a downstream project on 0.7.0 launch day). The top-level guard warning carries no actionable meaning for a read-only health check — doctor's own `state_dir` check surface already covers state-dir health — and it polluted stderr for `--json` pipeline consumers. Covered by a regression test asserting doctor's stderr stays clean.
+
 ### [0.7.0-beta] - 2026-08-15
 
 > Scope agreed through a two-round external architecture review (all five items unanimously approved on round two), implemented TDD-first, then adversarially reviewed by two independent agents whose 12 findings were all fixed before this release. Test suite: 565 → 613.
