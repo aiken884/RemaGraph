@@ -318,7 +318,20 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 def cmd_init(args: argparse.Namespace) -> None:
     """極簡初始化 - 為非技術使用者設計，一行指令即可。"""
-    project = args.project or "default"
+    project = args.project
+    derived_from: str | None = None
+    if not project:
+        # 不帶 --project 時自動採用專案資料夾名稱，而非寫死 'default'——
+        # 寫入端（post-commit hook）與讀取端（prompt-hook）都以「repo 根
+        # 目錄名的 slug」推導 project_id，init 若落到 'default' 會建出一個
+        # 兩邊永遠對不上的記憶庫。git repo 內以 repo 根目錄名推導（worktree
+        # 安全，與 hook 的 project_root 對稱）；非 git 目錄退回 cwd 目錄名。
+        from remagraph.prompt_hook import derive_project_candidates_from_cwd, slugify
+
+        cwd = Path.cwd()
+        candidates = derive_project_candidates_from_cwd(str(cwd))
+        derived_from = candidates[0] if candidates else cwd.name
+        project = slugify(derived_from)
     # 特殊字元的 project 名不做靜默改寫，直接拒絕——修復前只有目錄名做了
     # 字元白名單，env.sh 與 project.json 的內容用原始字串手工拼接，含引號
     # 或 $() 的名字會 exit 0 卻產出無效 JSON 與帶命令替換的損毀 shell 檔
@@ -361,6 +374,11 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     print("RemaGraph initialization complete!")
     print(f"Project: {project}")
+    if derived_from is not None:
+        print(
+            f"  (auto-derived from folder name {derived_from!r}; "
+            "use --project to override)"
+        )
     print(f"Memory folder: {state_dir}")
     print("")
     print("[Quick start in 3 steps, for non-technical users]")
@@ -650,7 +668,10 @@ def build_parser() -> argparse.ArgumentParser:
         "init", help="Initialize RemaGraph (one command, beginner-friendly)"
     )
     p_init.add_argument(
-        "--project", default="default", help="Project name (used to distinguish different tasks)"
+        "--project",
+        default=None,
+        help="Project name (used to distinguish different tasks); "
+        "defaults to the current project folder name",
     )
 
     # auto

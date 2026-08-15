@@ -70,7 +70,8 @@ Dependencies: Python ≥3.11, model2vec, mcp (FastMCP), pydantic.
 ## Quick Start (5 minutes, no coding required)
 
 1. Install (see "Installation" above).
-2. Initialize:
+2. Initialize (run inside your project folder — the project name defaults to
+   the folder name, or pass `--project` to choose one):
    ```bash
    remagraph init --project myproject
    source ~/.local/state/remagraph-myproject/env.sh

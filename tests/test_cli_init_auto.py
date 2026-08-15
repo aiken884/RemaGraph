@@ -34,6 +34,61 @@ def test_init_creates_dir_and_env_file(tmp_path, monkeypatch, capsys):
     assert "REMAGRAPH_STATE_DIR" in env_text
 
 
+def test_init_without_project_derives_from_cwd_folder_name(
+    tmp_path, monkeypatch, capsys
+):
+    """不帶 --project 時，init 應自動採用目前資料夾名稱（slugify 後），
+    而不是寫死 'default'——與 post-commit hook 的推導規則一致。"""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    workdir = tmp_path / "MyCloned-Repo"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+    args = build_parser().parse_args(["init"])
+    cmd_init(args)
+    out = capsys.readouterr().out
+    assert "initialization complete" in out
+    state = tmp_path / ".local" / "state" / "remagraph-mycloned-repo"
+    assert state.is_dir()
+    meta = json.loads((state / "project.json").read_text(encoding="utf-8"))
+    assert meta["project_id"] == "mycloned-repo"
+    # 不該再建出 default 專案
+    assert not (tmp_path / ".local" / "state" / "remagraph-default").exists()
+
+
+def test_init_without_project_in_git_repo_subdir_uses_repo_root_name(
+    tmp_path, monkeypatch, capsys
+):
+    """在 git repo 的子目錄執行 init 時，應以 repo 根目錄名（而非子目錄名）
+    推導專案名——與 post-commit hook 的 project_root 推導對稱。"""
+    import subprocess
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    repo = tmp_path / "Cloned-Project"
+    sub = repo / "src" / "deep"
+    sub.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    monkeypatch.chdir(sub)
+    args = build_parser().parse_args(["init"])
+    cmd_init(args)
+    state = tmp_path / ".local" / "state" / "remagraph-cloned-project"
+    assert state.is_dir()
+    meta = json.loads((state / "project.json").read_text(encoding="utf-8"))
+    assert meta["project_id"] == "cloned-project"
+
+
+def test_init_explicit_project_still_wins_over_cwd(tmp_path, monkeypatch, capsys):
+    """明確帶 --project 時維持原行為，不做自動推導。"""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    workdir = tmp_path / "some-folder"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+    args = build_parser().parse_args(["init", "--project", "explicit-name"])
+    cmd_init(args)
+    state = tmp_path / ".local" / "state" / "remagraph-explicit-name"
+    assert state.is_dir()
+    assert not (tmp_path / ".local" / "state" / "remagraph-some-folder").exists()
+
+
 def test_search_by_task_id_without_query(state_env):
     from remagraph import db as db_mod
 

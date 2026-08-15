@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [Unreleased]
 
+#### Changed
+- **`remagraph init` without `--project` now derives the project name from the current project folder** instead of silently falling back to `default` (field feedback: running a bare `remagraph init` inside a freshly cloned repo created a `default` project that the post-commit hook and prompt-hook could never match). The derivation mirrors the hook's rules exactly — inside a git repo it uses the repo root directory name (worktree-safe, so running from a subdirectory still resolves correctly), otherwise the current directory name, slugified with the same `slugify` the write side (post-commit hook) and read side (prompt-hook) already share. An explicit `--project` still wins, and the output states the auto-derived name with a hint to override.
+
 ### [0.7.1-beta] - 2026-08-15
 
 #### Fixed
@@ -217,6 +220,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 版本號依循 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
 
 ### [Unreleased]
+
+#### Changed
+- **`remagraph init` 不帶 `--project` 時，改為自動採用目前專案資料夾名稱**，不再靜默落回 `default`（實際使用回饋：在剛 clone 下來的 repo 裡直接跑 `remagraph init`，會建出一個 post-commit hook 與 prompt-hook 永遠對不上的 `default` 專案）。推導規則與 hook 完全一致——git repo 內用 repo 根目錄名（worktree 安全，在子目錄執行也能正確解析），非 git 目錄則用目前目錄名，再套用寫入端（post-commit hook）與讀取端（prompt-hook）共用的同一套 `slugify`。明確帶 `--project` 時維持原行為優先，輸出會標示自動推導的名稱並提示可用 `--project` 覆寫。
 
 ### [0.5.0-beta] — 2026-07-31
 
