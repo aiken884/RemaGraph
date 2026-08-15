@@ -182,6 +182,30 @@ def _trigram_char_len(s: str) -> int:
     return len(s.replace(" ", ""))
 
 
+def _split_fts_tokens_by_length(sanitized: str) -> tuple[list[str], list[str]]:
+    """把 sanitize 後的查詢依 token 有效長度拆成（可檢索, 太短）兩組。
+
+    修復診斷發現的閘門缺陷：舊閘門把「所有 token 去空白後的總字元數」當
+    判斷基準，但 _build_fts5_match 把每個空白分隔的 token 各自包成獨立
+    phrase，而 trigram tokenizer 對 < 3 字元的 phrase 產生零個 token——
+    結果「資料 搜尋」（兩個 2 字詞、總長 4）通過舊閘門後永遠回傳 0 筆，
+    也不會落入短查詢的列表模式 fallback；混合查詢（"search ab"）的短
+    token 則被 FTS5 靜默忽略。因此正確的判斷單位是「每一個 token」而非
+    總長。token 可能已被 sanitize_fts5_query 包上引號（FTS5 保留字），
+    計長前先去掉外層引號，避免引號被算進長度而誤判（舊版 "or" →
+    '"or"' 長度 4 繞過攔截的 bug）。
+    """
+    long_tokens: list[str] = []
+    short_tokens: list[str] = []
+    for t in sanitized.split():
+        inner = t[1:-1] if len(t) >= 2 and t[0] == '"' and t[-1] == '"' else t
+        if _trigram_char_len(inner) >= 3:
+            long_tokens.append(t)
+        else:
+            short_tokens.append(t)
+    return long_tokens, short_tokens
+
+
 def _build_fts5_match(sanitized: str) -> str:
     """將 sanitized query 包裝為 FTS5 MATCH 字串。
 
@@ -357,8 +381,18 @@ def search_memories(
 
     sanitized = sanitize_fts5_query(request.query or "")
 
-    # 無有效全文查詢時：有過濾條件就直接列表，否則空結果
-    if _trigram_char_len(sanitized) < 3:
+    # 無有效全文查詢時：有過濾條件就直接列表，否則空結果。判斷單位是
+    # 「每一個 token」而非總長（見 _split_fts_tokens_by_length 的缺陷說明）。
+    long_tokens, short_tokens = _split_fts_tokens_by_length(sanitized)
+    if short_tokens and long_tokens:
+        logger.warning(
+            "dropping too-short tokens %r from FTS5 query %r (trigram tokenizer "
+            "needs >= 3 chars per token); searching with %r only",
+            short_tokens,
+            request.query,
+            long_tokens,
+        )
+    if not long_tokens:
         if request.task_id or request.agent_id or request.kind or request.tags:
             return _list_by_filters(conn, request)
         logger.warning(
@@ -368,7 +402,7 @@ def search_memories(
         )
         return SearchResponse(results=[], has_more=False)
 
-    match_clause = _build_fts5_match(sanitized)
+    match_clause = _build_fts5_match(" ".join(long_tokens))
 
     # 動態 WHERE 條件
     where: list[str] = []
@@ -380,6 +414,12 @@ def search_memories(
     if request.status is not None:
         where.append("m.status = ?")
         params.append(request.status)
+    else:
+        # 與列表模式（_list_by_filters_rows）一致：未指定 status 時預設
+        # 只回 active，superseded/invalidated 不混入全文結果（診斷發現的
+        # 語意不一致——同一個 search 指令，有無 query 得到不同存活語意）。
+        where.append("m.status = ?")
+        params.append("active")
     if request.project_id is not None:
         where.append("m.project_id = ?")
         params.append(request.project_id)
@@ -565,12 +605,20 @@ def _cross_project_fanout(
     from remagraph import db as db_mod
 
     all_results: list[dict[str, Any]] = []
+    any_scored = False
 
-    # (a) 目前這個連線自己所屬專案的資料庫
+    # (a) 目前這個連線自己所屬專案的資料庫。source_project_id 以 row 自己
+    # 的 project_id 為準——own 連線指向共用資料庫檔案時，query_fn（例如
+    # label 比對，不含 project_id 過濾）可能撈到『別的』專案的記憶，一律
+    # 標成 own_project_id 會錯置來源（診斷發現）；row 的 project_id 才是
+    # 這筆記憶真正的歸屬。
     own_rows = query_fn(conn)
     for row in own_rows:
-        result = _row_to_result(row, score=_optional_score(row))
-        result["source_project_id"] = own_project_id or row["project_id"]
+        score = _optional_score(row)
+        if score is not None:
+            any_scored = True
+        result = _row_to_result(row, score=score)
+        result["source_project_id"] = row["project_id"] or own_project_id
         all_results.append(result)
 
     # 目前這個連線實際連到的實體檔案路徑（供下方物理別名比對；解析失敗時為
@@ -639,24 +687,33 @@ def _cross_project_fanout(
             )
             break
 
-        fanned_out += 1
         foreign_conn = db_mod.connect_foreign_project_readonly(pid)
         if foreign_conn is None:
             # 已註冊但目前不可達（例如 state_dir 已被刪除）——跳過，不讓
-            # 整個搜尋因單一專案失敗。
+            # 整個搜尋因單一專案失敗。不計入 fanned_out：cap 與
+            # candidates_searched 的語意是「實際開啟並查詢的連線數」，
+            # 修復前不可達候選也被計入，統計虛報（診斷發現）。
             continue
+        fanned_out += 1
         try:
             rows = query_fn(foreign_conn)
-        except sqlite3.OperationalError:
-            # 例如該外部專案的資料庫尚未升級到含所需表格的 schema 版本——
-            # 防禦性跳過，不讓整個搜尋失敗。
+        except sqlite3.DatabaseError:
+            # OperationalError（schema 未升級）之外，實體損毀的候選 DB 拋
+            # 的是父類 DatabaseError（"database disk image is malformed"）
+            # ——修復前只吞 OperationalError，單一損毀專案會炸掉整個搜尋，
+            # 違反本函式 docstring 的韌性合約（診斷發現）。
+            logger.warning("skipping unreadable candidate project %r during %s fan-out",
+                           pid, log_label, exc_info=True)
             continue
         finally:
             foreign_conn.close()
 
         for row in rows:
-            result = _row_to_result(row, score=_optional_score(row))
-            result["source_project_id"] = pid
+            score = _optional_score(row)
+            if score is not None:
+                any_scored = True
+            result = _row_to_result(row, score=score)
+            result["source_project_id"] = row["project_id"] or pid
             all_results.append(result)
 
     seen_keys: set[tuple[str, str]] = set()
@@ -667,6 +724,17 @@ def _cross_project_fanout(
             continue
         seen_keys.add(key)
         deduped_results.append(result)
+
+    # 合併後必須重新排序再截斷（診斷發現：修復前 own rows 先放、各候選
+    # 依序附加就直接 [:top_k]，own 專案有 >= top_k 筆低相關命中時，其他
+    # 專案更相關/更新的命中被系統性丟棄）。排序鍵依查詢型態：FTS 查詢的
+    # rows 帶 BM25 score（越低越相關，升冪）；label / 列表查詢無 score，
+    # 依 created_at 降冪（與 _LABEL_MATCH_SQL / _list_by_filters_rows 的
+    # 單庫排序一致）。
+    if any_scored:
+        deduped_results.sort(key=lambda r: r["score"])
+    else:
+        deduped_results.sort(key=lambda r: r["created_at"], reverse=True)
 
     has_more = len(deduped_results) > request.top_k
     trimmed = deduped_results[: request.top_k]
@@ -799,12 +867,13 @@ def _query_single_db_for_request(
     """
     sanitized = sanitize_fts5_query(request.query or "")
 
-    if _trigram_char_len(sanitized) < 3:
+    long_tokens, _short_tokens = _split_fts_tokens_by_length(sanitized)
+    if not long_tokens:
         if request.task_id or request.agent_id or request.kind or request.tags:
             return _list_by_filters_rows(conn, request, apply_project_filter=apply_project_filter)
         return []
 
-    match_clause = _build_fts5_match(sanitized)
+    match_clause = _build_fts5_match(" ".join(long_tokens))
     where: list[str] = []
     params: list[Any] = [match_clause]
 
@@ -814,6 +883,11 @@ def _query_single_db_for_request(
     if request.status is not None:
         where.append("m.status = ?")
         params.append(request.status)
+    else:
+        # 與列表模式一致：未指定 status 時預設只回 active（見
+        # search_memories 主路徑的同一修復說明）。
+        where.append("m.status = ?")
+        params.append("active")
     if apply_project_filter and request.project_id is not None:
         where.append("m.project_id = ?")
         params.append(request.project_id)
