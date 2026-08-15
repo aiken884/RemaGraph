@@ -148,7 +148,20 @@ def cmd_store(args: argparse.Namespace) -> None:
     except Exception as e:
         print(f"ERROR: failed to connect to database - {e}", file=sys.stderr)
         sys.exit(1)
-    response = process_store(request, conn)
+    try:
+        response = process_store(request, conn)
+    except SafetyValveError as e:
+        # process_store 內部的安全閥（safety_validate_project）拋出時，
+        # 給乾淨的錯誤訊息與指引，不讓使用者看到原始 Python traceback
+        # （診斷實測：裸環境跑 `remagraph store` 會整段 traceback 外洩）。
+        print(
+            f"ERROR: blocked by the safety valve - {e}\n"
+            f"Hint: run `remagraph init --project {project}` first, then "
+            f"`source` the printed env.sh (or export REMAGRAPH_STATE_DIR/"
+            f"REMAGRAPH_PROJECT) before storing.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     result: dict[str, Any] = {
         "status": response.status,
         "superseded": response.superseded,

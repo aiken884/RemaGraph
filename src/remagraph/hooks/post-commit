@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # remagraph-managed-hook v1
-# remagraph-fields-schema-version: 1
+# remagraph-fields-schema-version: 2
 # ── RemaGraph post-commit 記憶寫回 hook ─────────────────────────────────────
 # 由 `remagraph install-hooks` 安裝／升級，安裝到本機任一 git repo 的
 # post-commit hook。目的：commit 完成後自動把摘要寫回 RemaGraph，不依賴任何
@@ -95,8 +95,30 @@ main() {
     project_root=$(dirname "$common_dir")
     project_id=$(_slugify "$(basename "$project_root")" "project")
 
-    local task_id
-    task_id=$(_slugify "${project_id}-commit-${short_hash}" "commit-task")
+    # ── state_dir 解析（安全閥要求 env 與 project 對映）─────────────────
+    # 修復前 hook 從不解析本 repo 對應的 REMAGRAPH_STATE_DIR：裸環境下每次
+    # commit 都以 "REMAGRAPH_STATE_DIR is not set" 失敗；env 恰好指向別的
+    # 專案時則被 metadata mismatch 拒絕。現在以 repo 推導的 project_id 為
+    # 準：`remagraph init --project <slug>` 建立的 convention 目錄存在就
+    # 一律採用（覆蓋繼承來的 env——那正是造成 mismatch 的來源）；不存在且
+    # env 也沒設定時，給出明確的 init 指引後乾淨降級。
+    local conv_state_dir="${HOME}/.local/state/remagraph-${project_id}"
+    if [[ -d "$conv_state_dir" ]]; then
+        export REMAGRAPH_STATE_DIR="$conv_state_dir"
+        export REMAGRAPH_PROJECT="$project_id"
+    elif [[ -z "${REMAGRAPH_STATE_DIR:-}" ]]; then
+        echo "post-commit: 找不到專案 ${project_id} 的 state dir（${conv_state_dir}）；請先執行 remagraph init --project ${project_id}，本次略過記憶寫回（不影響 commit）" >&2
+        return 0
+    fi
+
+    # ── task_id：project 段先截長，保證 -commit-<hash> 尾碼完整保留 ──────
+    # 修復前整串組合後才截 64 字元：repo 目錄名夠長時尾碼被整段截掉，所有
+    # commit 產生完全相同的 task_id，kind=status_update 的 supersede 邏輯
+    # 會讓每次 commit 靜默覆蓋前一個 commit 的記錄（診斷實測確認）。
+    local task_id prefix_budget task_prefix
+    prefix_budget=$((64 - 8 - ${#short_hash}))   # 8 = ${#"-commit-"}
+    task_prefix=$(printf "%.${prefix_budget}s" "$project_id")
+    task_id=$(_slugify "${task_prefix}-commit-${short_hash}" "commit-task")
 
     local agent_id_raw agent_id
     agent_id_raw="${AGENT_ID:-$(git config user.name 2>/dev/null)}"

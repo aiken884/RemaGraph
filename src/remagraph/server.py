@@ -617,6 +617,12 @@ def remagraph_maintain(
 ) -> dict[str, Any]:
     """自動維護 DB。"""
     _check_rate_limit("maintenance")
+    # 與 remagraph_store/search/status 相同的 project binding 檢查（診斷
+    # 修復）：綁定 project A 的 serve 行程不得以 B 的名義執行 prune/vacuum
+    # 這類有資料影響的維護——單行程單專案是 PPLX 共識的核心約束。
+    mismatch = _check_project_binding(project_id)
+    if mismatch is not None:
+        return mismatch
     try:
         safety_validate_project(project_id)
         policy = MaintenancePolicy()

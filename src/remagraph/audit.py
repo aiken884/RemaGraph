@@ -92,13 +92,21 @@ def append_audit(response: StoreResponse, request: StoreRequest) -> None:
             record["detail"] = detail
 
     try:
+        # 與 append_event 相同的先序列化保護（診斷修復）：json.dump 直接對
+        # 已開啟的檔案物件做多次小寫入，(a) 多 process 並發 append 且單筆
+        # record 超過檔案 buffer 時會產生交錯損毀的行；(b) 序列化中途失敗
+        # 時，已寫入 buffer 的半殘 JSON 片段仍會在 close 時 flush 落檔，且
+        # TypeError/ValueError 不在 except 內、往外拋，違反「audit 寫入
+        # 失敗不中斷主流程」的契約。先在記憶體中完整序列化、成功才開檔
+        # 一次性寫入，兩個問題一起解。
+        serialized = json.dumps(record, ensure_ascii=False)
         path = _audit_path()
         _ensure_dir(path)
         with open(path, "a", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False)
+            f.write(serialized)
             f.write("\n")
         os.chmod(path, 0o600)
-    except OSError:
+    except (OSError, TypeError, ValueError):
         pass  # 審計寫入失敗不應中斷主流程
 
 

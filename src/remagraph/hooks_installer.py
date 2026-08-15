@@ -36,7 +36,7 @@ BACKUP_SUFFIX = ".pre-remagraph-backup"
 
 MANAGED_HOOK_MARKER = "# remagraph-managed-hook v1"
 FIELDS_SCHEMA_VERSION_PREFIX = "# remagraph-fields-schema-version:"
-CURRENT_FIELDS_SCHEMA_VERSION = 1
+CURRENT_FIELDS_SCHEMA_VERSION = 2
 
 _FIELDS_SCHEMA_VERSION_RE = re.compile(
     r"^#\s*remagraph-fields-schema-version:\s*(\d+)\s*$", re.MULTILINE

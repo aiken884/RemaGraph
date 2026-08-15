@@ -33,6 +33,7 @@ ArbitrationReason = Literal[
     "invalid_agent_id",
     "invalidates_not_found",
     "invalidates_kind_mismatch",
+    "invalidates_not_active",
     "invalid_label",
 ]
 
@@ -326,7 +327,7 @@ def invalidate_constraints(
     # 驗證所有 id 都存在
     placeholders = ",".join("?" for _ in invalidate_ids)
     rows = conn.execute(
-        f"SELECT id, kind FROM memories WHERE id IN ({placeholders})",
+        f"SELECT id, kind, status FROM memories WHERE id IN ({placeholders})",
         invalidate_ids,
     ).fetchall()
 
@@ -348,6 +349,21 @@ def invalidate_constraints(
                 detail=(
                     "only memories of kind discovered_constraint can be "
                     f"invalidated; {r['id']} has kind {r['kind']}"
+                ),
+            )
+
+    # 驗證 status 都是 active——與下方 UPDATE 的 status='active' 條件對齊
+    # （診斷修復：修復前對已 superseded/invalidated 的 constraint 請求會
+    # 通過驗證、UPDATE 到 0 筆，回傳的 invalidated_ids 卻列出全部請求 id，
+    # 呼叫端誤信本次已完成失效）。
+    for r in rows:
+        if r["status"] != "active":
+            return ArbitrationResult(
+                passed=False,
+                reason="invalidates_not_active",
+                detail=(
+                    f"only active constraints can be invalidated; {r['id']} "
+                    f"currently has status {r['status']}"
                 ),
             )
 

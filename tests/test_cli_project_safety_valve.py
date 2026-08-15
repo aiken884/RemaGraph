@@ -56,7 +56,6 @@ import pytest
 
 import remagraph.cli as cli_mod
 from remagraph import db as db_mod
-from remagraph.maintenance import SafetyValveError
 
 
 @pytest.fixture(autouse=True)
@@ -209,11 +208,14 @@ def test_cmd_store_default_project_without_state_dir_pre_existing_behavior_uncha
     REMAGRAPH_STATE_DIR 的 store 呼叫。這在修復前後皆一致（已用
     `git stash` 對照確認：修復前同樣拋出 SafetyValveError），因此不是本次
     修復造成的 regression，維持既有行為，僅在此明確釘住、避免日後誤以為
-    是新引入的問題。process_store 對此例外並未 try/except（cmd_store 只包住
-    _get_conn()，process_store 呼叫本身不在 try 區塊內），因此例外會直接
-    往外傳，而非乾淨的 SystemExit(1)——與 cmd_store 對 _get_conn() 失敗
-    的既有處理方式不同，但同樣屬於 pre-existing、非本次修復範圍。"""
-    with pytest.raises(SafetyValveError, match="REMAGRAPH_STATE_DIR"):
+    是新引入的問題。
+
+    全專案診斷修復更新：cmd_store 現在把 process_store 呼叫包進
+    SafetyValveError 捕捉，改為乾淨的 SystemExit(1) + 指引訊息（修復前
+    例外以完整 Python traceback 直接外洩，見
+    tests/test_safety_audit_diagnostics_fixes.py 的裸環境測試）。安全語意
+    本身不變：沒有 REMAGRAPH_STATE_DIR 的 store 呼叫仍被擋下。"""
+    with pytest.raises(SystemExit) as exc:
         cli_mod.main(
             [
                 "store",
@@ -229,6 +231,10 @@ def test_cmd_store_default_project_without_state_dir_pre_existing_behavior_uncha
                 '["a"]',
             ]
         )
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "REMAGRAPH_STATE_DIR" in err
+    assert "Traceback" not in err
 
 
 def test_cmd_search_default_project_without_state_dir_still_works(fake_home, capsys):

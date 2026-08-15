@@ -185,9 +185,14 @@ def test_existing_managed_hook_with_older_fields_schema_version_reports_upgrade(
     assert result.returncode == 0, result.stderr
     backup = hooks_dir / "post-commit.pre-remagraph-backup"
     assert not backup.exists(), "屬於我們自己管理的 hook，就地升級不需要備份"
+    from remagraph.hooks_installer import CURRENT_FIELDS_SCHEMA_VERSION
+
     assert "fields-schema-version=0" in result.stdout
-    assert "fields-schema-version=1" in result.stdout
-    assert "# remagraph-fields-schema-version: 1" in stale_hook.read_text()
+    assert f"fields-schema-version={CURRENT_FIELDS_SCHEMA_VERSION}" in result.stdout
+    assert (
+        f"# remagraph-fields-schema-version: {CURRENT_FIELDS_SCHEMA_VERSION}"
+        in stale_hook.read_text()
+    )
 
 
 def test_existing_managed_hook_reinstall_is_idempotent_no_backup(tmp_path, base_env):

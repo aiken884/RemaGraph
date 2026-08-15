@@ -39,16 +39,24 @@ from remagraph.db import (
 # ---------------------------------------------------------------------------
 
 
-def resolve_project_state_dir(project_id: str) -> pathlib.Path:
+def resolve_project_state_dir(project_id: str, *, register: bool = True) -> pathlib.Path:
     """從 env / project.json / governance 取得權威 state_dir。
     必須回傳 realpath 解析後的絕對路徑。
 
-    副作用（PPLX 架構改善計畫 item 4a）：每次呼叫都會把解析出的
-    (project_id, state_dir) upsert 進共用 registry
+    副作用（PPLX 架構改善計畫 item 4a）：register=True（預設）時，每次呼叫
+    都會把解析出的 (project_id, state_dir) upsert 進共用 registry
     （db.register_known_project()，落在 DEFAULT_STATE_DIR 的 remagraph.db，
     與呼叫端當下的 project_id/state_dir 無關）——這是後續跨專案標籤搜尋
     與 recall_related 賴以知道「其他專案的 DB 在哪裡」的唯一入口，不需要
     任何額外的顯式「註冊」呼叫，正常使用就會自動讓專案被登記。
+
+    register=False 供 safety_validate_project / _record_violation 使用
+    （診斷修復）：安全驗證「之前」與「違規記錄」路徑絕不能觸發 upsert——
+    修復前，env 繼承錯誤的違規呼叫（process 帶著自己的 project_id、卻繼承
+    了別的專案的 REMAGRAPH_STATE_DIR）雖被 raise 擋下寫入，但 registry 裡
+    該 project_id 原本正確的映射已在驗證前就被覆寫成別人的目錄，後續
+    cross-project fan-out 會照著被污染的 registry 打開錯誤專案的資料庫。
+    合法路徑（驗證通過後、以及一般的解析呼叫）仍照常登記。
 
     此登記為 best-effort：任何失敗都被吞掉，絕不影響本函式既有的解析結果
     與回傳行為（register_known_project 本身已具備防禦性，這裡再包一層
@@ -73,10 +81,11 @@ def resolve_project_state_dir(project_id: str) -> pathlib.Path:
             )
             resolved = (pathlib.Path.home() / ".local" / "state" / f"remagraph-{safe}").resolve()
 
-    try:
-        register_known_project(project_id, resolved)
-    except Exception:
-        pass
+    if register:
+        try:
+            register_known_project(project_id, resolved)
+        except Exception:
+            pass
 
     return resolved
 
@@ -91,7 +100,9 @@ def safety_validate_project(project_id: str, *, require_env_match: bool = True) 
     - 受限前綴的專案（見 REMAGRAPH_RESTRICTED_PREFIXES）嚴禁使用 default DB
     - 違規時寫 audit + discovered_constraint 並 raise
     """
-    configured = resolve_project_state_dir(project_id)
+    # register=False：解析階段絕不 upsert registry——所有驗證通過後才在
+    # 下方 return 前登記（診斷修復，見 resolve_project_state_dir docstring）。
+    configured = resolve_project_state_dir(project_id, register=False)
     env_dir_str = os.environ.get("REMAGRAPH_STATE_DIR", "")
     env_dir = pathlib.Path(env_dir_str).resolve() if env_dir_str else None
 
@@ -146,7 +157,7 @@ def safety_validate_project(project_id: str, *, require_env_match: bool = True) 
     if (
         restricted_prefixes
         and project_id.startswith(restricted_prefixes)
-        and configured.name == "remagraph"
+        and _is_default_state_dir(configured)
     ):
         _record_violation(project_id, "restricted_prefix_using_default_db")
         raise SafetyValveError(
@@ -154,7 +165,42 @@ def safety_validate_project(project_id: str, *, require_env_match: bool = True) 
             "the default DB; a separate state_dir is required"
         )
 
+    # 所有驗證通過——此時才登記進共用 registry（診斷修復，見
+    # resolve_project_state_dir 的 register 參數說明）。
+    try:
+        register_known_project(project_id, configured)
+    except Exception:
+        pass
+
     return configured
+
+
+def _is_default_state_dir(configured: pathlib.Path) -> bool:
+    """判斷 configured 是否應被視為 default 共用 state dir（受限前綴閥門用）。
+
+    修復前用 `configured.name == "remagraph"` 大小寫敏感字串比較：macOS
+    預設 APFS 大小寫不敏感——把 REMAGRAPH_STATE_DIR 設成 `.../REMAGRAPH`
+    這種大小寫變體，字串比較不相等、物理上卻是同一個目錄，受限前綴專案可
+    藉此繞過閥門實際寫入 default DB（診斷實測確認）。
+
+    修復採保守方向、只擴大攔截面：(a) 名稱比較改為大小寫不敏感
+    （casefold），大小寫變體一律視為 default；(b) 額外用 samefile 與實際的
+    DEFAULT_STATE_DIR 做實體比較，即使名稱完全不同、只要物理上是同一個
+    目錄也攔下。原字面名判斷（basename 為 remagraph 的自訂目錄也被視為
+    default 而拒絕）刻意保留——那是既有的保守誤差，方向是安全的，多個
+    既有測試也以此語意為前提。
+    """
+    if configured.name.casefold() == "remagraph":
+        return True
+    from remagraph import db as _db_mod
+
+    try:
+        default_dir = pathlib.Path(_db_mod.DEFAULT_STATE_DIR).resolve()
+        if configured.exists() and default_dir.exists():
+            return configured.samefile(default_dir)
+    except OSError:
+        pass
+    return False
 
 
 def _record_violation(project_id: str, reason: str) -> None:
@@ -181,7 +227,9 @@ def _record_violation(project_id: str, reason: str) -> None:
     append_event(state_dir=...)，確保與下方 memory 記錄使用同一目錄。
     """
     try:
-        state_dir = resolve_project_state_dir(project_id)
+        # register=False：記錄違規的路徑絕不 upsert registry（診斷修復，
+        # 違規當下的解析結果正是不可信的那個目錄）。
+        state_dir = resolve_project_state_dir(project_id, register=False)
     except Exception:
         # 解析失敗時退回舊行為：讓 append_event 用它自己的環境變數 fallback。
         state_dir = None
