@@ -39,12 +39,12 @@ jobs:
 
       - name: Create GitHub Release (CHANGELOG notes)
         if: steps.changelog.outputs.found == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body_path: release-notes.md
 
       - name: Create GitHub Release (fallback auto notes)
         if: steps.changelog.outputs.found != 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
