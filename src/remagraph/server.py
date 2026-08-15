@@ -328,7 +328,16 @@ def _bind_project(project_id: str) -> None:
     global _conn, _bound_project_id, _bound_db_path
 
     try:
-        resolved_state_dir = maintenance.resolve_project_state_dir(project_id)
+        # register=False：這裡只是啟動診斷的解析，發生在下方 _db.connect()
+        # 觸發 safety_validate_project 之前——絕不能在驗證前就把
+        # (project_id, env 繼承來的目錄) upsert 進 registry（對抗式審查
+        # 實測發現的繞過：serve 行程繼承別的專案的 REMAGRAPH_STATE_DIR
+        # 啟動，安全閥正確拒絕、行程失敗，但 registry 已被污染，後續
+        # cross-project fan-out 會照著開錯專案的資料庫）。合法登記由
+        # safety_validate_project 在全部驗證通過後執行。
+        resolved_state_dir = maintenance.resolve_project_state_dir(
+            project_id, register=False
+        )
     except Exception:
         resolved_state_dir = None
 
@@ -708,6 +717,23 @@ def main() -> None:
         return
 
     if argv[0] == "--project" or argv[0].startswith("--project="):
+        # 歷史 serve fallback 只涵蓋「純 serve 參數」的形狀；若後面還帶著
+        # CLI 子命令（如 `remagraph --project X store ...`，比 typo 更自然
+        # 的誤用寫法），靜默綁定 X 啟動 stdio server 掛住終端正是本輪修復
+        # 要消滅的失敗模式（對抗式審查發現的殘留入口）——改為明確報錯。
+        cli_commands = (
+            "store", "search", "status", "init", "auto", "maintain",
+            "migrate-project", "link", "install-hooks", "serve",
+        )
+        stray = next((a for a in argv[1:] if a in cli_commands), None)
+        if stray is not None:
+            print(
+                f"ERROR: the subcommand {stray!r} must come before --project "
+                f"(usage: remagraph {stray} --project <id> ...); a leading "
+                "--project without a subcommand starts the MCP stdio server.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         _run_serve(argv)
         return
 

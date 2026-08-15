@@ -99,12 +99,11 @@ def append_audit(response: StoreResponse, request: StoreRequest) -> None:
         # TypeError/ValueError 不在 except 內、往外拋，違反「audit 寫入
         # 失敗不中斷主流程」的契約。先在記憶體中完整序列化、成功才開檔
         # 一次性寫入，兩個問題一起解。
-        serialized = json.dumps(record, ensure_ascii=False)
+        serialized = json.dumps(record, ensure_ascii=False) + "\n"
         path = _audit_path()
         _ensure_dir(path)
         with open(path, "a", encoding="utf-8") as f:
             f.write(serialized)
-            f.write("\n")
         os.chmod(path, 0o600)
     except (OSError, TypeError, ValueError):
         pass  # 審計寫入失敗不應中斷主流程
@@ -150,12 +149,11 @@ def append_event(action: str, detail: dict[str, Any], *, state_dir: Path | None 
     try:
         # 先在記憶體中完整序列化；失敗（TypeError/ValueError）不會碰到檔案，
         # 因此絕不會留下半殘的行。
-        serialized = json.dumps(record, ensure_ascii=False)
+        serialized = json.dumps(record, ensure_ascii=False) + "\n"
         path = _audit_path(state_dir)
         _ensure_dir(path)
         with open(path, "a", encoding="utf-8") as f:
             f.write(serialized)
-            f.write("\n")
         os.chmod(path, 0o600)
     except (OSError, TypeError, ValueError):
         pass  # 審計寫入失敗（含序列化失敗）不應中斷主流程

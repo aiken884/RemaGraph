@@ -41,6 +41,12 @@ _slugify() {
     printf '%.64s' "$s"
 }
 
+# ── 小工具：從 project.json 讀 project_id（無 jq 依賴；該檔由
+# remagraph init 以 json.dumps 產生，格式穩定）─────────────────────────────
+_read_project_id_from_meta() {
+    sed -n 's/.*"project_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" 2>/dev/null | head -n1
+}
+
 # ── 小工具：JSON 字串 escape（不含前後引號）──────────────────────────────
 _json_escape() {
     local s="$1"
@@ -97,17 +103,54 @@ main() {
 
     # ── state_dir 解析（安全閥要求 env 與 project 對映）─────────────────
     # 修復前 hook 從不解析本 repo 對應的 REMAGRAPH_STATE_DIR：裸環境下每次
-    # commit 都以 "REMAGRAPH_STATE_DIR is not set" 失敗；env 恰好指向別的
-    # 專案時則被 metadata mismatch 拒絕。現在以 repo 推導的 project_id 為
-    # 準：`remagraph init --project <slug>` 建立的 convention 目錄存在就
-    # 一律採用（覆蓋繼承來的 env——那正是造成 mismatch 的來源）；不存在且
-    # env 也沒設定時，給出明確的 init 指引後乾淨降級。
-    local conv_state_dir="${HOME}/.local/state/remagraph-${project_id}"
-    if [[ -d "$conv_state_dir" ]]; then
-        export REMAGRAPH_STATE_DIR="$conv_state_dir"
-        export REMAGRAPH_PROJECT="$project_id"
+    # commit 都以 "REMAGRAPH_STATE_DIR is not set" 失敗。解析順序（對抗式
+    # 審查後收斂）：
+    #   1. 繼承的 env 已設定、且其 project.json 的 project_id 與本 repo 的
+    #      slug（不分大小寫）一致 → 尊重 env（使用者可能刻意把 state 遷到
+    #      自訂位置，不得被 convention 目錄搶走）。
+    #   2. convention 目錄存在（先試 slug、再試 repo 原始目錄名——
+    #      remagraph init --project 可能用了含大寫的原名）→ 採用之，並以
+    #      其 project.json 記載的 project_id 為權威（大小寫不敏感 FS 上
+    #      slug 與 metadata 不一致會被安全閥拒絕，權威值才對得上）。
+    #   3. 都沒有且 env 也沒設定 → 給出明確的 init 指引後乾淨降級；env
+    #      有設定但不屬於本專案 → 保留原樣，交由 store 的安全閥判定。
+    # HOME 未設定的環境（部分 CI 容器/systemd）跳過 convention 解析，
+    # 不得因 set -u 讓整個 hook 中途爆掉。
+    local home_dir="${HOME:-}"
+    local resolved_state_dir="" resolved_project_id="$project_id"
+    local env_pid meta_pid cand
+
+    if [[ -n "${REMAGRAPH_STATE_DIR:-}" && -f "${REMAGRAPH_STATE_DIR}/project.json" ]]; then
+        env_pid=$(_read_project_id_from_meta "${REMAGRAPH_STATE_DIR}/project.json")
+        if [[ -n "$env_pid" ]] && \
+           [[ "$(printf '%s' "$env_pid" | tr '[:upper:]' '[:lower:]')" == "$project_id" ]]; then
+            resolved_state_dir="${REMAGRAPH_STATE_DIR}"
+            resolved_project_id="$env_pid"
+        fi
+    fi
+
+    if [[ -z "$resolved_state_dir" && -n "$home_dir" ]]; then
+        for cand in "${home_dir}/.local/state/remagraph-${project_id}" \
+                    "${home_dir}/.local/state/remagraph-$(basename "$project_root")"; do
+            if [[ -d "$cand" ]]; then
+                resolved_state_dir="$cand"
+                if [[ -f "$cand/project.json" ]]; then
+                    meta_pid=$(_read_project_id_from_meta "$cand/project.json")
+                    if [[ -n "$meta_pid" ]]; then
+                        resolved_project_id="$meta_pid"
+                    fi
+                fi
+                break
+            fi
+        done
+    fi
+
+    if [[ -n "$resolved_state_dir" ]]; then
+        export REMAGRAPH_STATE_DIR="$resolved_state_dir"
+        export REMAGRAPH_PROJECT="$resolved_project_id"
+        project_id="$resolved_project_id"
     elif [[ -z "${REMAGRAPH_STATE_DIR:-}" ]]; then
-        echo "post-commit: 找不到專案 ${project_id} 的 state dir（${conv_state_dir}）；請先執行 remagraph init --project ${project_id}，本次略過記憶寫回（不影響 commit）" >&2
+        echo "post-commit: 找不到專案 ${project_id} 的 state dir；請先執行 remagraph init --project ${project_id}，本次略過記憶寫回（不影響 commit）" >&2
         return 0
     fi
 

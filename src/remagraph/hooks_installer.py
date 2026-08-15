@@ -207,6 +207,17 @@ def _write_hook_into(target_dir: Path, *, force: bool) -> tuple[str, int | None]
 
     if MANAGED_HOOK_MARKER in existing_text:
         old_version = _parse_fields_schema_version(existing_text)
+        if old_version is not None and old_version > CURRENT_FIELDS_SCHEMA_VERSION:
+            # 既有 hook 的版本比目前程式碼還新（對抗式審查發現的降級風險：
+            # 舊版 remagraph 跑 install-hooks 會把新版 hook 靜默降回帶已知
+            # bug 的舊版）——保留較新的 hook 不動，明確告知。
+            raise HooksInstallerError(
+                f"{target} is a remagraph-managed hook with a NEWER "
+                f"fields-schema-version ({old_version}) than this remagraph "
+                f"version supports ({CURRENT_FIELDS_SCHEMA_VERSION}); "
+                "refusing to downgrade it. Upgrade the remagraph package "
+                "and re-run install-hooks."
+            )
         target.write_text(content, encoding="utf-8")
         os.chmod(target, 0o755)
         return "upgraded", old_version

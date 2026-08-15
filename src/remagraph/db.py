@@ -1087,7 +1087,22 @@ def _run_migrations(conn: sqlite3.Connection) -> bool:
     current_version = int(row[0])
 
     if current_version == SCHEMA_VERSION:
-        # 已是最新版本
+        # 已是最新版本。修補存量資料庫的 min_writer_version（對抗式審查
+        # 發現的缺口）：_MIN_WRITER_VERSION_DEFAULT 修復只治「新建」DB，
+        # 修復前由 v6 程式建立的存量 DB 仍帶著錯種的 min_writer_version=6，
+        # v5 釘版消費端對它們照樣被錯誤降級唯讀。此回填嚴格限定
+        # SCHEMA_VERSION == 6 且值恰為錯種的 "6"——未來版本若真的需要提高
+        # min_writer_version，由該版的 migration 自行設定，不受此修補影響。
+        if SCHEMA_VERSION == 6:
+            mw_row = conn.execute(
+                "SELECT value FROM _meta WHERE key='min_writer_version'"
+            ).fetchone()
+            if mw_row is not None and mw_row[0] == "6":
+                conn.execute(
+                    "INSERT OR REPLACE INTO _meta (key, value) "
+                    "VALUES ('min_writer_version', ?)",
+                    (_MIN_WRITER_VERSION_DEFAULT,),
+                )
         return False
 
     initial_version = current_version

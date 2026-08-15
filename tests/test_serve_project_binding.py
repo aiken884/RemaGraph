@@ -208,7 +208,11 @@ def test_run_serve_prints_mismatch_warning_before_startup_failure(
     state_dir = tmp_path / "actual-env-dir"
     other_dir = tmp_path / "resolved-elsewhere"
     monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(state_dir))
-    monkeypatch.setattr(server.maintenance, "resolve_project_state_dir", lambda pid: other_dir)
+    monkeypatch.setattr(
+        server.maintenance,
+        "resolve_project_state_dir",
+        lambda pid, register=True: other_dir,
+    )
 
     with pytest.raises(SystemExit):
         server._run_serve(["--project", "proj-mismatch-diag"])

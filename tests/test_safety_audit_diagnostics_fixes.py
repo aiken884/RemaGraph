@@ -203,8 +203,10 @@ def test_invalidate_non_active_constraint_is_rejected_not_misreported():
         (now, now, now),
     )
     result = invalidate_constraints(["mem-c1"], conn)
-    # 已非 active 的 constraint：必須明確拒絕（ArbitrationResult），而不是
-    # 「驗證通過、更新 0 筆、invalidated_ids 卻列出它」的矛盾回報。
-    assert isinstance(result, ArbitrationResult)
-    assert result.passed is False
+    # 已非 active 的 constraint：冪等跳過、如實回報（不擋整筆 store——
+    # 對抗式審查指出整筆拒絕對跨塔並行寫入是可用性退步），且
+    # invalidated_ids 不得再虛報未實際更新的 id。
+    assert not isinstance(result, ArbitrationResult)
+    assert result.invalidated_count == 0
+    assert result.invalidated_ids == []
     conn.close()

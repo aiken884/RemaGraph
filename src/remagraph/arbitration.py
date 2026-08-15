@@ -352,20 +352,14 @@ def invalidate_constraints(
                 ),
             )
 
-    # 驗證 status 都是 active——與下方 UPDATE 的 status='active' 條件對齊
-    # （診斷修復：修復前對已 superseded/invalidated 的 constraint 請求會
-    # 通過驗證、UPDATE 到 0 筆，回傳的 invalidated_ids 卻列出全部請求 id，
-    # 呼叫端誤信本次已完成失效）。
-    for r in rows:
-        if r["status"] != "active":
-            return ArbitrationResult(
-                passed=False,
-                reason="invalidates_not_active",
-                detail=(
-                    f"only active constraints can be invalidated; {r['id']} "
-                    f"currently has status {r['status']}"
-                ),
-            )
+    # 已非 active 的 constraint：不擋整筆 store（維持並行/重放冪等——兩個
+    # agent 平行發現同一過時 constraint、各自帶 invalidates 寫入時，後到者
+    # 的記憶本體不該因此被拒），也不列進回報。invalidated_ids 只包含本次
+    # 「實際」被更新的 id，與下方 UPDATE 的 status='active' 條件完全對齊
+    # ——修復診斷發現的矛盾回報（修復前 invalidated_ids 列出全部請求 id、
+    # 實際更新 0 筆，呼叫端誤信已完成失效）。整筆拒絕的第一版修法經
+    # 對抗式審查指出對跨塔並行寫入是可用性退步，改為此冪等版本。
+    active_ids = [r["id"] for r in rows if r["status"] == "active"]
 
     # 執行 invalidate
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
@@ -377,5 +371,5 @@ def invalidate_constraints(
 
     return InvalidateResult(
         invalidated_count=cursor.rowcount,
-        invalidated_ids=list(invalidate_ids),
+        invalidated_ids=active_ids,
     )

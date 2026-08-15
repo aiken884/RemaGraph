@@ -104,7 +104,11 @@ class SearchRequest(BaseModel):
     query: str = ""
     top_k: int = Field(default=20, ge=1, le=100)
     kind: MemoryKind | None = None
-    status: MemoryStatus | None = None
+    status: MemoryStatus | Literal["all"] | None = None
+    """None（預設）＝只回 active（與列表模式一致的存活語意）；明確傳
+    "all" 才一次涵蓋 active/superseded/invalidated——診斷把 FTS 路徑的
+    status=None 從「不過濾」收斂成「預設 active」後，補上這個顯式逃生口，
+    保留「全文檢索歷史記憶」的既有能力（對抗式審查發現的表達力缺口）。"""
     tags: list[str] | None = None
     project_id: str | None = None
     agent_id: str | None = None

@@ -145,6 +145,20 @@ def cmd_store(args: argparse.Namespace) -> None:
     )
     try:
         conn = _get_conn(_project_id_for_conn(project))
+    except SafetyValveError as e:
+        # 明確 --project + 裸環境時，安全閥在連線層（db.connect →
+        # safety_validate_project）就拋出——與下方 process_store 層的
+        # 同名例外給同一份乾淨訊息與 init 指引（對抗式審查發現：修復
+        # 第一版只包了 process_store，最常見的觸發點反而落入 generic
+        # 的 failed to connect 訊息）。
+        print(
+            f"ERROR: blocked by the safety valve - {e}\n"
+            f"Hint: run `remagraph init --project {project}` first, then "
+            f"`source` the printed env.sh (or export REMAGRAPH_STATE_DIR/"
+            f"REMAGRAPH_PROJECT) before storing.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     except Exception as e:
         print(f"ERROR: failed to connect to database - {e}", file=sys.stderr)
         sys.exit(1)
@@ -273,10 +287,15 @@ def cmd_init(args: argparse.Namespace) -> None:
     # 字元白名單，env.sh 與 project.json 的內容用原始字串手工拼接，含引號
     # 或 $() 的名字會 exit 0 卻產出無效 JSON 與帶命令替換的損毀 shell 檔
     # （診斷實測確認）。允許字元集與下方使用說明宣告的一致。
-    if not re.fullmatch(r"[A-Za-z0-9_-]+", project):
+    # 驗證規則直接採用 models 層對 project_id 的同一條 regex（字母數字
+    # 開頭、至多 64 字元）——對抗式審查實測發現第一版白名單
+    # （[A-Za-z0-9_-]+）比 models 寬鬆：`_foo`、65 字元名稱 init 成功、
+    # store 卻永遠被拒，且 store 的錯誤指引又叫使用者回去 init，形成死循環。
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", project):
         print(
-            f"ERROR: invalid project name {project!r} - project names may "
-            "only contain letters, digits, underscores, and hyphens",
+            f"ERROR: invalid project name {project!r} - project names must "
+            "start with a letter or digit, may only contain letters, digits, "
+            "underscores, and hyphens, and must be at most 64 characters",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -521,7 +540,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--kind",
         choices=["task_handoff", "status_update", "discovered_constraint", "fleet_member"],
     )
-    p_search.add_argument("--status", choices=["active", "superseded", "invalidated"])
+    p_search.add_argument(
+        "--status",
+        choices=["active", "superseded", "invalidated", "all"],
+        help=(
+            "Filter by memory status (default: active only; pass 'all' to "
+            "search across active/superseded/invalidated at once)"
+        ),
+    )
     p_search.add_argument("--tags", help="JSON array")
     p_search.add_argument("--project")
     p_search.add_argument("--agent-id")

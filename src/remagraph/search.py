@@ -289,7 +289,10 @@ def _list_by_filters_rows(
     if request.kind is not None:
         where.append("kind = ?")
         params.append(request.kind)
-    if request.status is not None:
+    # status 三態：None（預設）＝active；"all"＝不過濾；其餘＝指定值
+    if request.status == "all":
+        pass
+    elif request.status is not None:
         where.append("status = ?")
         params.append(request.status)
     else:
@@ -411,13 +414,16 @@ def search_memories(
     if request.kind is not None:
         where.append("m.kind = ?")
         params.append(request.kind)
-    if request.status is not None:
+    # 與列表模式（_list_by_filters_rows）一致的 status 三態：None（預設）
+    # ＝只回 active（診斷發現的語意不一致修復——同一個 search 指令，有無
+    # query 不得有不同存活語意）；"all"＝顯式不過濾（歷史記憶逃生口）；
+    # 其餘＝指定值。
+    if request.status == "all":
+        pass
+    elif request.status is not None:
         where.append("m.status = ?")
         params.append(request.status)
     else:
-        # 與列表模式（_list_by_filters_rows）一致：未指定 status 時預設
-        # 只回 active，superseded/invalidated 不混入全文結果（診斷發現的
-        # 語意不一致——同一個 search 指令，有無 query 得到不同存活語意）。
         where.append("m.status = ?")
         params.append("active")
     if request.project_id is not None:
@@ -745,10 +751,13 @@ def _cross_project_fanout(
     # 「搜尋不完整」，而非僅能從 cross_project_fanout_capped 這個布林值猜測
     # 差距有多大。candidates_total 為候選的『其他』專案總數（不含目前這個
     # 連線自己所屬的專案，計算基礎與下方迴圈的迭代範圍 other_candidate_ids
-    # 完全一致）；candidates_searched 為撞到 cap 前實際開連線查詢的數量；
+    # 完全一致）；candidates_searched 為「實際開啟連線並查詢」的數量
+    # （診斷修復後：不可達或損毀而被跳過的候選不再計入）；
     # candidates_skipped 恆為兩者之差——candidates_total ==
-    # candidates_searched + candidates_skipped 恆成立，且未撞到 cap 時
-    # candidates_skipped 恆為 0。
+    # candidates_searched + candidates_skipped 恆成立。注意（對抗式審查
+    # 指正後的語意更新）：skipped > 0 不再等同「撞到 cap」——不可達/損毀
+    # 候選也會計入 skipped 而 capped 維持 False；判斷「是否因上限截斷」
+    # 一律以 cross_project_fanout_capped 為準。
     candidates_total = len(other_candidate_ids)
     candidates_searched = fanned_out
     candidates_skipped = candidates_total - candidates_searched
@@ -880,12 +889,13 @@ def _query_single_db_for_request(
     if request.kind is not None:
         where.append("m.kind = ?")
         params.append(request.kind)
-    if request.status is not None:
+    # 與 search_memories 主路徑相同的 status 三態（見該處說明）
+    if request.status == "all":
+        pass
+    elif request.status is not None:
         where.append("m.status = ?")
         params.append(request.status)
     else:
-        # 與列表模式一致：未指定 status 時預設只回 active（見
-        # search_memories 主路徑的同一修復說明）。
         where.append("m.status = ?")
         params.append("active")
     if apply_project_filter and request.project_id is not None:

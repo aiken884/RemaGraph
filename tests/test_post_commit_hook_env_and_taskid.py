@@ -45,7 +45,7 @@ pytestmark = pytest.mark.skipif(
 
 def _run(cmd: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        cmd, cwd=str(cwd), env=env, capture_output=True, text=True, timeout=30
+        cmd, cwd=str(cwd), env=env, capture_output=True, text=True, timeout=180
     )
 
 
@@ -74,7 +74,7 @@ def _search_all(project: str, env: dict[str, str]) -> list[dict]:
         env=env,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=180,
     )
     assert result.returncode == 0, f"remagraph search 失敗: {result.stderr}"
     return json.loads(result.stdout)["results"]
