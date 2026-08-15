@@ -710,6 +710,38 @@ Each stage's trigger is actual usage and user feedback, not pre-planning.
 - [x] N10: the `mcp>=1.0` dependency is documented in the pyproject.toml snippet
 - [x] No occurrence anywhere of `potion-base-8M`; no leftover "v1 primarily Unix socket" description
 
+## Memory IDs are not globally unique (architectural fact)
+
+Memory ids (`mem-YYYYMMDD-NNN`) are a **per-database daily sequence**: each
+project's SQLite file allocates `NNN` independently, starting from that
+day's `MAX + 1` within that file alone. Two projects that both stored a
+memory on the same day will, with near certainty, both own an id like
+`mem-20260815-001` — referring to *different* records.
+
+Consequences and boundaries (documented per the 0.7.0 review cycle):
+
+- **Cross-database references by id are not meaningful.** An id only
+  identifies a record *within* one project's database. Anything that
+  crosses databases must carry `(project_id, id)` or better,
+  `(source_project_id, id)` as the search fan-out already does.
+- **`invalidates` is same-database only.** The `discovered_constraint`
+  invalidation mechanism looks the ids up in the current connection's
+  database; passing an id from another project silently refers to a
+  different (or missing) record.
+- **`migrate-project` re-numbers on collision.** When a migrated record's
+  id already exists in the target (the common same-day case), the record
+  is assigned a fresh id in the target's own sequence and the source's
+  `learnings` records the actual arrival id
+  (`migrated-to:<project> as <new-id> at <ts>`). Retries are idempotent:
+  an identical already-migrated record is recognized by content
+  (task_id/agent_id/summary/created_at) rather than duplicated.
+- **Why not globally unique ids?** Per-project databases are fully
+  independent files by design (the safety-valve architecture); a global
+  sequence would require shared coordination state, reintroducing exactly
+  the cross-project coupling the architecture rejects. The per-db
+  sequence keeps ids short, human-readable, and free of coordination —
+  at the documented cost above.
+
 ---
 
 ## 繁體中文

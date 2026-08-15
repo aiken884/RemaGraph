@@ -68,10 +68,26 @@ ignore_missing_imports = true
 exclude = ["tests/"]
 
 [tool.mutmut]
+# 0.7.0（PPLX 審查定案）：範圍擴大至核心業務邏輯與新模組。
+# 依審查的執行時間條款（單輪目標 <6h GitHub Actions 上限）本輪納入
+# store/search/prompt_hook/audit；maintenance.py 與 hooks_installer.py
+# 連同 db.py 記為技術債。
+# TODO(0.8.0): add db.py, maintenance.py, hooks_installer.py to mutation
+# scope — migration logic is exactly where mutation testing pays off.
+# 估算依據（審查條件 B.2）：納入模組合計約 2,600 行，--use-coverage 限縮
+# 至有覆蓋的行後粗估 1,000–1,500 mutants；mutmut 對每個 mutant 以首個
+# 失敗即停的方式跑測試，平均每 mutant 數秒，單輪預估 2–4 小時。
 paths_to_mutate = [
     "src/remagraph/arbitration.py",
     "src/remagraph/dedup.py",
+    "src/remagraph/store.py",
+    "src/remagraph/search.py",
+    "src/remagraph/prompt_hook.py",
+    "src/remagraph/audit.py",
 ]
 tests_dir = "tests/"
-runner = "pytest"
+runner = "pytest -x -q"
 backup = false
+# 等效突變噪音抑制（審查條件 B.4）：logging 呼叫、常數字串等已知噪音源
+# 於首輪結果整理時以 `# pragma: no mutate` 標注；首輪 issue 需區分
+# 等效突變（不補）與真實測試缺口（補測試）。

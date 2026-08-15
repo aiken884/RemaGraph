@@ -24,7 +24,27 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
-      - name: Create GitHub Release
+      # 0.7.0 項目 E.3（PPLX 審查定案）：Release notes 改抽 CHANGELOG 對應
+      # 版本段落；抽取失敗（段落缺失/為空）時發出可觀測 ::warning:: 並
+      # fallback 回自動產生的 commit 清單——絕不讓 publish 因此失敗。
+      - name: Extract CHANGELOG section
+        id: changelog
+        run: |
+          if python3 .github/scripts/extract_changelog.py "${GITHUB_REF_NAME}" > release-notes.md; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Release notes falling back to auto-generated commit list"
+          fi
+
+      - name: Create GitHub Release (CHANGELOG notes)
+        if: steps.changelog.outputs.found == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+
+      - name: Create GitHub Release (fallback auto notes)
+        if: steps.changelog.outputs.found != 'true'
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true

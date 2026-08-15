@@ -249,6 +249,12 @@ def connect(
 
     conn = sqlite3.connect(
         str(db_path),
+        # busy_timeout=150ms（0.7.0 項目 C，PPLX 審查定案）：SQLite 層的
+        # busy handler 等待上限。刻意建線時固定而非交易區間動態切換——
+        # check_same_thread=False 的共用連線上動態改 PRAGMA 有競態面；
+        # 短 timeout 搭配 process_store 的應用層退避重試（L3），最壞總
+        # 預算約 1.3 秒。
+        timeout=0.15,
         isolation_level=None,  # 自動 commit 模式；手動管理 transaction
         check_same_thread=False,
         factory=_MarkedConnection,
@@ -365,6 +371,7 @@ def connect_at_state_dir(state_dir: Path) -> sqlite3.Connection:
 
     conn = sqlite3.connect(
         str(db_path),
+        timeout=0.15,  # busy_timeout 150ms，同 connect()（0.7.0 項目 C）
         isolation_level=None,
         check_same_thread=False,
         factory=_MarkedConnection,

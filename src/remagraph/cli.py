@@ -781,6 +781,34 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    # doctor（0.7.0 項目 A：唯讀健檢）
+    p_doctor = sub.add_parser(
+        "doctor",
+        help=(
+            "Read-only health check: CLI version, hook version, state dir, "
+            "registry health, stray records in the shared db, database "
+            "status. Never modifies anything; exit 0=ok, 1=fail, 2=warn "
+            "(note: exit code 2 semantics are remagraph-specific)"
+        ),
+    )
+    p_doctor.add_argument("--project", default=None)
+    p_doctor.add_argument(
+        "--all-projects", action="store_true",
+        help=(
+            "Also scan the full local registry for poisoned entries and the "
+            "shared db for all projects' stray records (default: current "
+            "project only)"
+        ),
+    )
+    p_doctor.add_argument(
+        "--json", dest="json_output", action="store_true",
+        help="Machine-readable output (schema_version 1)",
+    )
+    p_doctor.add_argument(
+        "--offline", action="store_true",
+        help="Skip the PyPI version check",
+    )
+
     # install-hooks
     p_install_hooks = sub.add_parser(
         "install-hooks",
@@ -906,6 +934,8 @@ def main(argv: list[str] | None = None) -> None:
         cmd_link(args)
     elif args.command == "install-hooks":
         cmd_install_hooks(args)
+    elif args.command == "doctor":
+        cmd_doctor(args)
 
     elif args.command == "serve":
         # 正常入口（server.main()）會在進到本函式之前就攔截 "serve"；這個
@@ -914,6 +944,27 @@ def main(argv: list[str] | None = None) -> None:
         from remagraph.server import _run_serve
 
         _run_serve(["--project", args.project] if args.project else [])
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: doctor（0.7.0 項目 A）
+# ---------------------------------------------------------------------------
+
+
+def cmd_doctor(args: argparse.Namespace) -> None:
+    from remagraph.doctor import format_text, run_doctor
+
+    project = args.project or os.environ.get("REMAGRAPH_PROJECT")
+    report = run_doctor(
+        project,
+        all_projects=args.all_projects,
+        skip_network=args.offline,
+    )
+    if args.json_output:
+        _print_json(report.to_json())
+    else:
+        print(format_text(report))
+    sys.exit(report.exit_code)
 
 
 # ---------------------------------------------------------------------------

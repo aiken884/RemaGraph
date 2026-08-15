@@ -732,7 +732,7 @@ def main() -> None:
         # 要消滅的失敗模式（對抗式審查發現的殘留入口）——改為明確報錯。
         cli_commands = (
             "store", "search", "status", "init", "auto", "maintain",
-            "migrate-project", "link", "install-hooks", "prompt-hook", "serve",
+            "migrate-project", "link", "install-hooks", "prompt-hook", "doctor", "serve",
         )
         stray = next((a for a in argv[1:] if a in cli_commands), None)
         if stray is not None:

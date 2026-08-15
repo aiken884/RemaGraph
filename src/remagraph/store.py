@@ -16,9 +16,11 @@
 from __future__ import annotations
 
 import json
+import random
 import re
 import sqlite3
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,13 +40,35 @@ from remagraph.dedup import check_duplicate, encode_summary
 from remagraph.maintenance import safety_validate_project
 from remagraph.models import Memory, MemoryKind, StoreRequest, StoreResponse
 
-# ---------------------------------------------------------------------------
-# 自訂例外
-# ---------------------------------------------------------------------------
+_STORE_LOCK_RETRIES = 3
+_STORE_LOCK_BACKOFF_BASE_S = 0.1  # 0.1 → 0.2 → 0.4（×2 指數）
+_STORE_LOCK_JITTER_S = 0.05
 
 
-class MemoryIDGenerationError(RuntimeError):
-    """記憶 ID 生成失敗（例如並發衝突超過重試次數）。"""
+def _begin_immediate_with_retry(conn: sqlite3.Connection) -> None:
+    """BEGIN IMMEDIATE with 指數退避重試（僅 locked 類錯誤）。
+
+    設計（PPLX 兩輪審查定案）：L2 為建線固定 busy_timeout=150ms（見
+    db.connect），本函式是 L3 應用層補救——只針對跨連線鎖競爭的
+    "database is locked"（訊息比對用 in + lower，跨 SQLite 版本措辭
+    差異防護）；其他 OperationalError（disk full 等）原樣外拋交由
+    process_store 的統一 except 處理。重試耗盡時在原例外訊息附註
+    "retried N times"，讓呼叫端（含 agent）可從 detail 判讀。
+    """
+    for attempt in range(_STORE_LOCK_RETRIES + 1):
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower():
+                raise
+            if attempt == _STORE_LOCK_RETRIES:
+                raise sqlite3.OperationalError(
+                    f"{e} (retried {_STORE_LOCK_RETRIES} times with backoff)"
+                ) from e
+            delay = _STORE_LOCK_BACKOFF_BASE_S * (2**attempt)
+            delay += random.uniform(-_STORE_LOCK_JITTER_S, _STORE_LOCK_JITTER_S)
+            time.sleep(max(delay, 0.01))
 
 
 # ---------------------------------------------------------------------------
@@ -314,15 +338,19 @@ def process_store(
     # 開始 transaction。BEGIN IMMEDIATE 而非 deferred BEGIN：
     # generate_memory_id 的 SELECT MAX 在 deferred 交易下不取寫鎖，兩個
     # process 併發 store 會讀到相同 MAX、算出相同 id，後寫入者撞 PRIMARY
-    # KEY 而整筆失敗（診斷發現；MemoryIDGenerationError docstring 宣稱的
-    # 重試機制實際上不存在）。IMMEDIATE 讓寫鎖在交易一開始就取得，
+    # KEY 而整筆失敗（診斷發現）。IMMEDIATE 讓寫鎖在交易一開始就取得，
     # 序列化整段「取號 + 插入」。
     try:
         # BEGIN IMMEDIATE 必須在 try 內（第二輪驗收掃描）：deferred BEGIN
         # 幾乎不會失敗，IMMEDIATE 取寫鎖，另一寫入者持鎖超過 busy timeout
         # 時這裡就拋 "database is locked"——放在 try 外會裸拋、打破
         # 「一律回傳 StoreResponse」契約，也不寫 audit。
-        conn.execute("BEGIN IMMEDIATE")
+        #
+        # L3 應用層重試（0.7.0 項目 C，PPLX 審查定案）：跨連線鎖競爭
+        # （兩個 CLI、或 CLI vs serve）在 L2 busy_timeout=150ms 耗盡後
+        # 拋 locked——退避重試最多 3 次（0.1/0.2/0.4s ± 50ms jitter），
+        # 僅 locked 類錯誤重試；最壞總預算 (0.15×4)+(0.7)+jitter ≈ 1.3s。
+        _begin_immediate_with_retry(conn)
         # guardrail: 跨 project 碰撞偵測
         if request.project_id and request.project_id != "default":
             other = conn.execute(

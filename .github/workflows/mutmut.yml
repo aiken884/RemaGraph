@@ -1,21 +1,28 @@
 name: mutmut
 
 # 非 blocking：不 gate PR merge，供開發者參考 mutation score。
-# 本地執行：uv run mutmut run
+# 本地執行：uv run coverage run -m pytest -q && uv run mutmut run --use-coverage
 #
-# 故意不掛在 push/pull_request 上：mutation testing 本身要重跑測試套件
-# 一次每個 mutant，成本遠高於一般 CI job，加上這本來就是 non-blocking、
-# 純參考用的指標，沒有必要每次 commit 都跑一次。改成每週跑一次 + 手動觸發。
+# 0.7.0（PPLX 審查定案）改造：
+# - --use-coverage：只突變有測試覆蓋的行（控制執行時間的最有效開關）。
+#   coverage 資料由本 workflow 內的前置 step 產生於同一工作目錄，確保
+#   mutmut 讀得到（審查條件 B.2：若 .coverage 缺失 mutmut 會靜默退化為
+#   全行突變——下方 step 明確驗證檔案存在，缺失即 fail）。
+# - delta 防護（審查條件 B.3）：per-module 存活數寫成 baseline JSON，
+#   以 actions/cache 跨輪保存；本輪存活數比上輪「增加」的模組在 job
+#   summary 標記 annotation（不 fail build）。baseline 記錄 commit SHA；
+#   上輪 baseline 不存在的模組視為「初始建立」不告警。
 
 on:
   schedule:
-    - cron: "0 18 * * 0" # 每週日 UTC 18:00(台北時間週一 02:00)
+    - cron: "0 18 * * 0" # 每週日 UTC 18:00（台北時間週一 02:00）
   workflow_dispatch:
 
 jobs:
   mutmut:
-    name: "mutation testing (arbitration + dedup)"
+    name: "mutation testing (core modules, coverage-limited)"
     runs-on: ubuntu-latest
+    timeout-minutes: 350
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,10 +36,41 @@ jobs:
       - name: Install with frozen lockfile (dev extras)
         run: uv sync --frozen --extra dev
 
-      - name: Run mutmut
-        run: uv run mutmut run
+      - name: Produce coverage data for --use-coverage
+        run: |
+          uv run coverage run -m pytest -q
+          test -f .coverage || { echo "::error::.coverage missing — mutmut would silently mutate all lines"; exit 1; }
+
+      - name: Restore previous baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: mutmut-baseline.json
+          key: mutmut-baseline
+          restore-keys: mutmut-baseline
+
+      - name: Run mutmut (coverage-limited)
+        run: uv run mutmut run --use-coverage
         continue-on-error: true
 
-      - name: Show mutmut results
-        run: uv run mutmut results
+      - name: Results, per-module baseline, delta annotations
+        run: |
+          uv run mutmut results || true
+          uv run python .github/scripts/mutmut_baseline.py || true
         continue-on-error: true
+
+      - name: Save baseline
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: mutmut-baseline.json
+          key: mutmut-baseline-${{ github.run_id }}
+
+      - name: Upload results artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutmut-results
+          path: |
+            mutmut-baseline.json
+            .mutmut-cache
+          if-no-files-found: ignore

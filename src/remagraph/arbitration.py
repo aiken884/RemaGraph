@@ -33,7 +33,6 @@ ArbitrationReason = Literal[
     "invalid_agent_id",
     "invalidates_not_found",
     "invalidates_kind_mismatch",
-    "invalidates_not_active",
     "invalid_label",
 ]
 
