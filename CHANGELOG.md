@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [Unreleased]
 
+### [0.7.0-beta] - 2026-08-15
+
+> Scope agreed through a two-round external architecture review (all five items unanimously approved on round two), implemented TDD-first, then adversarially reviewed by two independent agents whose 12 findings were all fixed before this release. Test suite: 565 → 613.
+
+#### Added
+- **`remagraph doctor` — read-only health check.** Six check surfaces: CLI version vs PyPI (3s timeout; offline/5xx → skip), post-commit hook (managed marker, fields-schema-version, execute bit — skipped on Windows), conventional state dir & `project.json` identity, registry health (current project by default; `--all-projects` scans the full local registry for poisoned entries, capped at 50 shown with `total_count`/`truncated`), stray records in the shared default DB (with the exact `migrate-project` recovery command), and database status (openability, three-tier schema compatibility, WAL mode read from the file header, stale `-wal`/`-shm` detection that never false-positives on an actively used database). Strictly read-only — hardened by adversarial review: all SQLite access is `mode=ro&immutable=1` + `query_only`, and the registry is read directly rather than through the auto-creating internal API, so doctor can never create a database, a directory, or a side file; a filesystem-snapshot test enforces this. Output: human text or `--json` (schema_version 1, append-only); exit 0=ok, 1=fail, 2=warn (remagraph-specific semantics).
+- **Release process documentation** (`docs/release-process.md`): doctor as the opening go/no-go gate, the whole-codebase diagnostic + adversarial review methodology from the 0.6.x cycle, and the real-environment verification principle. `DESIGN.md` gains a section documenting that memory ids are a per-database daily sequence (not globally unique), with the cross-database reference boundaries and migrate re-numbering behavior.
+
+#### Changed
+- **Concurrent store handling**: connections now set a fixed 150ms SQLite busy timeout at creation (previously the 5s default), and `process_store` retries `BEGIN IMMEDIATE` up to 3 times with exponential backoff (0.1/0.2/0.4s ± 50ms jitter) on lock contention — worst-case budget ≈1.45s, bounded and documented. The cross-project migration path uses the same retry (its lock tolerance would otherwise have shrunk 33×). Retry exhaustion still returns a structured error (`retried 3 times` in the detail). The never-raised `MemoryIDGenerationError` class was removed.
+- **Mutation testing restored and expanded**: `mutmut` scope grows from 2 to 6 modules (store, search, prompt_hook, audit added; db/maintenance/hooks_installer documented as 0.8.0 debt), weekly CI runs with `--use-coverage` (with an explicit `.coverage` presence guard — a missing file silently yields zero mutants), and a per-module surviving-mutant baseline with delta annotations; a failed run can no longer silently wipe the baseline, and zero-survivor modules stay pinned at 0 so later regressions are caught.
+- **GitHub Release notes** are now extracted from the matching CHANGELOG section (with a visible warning and automatic fallback to generated notes if the section is missing or empty — and a parser that stops at the bilingual section boundary).
+
+#### Fixed
+- Removed the dead `invalidates_not_active` literal left over from the 0.6.x review cycle.
+
 ### [0.6.4-beta] - 2026-08-15
 
 #### Fixed
