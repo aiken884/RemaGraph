@@ -402,6 +402,7 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 def cmd_auto(args: argparse.Namespace) -> None:
     project = args.project or os.environ.get("REMAGRAPH_PROJECT") or "default"
+    project = _maybe_adopt_conventional_state_dir(project) or "default"
     if args.all_projects:
         project = None
     task_id = args.task_id
@@ -481,7 +482,7 @@ def cmd_auto(args: argparse.Namespace) -> None:
         )
     try:
         store_req = StoreRequest(
-            project_id=project,
+            project_id=project or "default",
             task_id=task_id,
             agent_id=agent_id,
             kind=kind,  # type: ignore[arg-type]
@@ -922,6 +923,7 @@ def main(argv: list[str] | None = None) -> None:
 
 def cmd_maintain(args: argparse.Namespace) -> None:
     project = args.project or os.environ.get("REMAGRAPH_PROJECT") or "default"
+    project = _maybe_adopt_conventional_state_dir(project) or "default"
     print(f"=== RemaGraph maintain: project={project} ===")
 
     # 強制安全閥門 + 設定 env（確保用正確 DB）

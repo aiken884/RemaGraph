@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [Unreleased]
 
+### [0.6.4-beta] - 2026-08-15
+
+#### Fixed
+- **`maintain --project` and `auto --project` now auto-resolve the conventional state dir** like `search`/`store`/`status` already do since 0.6.1 — in a bare environment they previously still hit the safety valve ("REMAGRAPH_STATE_DIR is not set") and required a manual env export, a consistency gap reported from the field right after the 0.6.3 migration recovery. `--project` alone is now sufficient across every project-scoped subcommand.
+
 ### [0.6.3-beta] - 2026-08-15
 
 #### Fixed

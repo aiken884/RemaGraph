@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "remagraph"
-version = "0.6.3"
+version = "0.6.4"
 description = "Lightweight MCP tool that captures the trail an AI coding agent leaves behind while working (task handoff / status update / discovered constraint) for later agents to query."
 readme = "README.md"
 license = "Apache-2.0"

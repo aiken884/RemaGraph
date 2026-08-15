@@ -525,3 +525,27 @@ def test_migrate_target_ignores_poisoned_registry_entry(
     assert src["status"] == "invalidated"
     # 污染條目應被修正為正確映射
     assert db_mod.get_registered_state_dir("linedb") == str(linedb_dir.resolve())
+
+
+def test_cmd_maintain_and_auto_adopt_conventional_state_dir(
+    tmp_path, monkeypatch, fake_home, capsys
+):
+    """一致性缺口（linedb 補充回報）：search/store/status 已接 conventional
+    自動解析，但 maintain --project（與 auto --project 的解析入口）漏接——
+    裸環境跑 `maintain --project X` 仍被安全閥擋，得手動 export env。"""
+    import json as _json
+
+    from remagraph.cli import main as cli_main
+
+    state_dir = fake_home / ".local" / "state" / "remagraph-maintproj"
+    state_dir.mkdir(parents=True)
+    (state_dir / "project.json").write_text(
+        _json.dumps({"project_id": "maintproj", "state_dir": str(state_dir)}),
+        encoding="utf-8",
+    )
+    db_mod.connect_at_state_dir(state_dir).close()
+
+    # 裸環境（REMAGRAPH_STATE_DIR 未設定）——修復前：SafetyValveError exit 1
+    cli_main(["maintain", "--project", "maintproj", "--dry-run"])
+    out = capsys.readouterr().out
+    assert "maintproj" in out
