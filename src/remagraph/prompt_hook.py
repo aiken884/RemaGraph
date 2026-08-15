@@ -120,6 +120,26 @@ def resolve_conventional_state_dir(project: str) -> tuple[Path, str] | None:
             continue
         authoritative = _read_project_id_from_meta(cand / "project.json") or name
         return cand, authoritative
+
+    # 第三層 fallback：目錄名大小寫不敏感掃描。大小寫敏感 FS（Linux）上
+    # `remagraph-MyRepo` 與查詢 `myrepo` 精確比對不會命中——macOS 的
+    # APFS 大小寫不敏感讓上面兩層「碰巧」成立，CI 的 Linux 矩陣才暴露
+    # 這個平台差異。state 目錄下項目數量級為數十，掃描成本可忽略。
+    wanted = {n.casefold() for n in seen}
+    try:
+        entries = sorted(base.iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.name.startswith("remagraph-"):
+            continue
+        cand_name = entry.name[len("remagraph-"):]
+        if cand_name.casefold() not in wanted:
+            continue
+        if not entry.is_dir():
+            continue
+        authoritative = _read_project_id_from_meta(entry / "project.json") or cand_name
+        return entry, authoritative
     return None
 
 
