@@ -35,6 +35,15 @@ _RATE_LIMIT_WINDOW = 60  # seconds
 _RATE_LIMIT_MAX = 60  # calls per window
 
 
+_RATE_LIMIT_SWEEP_THRESHOLD = 512
+"""_buckets 的 key 數超過此值時，check() 順便全域清掃已完全過期的 key。
+
+key 是呼叫端提供的任意 agent_id，且過期 timestamp 原本只在同 key 再次
+check() 時才清理——長駐 serve 行程被大量不同 agent_id 呼叫時，_buckets
+會單調成長（診斷發現的記憶體洩漏）。門檻設得比正常 agent 數高很多，
+一般情境下永遠不會觸發掃描成本。"""
+
+
 class _RateLimiter:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -44,6 +53,14 @@ class _RateLimiter:
         now = time.monotonic()
         window_start = now - _RATE_LIMIT_WINDOW
         with self._lock:
+            if len(self._buckets) > _RATE_LIMIT_SWEEP_THRESHOLD:
+                stale_keys = [
+                    k
+                    for k, ts in self._buckets.items()
+                    if k != key and not any(t > window_start for t in ts)
+                ]
+                for k in stale_keys:
+                    del self._buckets[k]
             self._buckets[key] = [t for t in self._buckets[key] if t > window_start]
             if len(self._buckets[key]) >= _RATE_LIMIT_MAX:
                 return False
@@ -253,12 +270,28 @@ def _determine_serve_project_id(argv: list[str]) -> str | None:
     i = 0
     while i < len(argv):
         arg = argv[i]
-        if arg == "--project" and i + 1 < len(argv):
+        if arg == "--project":
+            if i + 1 >= len(argv):
+                # 末端無值不得靜默 fallback 到 REMAGRAPH_PROJECT——使用者
+                # 以為指定了 A，行程實際綁到 env 裡的 B（診斷發現）。
+                print(
+                    "ERROR: --project requires a value "
+                    "(usage: remagraph serve --project <id>)",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             project_id = argv[i + 1]
             i += 2
             continue
         if arg.startswith("--project="):
             project_id = arg.split("=", 1)[1]
+            if not project_id:
+                print(
+                    "ERROR: --project= requires a non-empty value "
+                    "(usage: remagraph serve --project=<id>)",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             i += 1
             continue
         i += 1
@@ -643,45 +676,38 @@ def remagraph_migrate_project(
 def main() -> None:
     """程式入口：自動判斷 CLI 或 MCP 模式。
 
-    - `remagraph serve [--project <id>]` → MCP stdio server（BUG 1 修復：
-      現在會先解析 --project/REMAGRAPH_PROJECT 並在啟動時綁定，見
-      _run_serve/_bind_project；缺席時快速失敗，不再悄悄以未綁定狀態啟動）
-    - `remagraph store/search/status/init/auto/install-hooks` → CLI 子命令
-    - 其餘（含完全省略子命令、或子命令不是上述任何一種）→ 沿用修復前的
-      既有行為，視為 serve 模式（歷史上 bare `remagraph` 呼叫等同
-      `remagraph serve`），一併套用上方相同的啟動綁定要求。
+    分派規則（診斷後收斂；歷史 serve fallback 只保留兩種明確形狀）：
+
+    - bare `remagraph`（無任何參數）→ serve 模式（歷史行為：MCP host 常以
+      bare 呼叫啟動 stdio server），套用 _run_serve 的啟動綁定要求。
+    - `remagraph --project <id>` / `--project=<id>` 開頭（無 serve 子命令）
+      → 同上 serve fallback（MCP host 的另一種歷史設定寫法）。
+    - `remagraph serve [...]` → MCP stdio server（BUG 1 修復：啟動時綁定
+      單一 project，缺席時快速失敗，見 _run_serve/_bind_project）。
+    - 其餘一切（已知 CLI 子命令、-h/--help/--version、頂層旗標前置寫法、
+      以及打錯的子命令）→ 一律交給 cli.py 的 argparse parser：已知子命令
+      正常執行，help/version 印出後 exit 0，typo 得到 invalid choice 的
+      exit 2——修復前 typo 或 --version 會靜默落入 serve fallback，在
+      REMAGRAPH_PROJECT 已設定的環境下甚至直接啟動 stdio server 掛住
+      終端機（診斷發現的同族缺口）。
     """
-    cli_commands = (
-        "store",
-        "search",
-        "status",
-        "init",
-        "auto",
-        "maintain",
-        "migrate-project",
-        "link",
-        "install-hooks",
-    )
-    if len(sys.argv) >= 2 and sys.argv[1] in cli_commands:
-        from remagraph.cli import main as cli_main
+    argv = sys.argv[1:]
 
-        cli_main(sys.argv[1:])
+    if not argv:
+        _run_serve([])
         return
 
-    if len(sys.argv) >= 2 and sys.argv[1] in ("-h", "--help"):
-        # 頂層 --help/-h 委派給 cli.py 的 argparse parser 印出完整子命令
-        # 總覽（含 serve）並 exit 0——修復前這裡會落入下方的 serve
-        # fallback，被當成 serve 參數處理。
-        from remagraph.cli import main as cli_main
-
-        cli_main(["--help"])
+    if argv[0] == "serve":
+        _run_serve(argv[1:])
         return
 
-    if len(sys.argv) >= 2 and sys.argv[1] == "serve":
-        _run_serve(sys.argv[2:])
+    if argv[0] == "--project" or argv[0].startswith("--project="):
+        _run_serve(argv)
         return
 
-    _run_serve(sys.argv[1:] if len(sys.argv) >= 2 else [])
+    from remagraph.cli import main as cli_main
+
+    cli_main(argv)
 
 
 if __name__ == "__main__":

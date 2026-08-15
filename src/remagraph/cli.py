@@ -16,6 +16,7 @@ import argparse
 import atexit
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -255,10 +256,18 @@ def cmd_status(args: argparse.Namespace) -> None:
 def cmd_init(args: argparse.Namespace) -> None:
     """極簡初始化 - 為非技術使用者設計，一行指令即可。"""
     project = args.project or "default"
-    safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in project)
-    if not safe:
-        safe = "default"
-    state_dir = Path.home() / ".local" / "state" / f"remagraph-{safe}"
+    # 特殊字元的 project 名不做靜默改寫，直接拒絕——修復前只有目錄名做了
+    # 字元白名單，env.sh 與 project.json 的內容用原始字串手工拼接，含引號
+    # 或 $() 的名字會 exit 0 卻產出無效 JSON 與帶命令替換的損毀 shell 檔
+    # （診斷實測確認）。允許字元集與下方使用說明宣告的一致。
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", project):
+        print(
+            f"ERROR: invalid project name {project!r} - project names may "
+            "only contain letters, digits, underscores, and hyphens",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    state_dir = Path.home() / ".local" / "state" / f"remagraph-{project}"
     state_dir.mkdir(parents=True, exist_ok=True)
     state_dir.chmod(0o700)
 
@@ -271,8 +280,13 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     meta_file = state_dir / "project.json"
     meta_file.write_text(
-        f'{{"project_id": "{project}", "state_dir": "{state_dir}", '
-        f'"created": "{__import__("datetime").datetime.now().isoformat()}"}}',
+        json.dumps(
+            {
+                "project_id": project,
+                "state_dir": str(state_dir),
+                "created": datetime.now().isoformat(),
+            }
+        ),
         encoding="utf-8",
     )
     meta_file.chmod(0o600)
@@ -444,6 +458,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="remagraph",
         description="RemaGraph -- a minimalist memory CLI for AI agents",
+    )
+    from remagraph import __version__
+
+    parser.add_argument(
+        "--version", action="version", version=f"remagraph {__version__}"
     )
     parser.add_argument(
         "--allow-default-state-dir",
