@@ -5,7 +5,7 @@
 per-transaction PRAGMA 切換——check_same_thread=False 的共用連線上動態
 切換有競態面，建線固定值徹底根除）；L3 應用層 BEGIN IMMEDIATE 重試
 3 次、退避 0.1/0.2/0.4s ± jitter、僅 "locked" 訊息重試。
-最壞預算 (0.15×3)+(0.7)+jitter ≈ 1.3s。
+最壞預算 (0.15×4)+(0.7)+jitter ≈ 1.45s 上限。
 """
 
 from __future__ import annotations

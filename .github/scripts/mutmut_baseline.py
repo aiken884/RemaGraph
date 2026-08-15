@@ -19,11 +19,32 @@ from pathlib import Path
 BASELINE = Path("mutmut-baseline.json")
 
 
+def _paths_to_mutate() -> list[str]:
+    """讀 pyproject 的 paths_to_mutate，作為 baseline 的完整模組宇集——
+    0 survived 的模組必須以 0 留在 baseline（審查 #1 同構問題：否則
+    之後 0→N 的退化被當『初始建立』放行）。"""
+    try:
+        import tomllib
+
+        with open("pyproject.toml", "rb") as f:
+            cfg = tomllib.load(f)
+        return list(cfg.get("tool", {}).get("mutmut", {}).get("paths_to_mutate", []))
+    except Exception:
+        return []
+
+
 def survived_by_module() -> dict[str, int]:
     result = subprocess.run(
         ["uv", "run", "mutmut", "result-ids", "survived"],
         capture_output=True, text=True,
     )
+    if result.returncode != 0:
+        # 查詢失敗（mutmut run 崩潰、.mutmut-cache 缺失）不得被當成
+        # 「0 survived」——否則會覆寫掉上輪 baseline（審查 #1）
+        raise RuntimeError(
+            f"mutmut result-ids failed (rc={result.returncode}): "
+            f"{result.stderr.strip()[:200]}"
+        )
     ids = result.stdout.split()
     counts: Counter[str] = Counter()
     for mid in ids:
@@ -38,7 +59,17 @@ def survived_by_module() -> dict[str, int]:
 
 
 def main() -> None:
-    current = survived_by_module()
+    try:
+        current = survived_by_module()
+    except Exception as e:
+        # 保護既有 baseline：查詢失敗時不覆寫、以非零退出讓 workflow 的
+        # continue-on-error 記錄失敗（審查 #1——delta 防護不得被單次
+        # 壞輪靜默重置）。
+        print(f"::warning::mutmut baseline skipped — {e}")
+        raise SystemExit(1)
+    # 0-survived 模組補 0（完整宇集來自 pyproject）
+    for module in _paths_to_mutate():
+        current.setdefault(module, 0)
     sha = os.environ.get("GITHUB_SHA", "unknown")
 
     previous: dict[str, int] = {}

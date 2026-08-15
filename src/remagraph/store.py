@@ -349,7 +349,7 @@ def process_store(
         # L3 應用層重試（0.7.0 項目 C，PPLX 審查定案）：跨連線鎖競爭
         # （兩個 CLI、或 CLI vs serve）在 L2 busy_timeout=150ms 耗盡後
         # 拋 locked——退避重試最多 3 次（0.1/0.2/0.4s ± 50ms jitter），
-        # 僅 locked 類錯誤重試；最壞總預算 (0.15×4)+(0.7)+jitter ≈ 1.3s。
+        # 僅 locked 類錯誤重試；最壞總預算 (0.15×4)+(0.7)+jitter ≈ 1.45s 上限。
         _begin_immediate_with_retry(conn)
         # guardrail: 跨 project 碰撞偵測
         if request.project_id and request.project_id != "default":
@@ -765,8 +765,12 @@ def migrate_project_memories(
             migrated = 0
             skipped_ids: list[str] = []
 
-            conn_tgt.execute("BEGIN IMMEDIATE")
-            conn_src.execute("BEGIN IMMEDIATE")
+            # 對抗式審查 #5：timeout=0.15 讓 migrate 的鎖容忍度縮小
+            # 33 倍（實測 ~1.05s 即拋 locked），而「撈回漏寫記憶」正是
+            # 可能與其他寫者競爭的搶救場景——套用與 process_store 相同的
+            # L3 退避重試，維持成功率。
+            _begin_immediate_with_retry(conn_tgt)
+            _begin_immediate_with_retry(conn_src)
             try:
                 for row in rows:
                     try:

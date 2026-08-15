@@ -23,8 +23,11 @@ def main() -> int:
     tag = sys.argv[1].lstrip("v")  # v0.7.0-beta → 0.7.0-beta
     text = Path("CHANGELOG.md").read_text(encoding="utf-8")
 
+    # 終止邊界（對抗式審查 #2）：除了下一個版本標題（### [x.y.z]），也要
+    # 認得任何二級標題（## 繁體中文等雙語區塊）——否則英文區最後一個版本
+    # 會夾帶中文區與 link-reference 區。
     pattern = re.compile(
-        r"^### \[" + re.escape(tag) + r"\][^\n]*\n(.*?)(?=^### \[|\Z)",
+        r"^### \[" + re.escape(tag) + r"\][^\n]*\n(.*?)(?=^### \[|^## |\Z)",
         re.MULTILINE | re.DOTALL,
     )
     match = pattern.search(text)

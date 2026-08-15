@@ -557,6 +557,10 @@ def _connect_default_registry_db() -> sqlite3.Connection:
     db_path = default_state_dir / DB_FILENAME
     conn = sqlite3.connect(
         str(db_path),
+        # busy_timeout 150ms（0.7.0 項目 C 對抗式審查 #3 補實作）：registry
+        # 是多 agent 每次路徑解析都會 upsert 的最高頻共用寫入點，長鎖時
+        # 不該讓每個 CLI 指令卡到 sqlite 預設的 5 秒。
+        timeout=0.15,
         isolation_level=None,
         check_same_thread=False,
     )

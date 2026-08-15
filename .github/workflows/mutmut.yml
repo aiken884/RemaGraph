@@ -6,8 +6,9 @@ name: mutmut
 # 0.7.0（PPLX 審查定案）改造：
 # - --use-coverage：只突變有測試覆蓋的行（控制執行時間的最有效開關）。
 #   coverage 資料由本 workflow 內的前置 step 產生於同一工作目錄，確保
-#   mutmut 讀得到（審查條件 B.2：若 .coverage 缺失 mutmut 會靜默退化為
-#   全行突變——下方 step 明確驗證檔案存在，缺失即 fail）。
+#   mutmut 讀得到（審查條件 B.2；mutmut 2.5.1 源碼實查：.coverage 缺失時
+#   covered_lines 為 None → should_exclude 全部回 True → 靜默跑出
+#   0 mutants——下方 step 明確驗證檔案存在，缺失即 fail）。
 # - delta 防護（審查條件 B.3）：per-module 存活數寫成 baseline JSON，
 #   以 actions/cache 跨輪保存；本輪存活數比上輪「增加」的模組在 job
 #   summary 標記 annotation（不 fail build）。baseline 記錄 commit SHA；
