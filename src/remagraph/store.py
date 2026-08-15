@@ -318,9 +318,12 @@ def process_store(
     # KEY 而整筆失敗（診斷發現；MemoryIDGenerationError docstring 宣稱的
     # 重試機制實際上不存在）。IMMEDIATE 讓寫鎖在交易一開始就取得，
     # 序列化整段「取號 + 插入」。
-    conn.execute("BEGIN IMMEDIATE")
-
     try:
+        # BEGIN IMMEDIATE 必須在 try 內（第二輪驗收掃描）：deferred BEGIN
+        # 幾乎不會失敗，IMMEDIATE 取寫鎖，另一寫入者持鎖超過 busy timeout
+        # 時這裡就拋 "database is locked"——放在 try 外會裸拋、打破
+        # 「一律回傳 StoreResponse」契約，也不寫 audit。
+        conn.execute("BEGIN IMMEDIATE")
         # guardrail: 跨 project 碰撞偵測
         if request.project_id and request.project_id != "default":
             other = conn.execute(
@@ -687,18 +690,52 @@ def migrate_project_memories(
                         # 目標庫重新配一個不衝突的 id（保留原日期段），
                         # 確定插入成功才繼續。
                         target_id = row["id"]
+                        inserted_this_run = True
                         cur = conn_tgt.execute(
                             f"INSERT OR IGNORE INTO memories (project_id, {cols_str}) "
                             f"VALUES (?, {placeholders})",
                             [to_project] + vals,
                         )
                         if cur.rowcount == 0:
-                            target_id = _remap_collided_memory_id(conn_tgt, row["id"])
-                            vals[cols.index("id")] = target_id
+                            # id 已存在——兩種情境要分開（第二輪驗收掃描）：
+                            # (a) 前次遷移「目標已 COMMIT、來源 COMMIT 失敗」
+                            #     後的重試：目標那筆就是同一筆記憶——冪等
+                            #     視為已抵達，絕不 re-id 再插一份（否則錯誤
+                            #     訊息引導的自然重試會讓整批變雙份）；
+                            # (b) 真正的日序列碰撞（不同內容）：re-id。
+                            existing = conn_tgt.execute(
+                                "SELECT task_id, agent_id, summary, created_at "
+                                "FROM memories WHERE id = ?",
+                                (row["id"],),
+                            ).fetchone()
+                            same_record = existing is not None and all(
+                                existing[k] == row[k]
+                                for k in ("task_id", "agent_id", "summary", "created_at")
+                            )
+                            if same_record:
+                                inserted_this_run = False
+                            else:
+                                target_id = _remap_collided_memory_id(conn_tgt, row["id"])
+                                vals[cols.index("id")] = target_id
+                                conn_tgt.execute(
+                                    f"INSERT INTO memories (project_id, {cols_str}) "
+                                    f"VALUES (?, {placeholders})",
+                                    [to_project] + vals,
+                                )
+
+                        # 連同 memory_labels 一起搬（第二輪驗收掃描：修復前
+                        # 只複製 memories 列，labels 一筆都沒過去——來源又被
+                        # 標 invalidated 而從 label 搜尋濾掉，跨專案標籤就此
+                        # 永久失聯）。INSERT OR IGNORE 保證重試冪等。
+                        label_rows = conn_src.execute(
+                            "SELECT label FROM memory_labels WHERE memory_id = ?",
+                            (row["id"],),
+                        ).fetchall()
+                        for lr in label_rows:
                             conn_tgt.execute(
-                                f"INSERT INTO memories (project_id, {cols_str}) "
-                                f"VALUES (?, {placeholders})",
-                                [to_project] + vals,
+                                "INSERT OR IGNORE INTO memory_labels "
+                                "(memory_id, label) VALUES (?, ?)",
+                                (target_id, lr["label"]),
                             )
 
                         # 來源標記寫在 INSERT 之後：記錄實際抵達的 target_id
@@ -716,14 +753,21 @@ def migrate_project_memories(
                             )
                         except Exception:
                             # 來源 UPDATE 失敗（SQLITE_BUSY、disk full 等）
-                            # ——把剛插入目標的那筆撤掉再記 skipped，否則
-                            # 迴圈結束後兩邊照樣 COMMIT，同一筆記憶會同時
-                            # 以 active 存在於來源與目標（診斷發現的矛盾
-                            # 狀態，正是上方註解宣稱要避免的）。
-                            conn_tgt.execute(
-                                "DELETE FROM memories WHERE project_id=? AND id=?",
-                                (to_project, target_id),
-                            )
+                            # ——把「本次」插入目標的那筆連同 labels 撤掉再
+                            # 記 skipped，否則迴圈結束後兩邊照樣 COMMIT，
+                            # 同一筆記憶會同時以 active 存在於來源與目標。
+                            # 冪等重試情境（inserted_this_run=False，目標那
+                            # 筆是前次遷移已 COMMIT 的成果）不撤——那不是
+                            # 本次的寫入。
+                            if inserted_this_run:
+                                conn_tgt.execute(
+                                    "DELETE FROM memory_labels WHERE memory_id=?",
+                                    (target_id,),
+                                )
+                                conn_tgt.execute(
+                                    "DELETE FROM memories WHERE project_id=? AND id=?",
+                                    (to_project, target_id),
+                                )
                             raise
                         migrated += 1
                     except Exception:

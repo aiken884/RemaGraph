@@ -784,15 +784,26 @@ _LABEL_MATCH_SQL = (
     "LIMIT ?"
 )
 
+# status="all" 逃生口用的變體（無 status 過濾，其餘與上完全一致）
+_LABEL_MATCH_SQL_ALL_STATUSES = (
+    "SELECT m.* FROM memories m "
+    "JOIN memory_labels ml ON ml.memory_id = m.id "
+    "WHERE ml.label = ? "
+    "ORDER BY m.created_at DESC "
+    "LIMIT ?"
+)
+
 
 def _query_labeled_memories(
-    conn: sqlite3.Connection, label: str, status: str, limit: int
+    conn: sqlite3.Connection, label: str, status: str | None, limit: int
 ) -> list[sqlite3.Row]:
     """對單一連線（可能是目前這個專案自己的、也可能是另一個 project 的唯讀
     連線）查詢符合 label 的 memories rows。獨立成小函式，讓自身 project 與
     其他已知 project 的查詢共用同一份 SQL 與參數順序，避免兩處各自維護一份
     容易漂移的 SQL 字串。
     """
+    if status is None:
+        return conn.execute(_LABEL_MATCH_SQL_ALL_STATUSES, (label, limit)).fetchall()
     return conn.execute(_LABEL_MATCH_SQL, (label, status, limit)).fetchall()
 
 
@@ -818,7 +829,12 @@ def _search_cross_project_by_label(
 
     label = request.cross_project_label
     assert label is not None  # 呼叫端（search_memories）已保證非空才會走到這裡
-    status = request.status or "active"
+    # status 三態（與主路徑/列表模式一致，第二輪驗收掃描補上）：None＝
+    # active；"all"＝不過濾（修復前 "all" 被當字面 status 值綁進 SQL，
+    # 恆回 0 筆，與逃生口的目的直接矛盾）；其餘＝指定值。
+    status: str | None = request.status or "active"
+    if request.status == "all":
+        status = None
     limit = request.top_k + 1
 
     def _query(c: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -878,8 +894,19 @@ def _query_single_db_for_request(
 
     long_tokens, _short_tokens = _split_fts_tokens_by_length(sanitized)
     if not long_tokens:
-        if request.task_id or request.agent_id or request.kind or request.tags:
+        if (
+            not (request.query or "").strip()
+            or request.task_id
+            or request.agent_id
+            or request.kind
+            or request.tags
+        ):
+            # 空 query＝「列出最近的記憶」（與 search_memories 主路徑 line
+            # ~355 的語意一致——第二輪驗收掃描：修復前 include_related +
+            # 空 query 在此回 []，加上「擴大搜尋範圍」的旗標反而讓結果
+            # 從有變無）；有任何過濾條件時同樣走列表模式。
             return _list_by_filters_rows(conn, request, apply_project_filter=apply_project_filter)
+        # 非空 query 但全部 token 過短且無過濾：維持短查詢空結果語意
         return []
 
     match_clause = _build_fts5_match(" ".join(long_tokens))
