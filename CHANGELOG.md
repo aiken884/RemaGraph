@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [Unreleased]
 
+### [0.6.1-beta] - 2026-08-15
+
+#### Fixed
+- **`prompt-hook` conventional state-dir resolution on case-sensitive filesystems (Linux)**: the exact-name/slug probes couldn't find `remagraph-MyRepo` when deriving `myrepo` — macOS's case-insensitive APFS masked this locally; the CI Linux matrix exposed it. A case-insensitive directory-scan fallback now covers mixed-case state dirs on every platform.
+- Suppressed an upstream `pydantic_settings` warning that the `mcp` dependency chain printed to stderr on every CLI invocation (including every `prompt-hook` run).
+- CI: upgraded the transitive `cryptography` dependency past PYSEC-2026-3552.
+
 ### [0.6.0-beta] - 2026-08-15
 
 > **Theme**: fully-automatic operation ("leave a trace — and recall it — without anyone remembering to"), plus the largest correctness sweep in the project's history: a three-agent whole-codebase diagnostic, followed by adversarial review of the fixes, followed by a second whole-codebase acceptance scan. 23 findings from round one, 12 more across the adversarial review and round two — all fixed, each with a regression test that was verified to fail against the pre-fix code. Test suite grew from 488 to 573 tests.
