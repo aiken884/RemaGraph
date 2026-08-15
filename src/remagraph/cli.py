@@ -149,24 +149,34 @@ def _pad_summary(text: str, min_len: int = 30) -> str:
 def cmd_store(args: argparse.Namespace) -> None:
     project = args.project or os.environ.get("REMAGRAPH_PROJECT") or "default"
     project = _maybe_adopt_conventional_state_dir(project) or "default"
-    if project and project != "default" and project not in (args.task_id or "").lower():
+    if (
+        project
+        and project != "default"
+        and project.lower() not in (args.task_id or "").lower()
+    ):
         print(
             f"WARNING: task_id '{args.task_id}' does not include the project "
             f"'{project}' prefix; consider using '{project}-xxx'",
             file=sys.stderr,
         )
-    request = StoreRequest(
-        project_id=project,
-        task_id=args.task_id,
-        agent_id=args.agent_id,
-        kind=args.kind,
-        summary=args.summary,
-        learnings=_parse_json_list(args.learnings) or [],
-        handoff_note=args.handoff_note,
-        tags=_parse_json_list(args.tags) or [],
-        invalidates=_parse_json_list(args.invalidates),
-        labels=_parse_json_list(args.labels) or [],
-    )
+    try:
+        request = StoreRequest(
+            project_id=project,
+            task_id=args.task_id,
+            agent_id=args.agent_id,
+            kind=args.kind,
+            summary=args.summary,
+            learnings=_parse_json_list(args.learnings) or [],
+            handoff_note=args.handoff_note,
+            tags=_parse_json_list(args.tags) or [],
+            invalidates=_parse_json_list(args.invalidates),
+            labels=_parse_json_list(args.labels) or [],
+        )
+    except Exception as e:
+        # pydantic 驗證失敗（非法 project/task_id/agent_id 等）——乾淨
+        # 報錯，不外洩原始 traceback（第二輪驗收掃描）。
+        print(f"ERROR: invalid store request - {e}", file=sys.stderr)
+        sys.exit(1)
     try:
         conn = _get_conn(_project_id_for_conn(project))
     except SafetyValveError as e:
@@ -813,17 +823,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-
-    if args.command == "prompt-hook":
-        # UserPromptSubmit 同步 hook：必須完全靜默（stderr 警告也不行）、
-        # 不經過頂層守門的 default-state-dir 警告與 metadata 驗證——所有
-        # 解析、降級與唯讀保證都在 prompt_hook 模組內自理。
+    args_list = sys.argv[1:] if argv is None else argv
+    if args_list and args_list[0] == "prompt-hook":
+        # 必須在 argparse 之前攔截（第二輪驗收掃描）：hook 設定裡任何
+        # 多餘參數都會讓 argparse exit 2，而 Claude Code 對
+        # UserPromptSubmit 的 exit 2 語意是「封鎖該次 prompt」——設定
+        # 錯誤不得懲罰使用者的每一則輸入。多餘參數一律忽略。
         from remagraph.prompt_hook import main as prompt_hook_main
 
         prompt_hook_main()
         return
+
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
     if args.command != "init":
         if _db.is_using_default_state_dir() and not getattr(args, "allow_default_state_dir", False):

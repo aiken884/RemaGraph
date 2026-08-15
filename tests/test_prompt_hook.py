@@ -25,7 +25,7 @@ from remagraph import db as db_mod
 from remagraph.cli import main as cli_main
 from remagraph.db import _init_schema
 from remagraph.prompt_hook import (
-    derive_project_from_cwd,
+    derive_project_candidates_from_cwd,
     resolve_conventional_state_dir,
     run_prompt_hook,
     slugify,
@@ -95,13 +95,15 @@ class TestSlugify:
 
 def test_derive_project_from_git_repo(tmp_path):
     repo = _make_git_repo(tmp_path / "My-Cool-Project")
-    assert derive_project_from_cwd(str(repo)) == "my-cool-project"
+    assert derive_project_candidates_from_cwd(str(repo)) == [
+        "My-Cool-Project", "my-cool-project"
+    ]
 
 
 def test_derive_project_outside_git_returns_none(tmp_path):
     plain = tmp_path / "not-a-repo"
     plain.mkdir()
-    assert derive_project_from_cwd(str(plain)) is None
+    assert derive_project_candidates_from_cwd(str(plain)) == []
 
 
 def test_resolve_conventional_prefers_metadata_authoritative_name(isolated):

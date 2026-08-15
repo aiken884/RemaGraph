@@ -23,6 +23,13 @@ MemoryStatus = Literal["active", "superseded", "invalidated"]
 
 _TASK_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 
+# project_id 額外允許底線開頭（第二輪驗收掃描）：`_Scripts`、`_Megapower`
+# 是常見的目錄命名慣例，post-commit hook 從 repo 目錄名推導、init 建立的
+# conventional state dir 也以原名登記——若沿用 task_id 的「字母數字開頭」
+# 規則，這類專案每次 commit 的記憶寫回都必然被驗證擋下。task_id/agent_id
+# 維持原規則不變。
+_PROJECT_ID_RE = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$")
+
 
 class StoreRequest(BaseModel):
     """remagraph_store 的輸入。不含 id、timestamp、status、embedding（伺服器端填入）。"""
@@ -38,12 +45,21 @@ class StoreRequest(BaseModel):
     invalidates: list[str] | None = None
     labels: list[str] = Field(default_factory=list)
 
-    @field_validator("project_id", "task_id", "agent_id", mode="before")
+    @field_validator("project_id", mode="before")
+    @classmethod
+    def _validate_project_id(cls, v: object) -> str:
+        if not isinstance(v, str) or not _PROJECT_ID_RE.match(v):
+            raise ValueError(
+                f"project_id must match {_PROJECT_ID_RE.pattern}, got {v!r}"
+            )
+        return v
+
+    @field_validator("task_id", "agent_id", mode="before")
     @classmethod
     def _validate_id(cls, v: object) -> str:
         if not isinstance(v, str) or not _TASK_ID_RE.match(v):
             raise ValueError(
-                f"project_id/task_id/agent_id must match {_TASK_ID_RE.pattern}, got {v!r}"
+                f"task_id/agent_id must match {_TASK_ID_RE.pattern}, got {v!r}"
             )
         return v
 
