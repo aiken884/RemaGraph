@@ -866,7 +866,10 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command != "init":
+    # doctor 排除頂層守門的 default-state-dir 警告（linedb 0.7.0 實戰
+    # 回饋）：唯讀健檢對該警告無行動意義（doctor 自己的檢查面已涵蓋
+    # state dir 健康度），且會污染 --json 管道使用的 stderr。
+    if args.command not in ("init", "doctor"):
         if _db.is_using_default_state_dir() and not getattr(args, "allow_default_state_dir", False):
             proj = getattr(args, "project", None) or os.environ.get("REMAGRAPH_PROJECT", "default")
             if proj == "default":

@@ -478,3 +478,21 @@ class TestAdversarialFixes:
         result = check_database("legacyproj")
         assert result.status == "warn"
         assert "unopenable" not in result.message
+
+
+def test_doctor_stderr_is_clean_even_on_shared_state_dir(
+    isolated, tmp_path, monkeypatch, capsys
+):
+    """linedb 0.7.0 實戰回饋：doctor 在共用 default state dir 上下文執行時
+    不得噴 "using the default shared state dir" 警告——唯讀健檢對該警告
+    無行動意義，且污染 --json 管道使用的 stderr。"""
+    from remagraph.cli import main as cli_main
+
+    shared = Path(db_mod.DEFAULT_STATE_DIR)
+    shared.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(shared))
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit):
+        cli_main(["doctor", "--json", "--offline"])
+    err = capsys.readouterr().err
+    assert "default shared state dir" not in err, f"stderr 不乾淨: {err}"
