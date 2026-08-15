@@ -346,6 +346,15 @@ def _run_serve(argv: list[str]) -> None:
     缺席時快速失敗（不啟動 MCP stdio 迴圈），否則綁定後才進入
     `mcp.run(transport="stdio")`。
     """
+    if any(a in ("-h", "--help") for a in argv):
+        # help 委派給 cli.py 的 argparse serve subparser（單一說明來源）；
+        # argparse 會印出說明並 sys.exit(0)，絕不能走到下方的 project
+        # 綁定與 MCP stdio 啟動。
+        from remagraph.cli import main as cli_main
+
+        cli_main(["serve", "--help"])
+        return
+
     project_id = _determine_serve_project_id(argv)
     if not project_id:
         print(
@@ -657,6 +666,15 @@ def main() -> None:
         from remagraph.cli import main as cli_main
 
         cli_main(sys.argv[1:])
+        return
+
+    if len(sys.argv) >= 2 and sys.argv[1] in ("-h", "--help"):
+        # 頂層 --help/-h 委派給 cli.py 的 argparse parser 印出完整子命令
+        # 總覽（含 serve）並 exit 0——修復前這裡會落入下方的 serve
+        # fallback，被當成 serve 參數處理。
+        from remagraph.cli import main as cli_main
+
+        cli_main(["--help"])
         return
 
     if len(sys.argv) >= 2 and sys.argv[1] == "serve":

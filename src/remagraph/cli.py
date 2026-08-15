@@ -655,6 +655,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="Ignore some safety checks"
     )
 
+    # serve（實際啟動邏輯在 server._run_serve；正常入口 server.main() 會在
+    # 進到本 parser 之前就攔截 "serve" argv，這裡註冊的目的是讓
+    # `remagraph --help` 的子命令總覽完整列出 serve、並讓
+    # `remagraph serve --help` 有正確的 argparse 說明可印）
+    p_serve = sub.add_parser(
+        "serve",
+        help="Start the MCP stdio server (requires an explicit project binding)",
+        description=(
+            "Start the MCP stdio server. Requires an explicit project binding: "
+            "provide --project <id> or set the REMAGRAPH_PROJECT environment "
+            "variable. Each serve process binds to exactly one project; start "
+            "a separate process per project."
+        ),
+    )
+    p_serve.add_argument(
+        "--project",
+        default=None,
+        help="Project to bind this serve process to (falls back to REMAGRAPH_PROJECT)",
+    )
+
     # install-hooks
     p_install_hooks = sub.add_parser(
         "install-hooks",
@@ -769,6 +789,13 @@ def main(argv: list[str] | None = None) -> None:
         cmd_link(args)
     elif args.command == "install-hooks":
         cmd_install_hooks(args)
+    elif args.command == "serve":
+        # 正常入口（server.main()）會在進到本函式之前就攔截 "serve"；這個
+        # 分支只在 cli_main 被直接以 ["serve", ...] 呼叫時生效，委派回
+        # server._run_serve 維持單一實作（延遲 import 避免循環相依）。
+        from remagraph.server import _run_serve
+
+        _run_serve(["--project", args.project] if args.project else [])
 
 
 # ---------------------------------------------------------------------------
