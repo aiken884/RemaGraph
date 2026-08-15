@@ -14,11 +14,10 @@ import sqlite3
 import sys
 import threading
 import time
+import warnings as _warnings
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
-
-from mcp.server.fastmcp import FastMCP
 
 from remagraph import db as _db
 from remagraph import maintenance
@@ -26,6 +25,16 @@ from remagraph.maintenance import MaintenancePolicy, run_maintenance, safety_val
 from remagraph.models import SearchRequest, StatusRequest, StoreRequest
 from remagraph.search import get_status, search_memories
 from remagraph.store import migrate_project_memories, process_store
+
+# 抑制 mcp 依賴鏈（pydantic_settings 對 FastMCP Settings 的
+# IncompleteFieldDefinitionWarning）在每次 CLI 呼叫時印到 stderr 的雜訊——
+# console entry point 是本模組，連 prompt-hook（UserPromptSubmit，每一則
+# 使用者輸入都會執行）都會因頂層 import 印出這段上游警告。filter 必須在
+# import mcp 之前生效，因此 FastMCP 的 import 刻意殿後（noqa: E402）。
+_warnings.filterwarnings(
+    "ignore", message=".*lifespan.*incomplete definition.*"
+)
+from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Rate limiter（簡易記憶體 token bucket, per agent_id）
