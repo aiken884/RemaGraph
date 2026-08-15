@@ -21,7 +21,7 @@ RemaGraph is a lightweight **MCP** (Model Context Protocol) tool built for AI co
 
 | Item | Status |
 |------|--------|
-| **Version** | `0.6.2-beta` (pre-1.0 beta; published on [PyPI](https://pypi.org/project/remagraph/) — `uv tool install remagraph` / `pip install remagraph`) |
+| **Version** | `0.6.3-beta` (pre-1.0 beta; published on [PyPI](https://pypi.org/project/remagraph/) — `uv tool install remagraph` / `pip install remagraph`) |
 | **Status** | v2: security / governance / reliability + cross-project collaboration + CLI (init/auto/store/search/status/maintain/link/migrate-project/install-hooks/serve) |
 | **Task memory convention** | [`docs/task-memory-convention.md`](./docs/task-memory-convention.md) |
 | **Release prep** | [`docs/reviews/v2-release-prep.md`](./docs/reviews/v2-release-prep.md) |
@@ -51,7 +51,7 @@ Prefer a specific tag, or want the bleeding edge from `main`? Install straight f
 
 ```bash
 # Pinned to a specific release tag
-uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.6.2-beta
+uv tool install git+https://github.com/aiken884/RemaGraph.git@v0.6.3-beta
 
 # Whatever is currently on main
 uv tool install git+https://github.com/aiken884/RemaGraph.git

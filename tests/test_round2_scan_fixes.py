@@ -476,3 +476,52 @@ def test_migrate_from_default_env_does_not_hijack_target_resolution(
         "SELECT status FROM memories WHERE task_id='linedb-pc-push-v1'",
     )[0]
     assert src["status"] == "invalidated"
+
+
+def test_migrate_target_ignores_poisoned_registry_entry(
+    tmp_path, monkeypatch, fake_home
+):
+    """linedb 0.6.2 復現回報的真正根因：registry 裡有「修復前污染路徑」留下
+    的存量條目（linedb → 共用 default dir）。0.6.2 的 registry-優先解析
+    盲信了它 → to 仍解析到共用 db → from==to 照樣被別名防護擋下。
+    修復後：conventional 目錄含匹配 metadata 時最優先；registry 值若把
+    非 default 專案指向共用 default dir 一律視為污染忽略。"""
+    import json as _json
+
+    shared_dir = fake_home / ".local" / "state" / "remagraph"
+    monkeypatch.setenv("REMAGRAPH_STATE_DIR", str(shared_dir))
+    conn = db_mod.connect()
+    _insert_memory(
+        conn, mem_id="mem-20260814-001", project_id="linedb",
+        task_id="linedb-pc-push-v1",
+    )
+    conn.commit()
+    conn.close()
+
+    # 存量污染：registry 把 linedb 指向共用 dir（真實環境實測到的狀態）
+    db_mod.register_known_project("linedb", shared_dir)
+
+    # linedb 的專屬 conventional dir（已 init、metadata 正確）
+    linedb_dir = fake_home / ".local" / "state" / "remagraph-linedb"
+    linedb_dir.mkdir(parents=True)
+    (linedb_dir / "project.json").write_text(
+        _json.dumps({"project_id": "linedb", "state_dir": str(linedb_dir)}),
+        encoding="utf-8",
+    )
+    db_mod.connect_at_state_dir(linedb_dir).close()
+
+    result = store_mod.migrate_project_memories("default", "linedb")
+
+    assert result.migrated_count == 1
+    moved = _rows(
+        linedb_dir / db_mod.DB_FILENAME,
+        "SELECT * FROM memories WHERE task_id='linedb-pc-push-v1'",
+    )
+    assert len(moved) == 1
+    src = _rows(
+        shared_dir / db_mod.DB_FILENAME,
+        "SELECT status FROM memories WHERE task_id='linedb-pc-push-v1'",
+    )[0]
+    assert src["status"] == "invalidated"
+    # 污染條目應被修正為正確映射
+    assert db_mod.get_registered_state_dir("linedb") == str(linedb_dir.resolve())

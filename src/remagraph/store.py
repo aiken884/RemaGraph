@@ -523,23 +523,60 @@ def _resolve_migration_target_state_dir(to_project: str) -> Path:
     被 env 綁架，會與來源解析為同一實體目錄、觸發別名防護的 ValueError——
     官方遷移路徑對它本該服務的場景反而跑不通（linedb 實戰回報，2026-08-15）。
 
-    解析順序：registry 登記 → conventional 目錄（~/.local/state/
-    remagraph-<to>）；都沒有時明確要求先 init，絕不猜測。解析結果仍經
-    validate_project_metadata 驗證歸屬（防 registry/目錄被誤指到別的專案），
-    通過後 best-effort 登記。
+    解析順序（0.6.3 修正，linedb 二次復現回報）：
+    1. conventional 目錄存在「且其 project.json 的 project_id 與 to_project
+       匹配（大小寫不敏感）」→ 最優先。這是最強證據：專屬目錄＋權威
+       metadata 同時指向這個專案。
+    2. registry 登記——但**不可盲信**：0.6.2 的 registry-優先解析在真實
+       環境踩中「修復前污染路徑留下的存量條目」（registry 把 linedb 指向
+       共用 default dir），to 又解析回共用 db、別名防護照樣擋。因此
+       registry 值若把非 default 專案指向共用 default dir，一律視為污染
+       忽略；其餘經 validate_project_metadata 驗證後採用。
+    3. conventional 路徑（不要求存在——「遷入尚未建立的目標專案」是既有
+       合法語意，connect_at_state_dir 會建庫）。
+    解析成功後 best-effort 登記（順帶把污染條目修正為正確映射）。
     """
-    registered = _db.get_registered_state_dir(to_project)
-    if registered is not None:
-        candidate = Path(registered)
-    else:
-        # conventional 路徑（與 resolve_project_state_dir 預設分支同一組法，
-        # 含 safe 字元清洗）；刻意不要求目錄已存在——「遷入尚未建立的目標
-        # 專案」是既有合法語意，connect_at_state_dir 會建庫。
-        safe = (
-            "".join(c if c.isalnum() or c in "-_" else "-" for c in to_project)
-            or "default"
-        )
-        candidate = (Path.home() / ".local" / "state" / f"remagraph-{safe}").resolve()
+    safe = (
+        "".join(c if c.isalnum() or c in "-_" else "-" for c in to_project)
+        or "default"
+    )
+    conv = (Path.home() / ".local" / "state" / f"remagraph-{safe}").resolve()
+
+    candidate: Path | None = None
+
+    if conv.is_dir():
+        meta_pid: str | None = None
+        try:
+            meta = json.loads((conv / "project.json").read_text(encoding="utf-8"))
+            raw_pid = meta.get("project_id")
+            meta_pid = raw_pid if isinstance(raw_pid, str) else None
+        except (OSError, ValueError):
+            meta_pid = None
+        if meta_pid is not None and meta_pid.casefold() == to_project.casefold():
+            candidate = conv
+
+    if candidate is None:
+        registered = _db.get_registered_state_dir(to_project)
+        if registered is not None:
+            reg_path = Path(registered)
+            default_dir = Path(_db.DEFAULT_STATE_DIR)
+            is_poisoned = False
+            if to_project != _db.DEFAULT_PROJECT_ID:
+                try:
+                    if reg_path.resolve() == default_dir.resolve() or (
+                        reg_path.exists()
+                        and default_dir.exists()
+                        and reg_path.samefile(default_dir)
+                    ):
+                        is_poisoned = True
+                except OSError:
+                    pass
+            if not is_poisoned:
+                candidate = reg_path
+
+    if candidate is None:
+        candidate = conv
+
     _db.validate_project_metadata(to_project, candidate)
     try:
         _db.register_known_project(to_project, candidate)

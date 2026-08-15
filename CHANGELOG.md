@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [Unreleased]
 
+### [0.6.3-beta] - 2026-08-15
+
+#### Fixed
+- **`migrate-project` target resolution follow-up — the 0.6.2 fix was incomplete in real environments.** 0.6.2 made target resolution ignore the ambient env var but trusted the shared project registry first; in the wild, that registry can contain a *stale poisoned entry* left behind by the pre-0.6.1 pollution path (the project mapped to the shared default DB — exactly the record-stranding incident being recovered from), so the target resolved right back to the shared DB and the alias guard rejected the migration again (field-reproduced by the same downstream project). Resolution order is now: conventional directory with matching `project.json` identity first (strongest evidence), then the registry — with any entry pointing a non-default project at the shared default DB treated as poisoned and ignored — then the conventional path for brand-new targets. A successful resolution re-registers the correct mapping, healing the poisoned entry. Verified against the real reported environment (both invocation shapes) before release.
+
 ### [0.6.2-beta] - 2026-08-15
 
 #### Fixed
